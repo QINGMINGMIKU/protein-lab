@@ -7,7 +7,7 @@ stdio 传输，标准 MCP JSON-RPC 协议
   .claude/settings.json → mcpServers:
     "protein-lab": {
       "command": "python",
-      "args": ["c:/WorkSpace/WeeklyReport/protein_lab/mcp_server.py"]
+      "args": ["path/to/protein_lab/mcp_server.py"]
     }
 """
 import sys
