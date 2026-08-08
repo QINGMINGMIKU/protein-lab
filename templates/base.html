@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Protein Lab</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="topbar">
+  <a href="/proteins" class="brand">🧬 Protein Lab</a>
+  <div class="nav-links">
+    <a href="/proteins" class="{% if request.path == '/proteins' or request.path == '/' %}active{% endif %}">蛋白库</a>
+    <a href="/calculator" class="{% if request.path == '/calculator' %}active{% endif %}">计算工具</a>
+    <a href="/experiments" class="{% if request.path == '/experiments' %}active{% endif %}">实验归档</a>
+  </div>
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

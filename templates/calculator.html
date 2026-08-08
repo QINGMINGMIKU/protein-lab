@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>计算工具</h1>
+
+<!-- ── Tab 导航 ── -->
+<nav class="tab-nav">
+  <button class="tab-btn active" data-tab="conc">蛋白浓度</button>
+  <button class="tab-btn" data-tab="dilution">BLI 浓度梯度</button>
+  <button class="tab-btn" data-tab="copy">从实验复制</button>
+</nav>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!--  Tab 1: 蛋白浓度                                    -->
+<!-- ══════════════════════════════════════════════════ -->
+<div id="tab-conc" class="tab-panel">
+  <!-- 搜索多选蛋白 -->
+  <div class="protein-picker">
+    <div class="picker-controls">
+      <div class="picker-header">
+        <input type="text" id="proteinSearch" placeholder="搜索蛋白名称..." oninput="searchProteins()" autocomplete="off">
+        <div id="searchResults" class="search-dropdown hidden"></div>
+      </div>
+      <div class="cys-inline">Cys:
+        <select id="concOxidized" onchange="updateTableExtCoeff()">
+          <option value="1">氧化态 (二硫键, -S-S-)</option>
+          <option value="0" selected>还原态 (游离巯基, -SH)</option>
+        </select>
+        <span class="cys-hint" title="氧化态: 含二硫键的分泌蛋白/膜蛋白/氧化环境&#10;还原态: 胞内蛋白/含DTT或TCEP的缓冲液">?</span>
+      </div>
+    </div>
+    <div id="selectedChips" class="chip-row"></div>
+  </div>
+
+  <!-- 计算表格 -->
+  <div class="table-scroll">
+    <table id="concTable" class="calc-table">
+      <thead>
+        <tr>
+          <th>蛋白</th>
+          <th>MW (Da)</th>
+          <th>ε (M⁻¹cm⁻¹)</th>
+          <th>Abs 0.1%</th>
+          <th>A₂₈₀</th>
+          <th>光程 (cm)</th>
+          <th class="col-result">浓度 (μM)</th>
+          <th class="col-result">浓度 (mg/mL)</th>
+          <th>目标浓度 (μM)</th>
+          <th>目标体积 (μL)</th>
+          <th class="col-result">取母液 (μL)</th>
+          <th class="col-result">加缓冲液 (μL)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="empty-row"><td colspan="13">请在上方搜索并添加蛋白</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tab-actions">
+    <input type="text" id="concExpName" placeholder="实验名称（可选）" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+    <button class="btn btn-primary" onclick="calcAllRows()">全部计算</button>
+    <button class="btn btn-outline" onclick="saveConcTable()">💾 保存为实验</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!--  Tab 2: BLI 浓度梯度                                 -->
+<!-- ══════════════════════════════════════════════════ -->
+<div id="tab-dilution" class="tab-panel hidden">
+  <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+    <select id="bliImportExp" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;min-width:200px" onchange="onBliImportExpChange()">
+      <option value="">-- 从浓度实验导入 --</option>
+    </select>
+    <button class="btn btn-outline" id="bliImportBtn" onclick="importBliFromExp()" disabled>📋 导入</button>
+    <span style="color:#888;font-size:13px;margin-left:8px">或搜索添加：</span>
+  </div>
+  <div class="protein-picker" style="margin-bottom:12px">
+    <div class="picker-header">
+      <input type="text" id="bliProteinSearch" placeholder="搜索蛋白名称..." oninput="searchBliProteins()" autocomplete="off">
+      <div id="bliSearchResults" class="search-dropdown hidden"></div>
+    </div>
+  </div>
+
+  <!-- BLI 多蛋白表格 -->
+  <div class="table-scroll">
+    <table id="bliTable" class="calc-table">
+      <thead>
+        <tr>
+          <th>蛋白</th>
+          <th>母液浓度 (μM)</th>
+          <th>起始浓度 (μM)</th>
+          <th>稀释倍数</th>
+          <th>步数</th>
+          <th>每孔 (μL)</th>
+          <th>死体积 (μL)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="empty-row"><td colspan="8">请从浓度表导入蛋白，或在上方搜索添加</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tab-actions">
+    <input type="text" id="bliExpName" placeholder="实验名称（可选）" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+    <button class="btn btn-primary" id="bliCalcAllBtn" onclick="calcAllBliRows()">全部计算</button>
+    <button class="btn btn-outline" onclick="saveBliTable()">💾 保存为实验</button>
+  </div>
+
+  <div id="bliResults" style="margin-top:16px"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!--  Tab 3: 从实验复制                                   -->
+<!-- ══════════════════════════════════════════════════ -->
+<div id="tab-copy" class="tab-panel hidden">
+  <div style="max-width:500px;margin-bottom:20px">
+    <label>选择历史实验
+      <select id="copyExpSelect" onchange="loadExpForCopy()">
+        <option value="">-- 选择实验 --</option>
+      </select>
+    </label>
+    <p style="color:#888;font-size:13px;margin-top:4px">选择后将加载该实验的蛋白列表和参数到"蛋白浓度"表格中</p>
+  </div>
+  <div id="copyPreview" class="hidden">
+    <p id="copySummary" style="margin-bottom:8px"></p>
+    <button class="btn btn-primary" onclick="applyCopyAndSwitch()">加载到蛋白浓度表格</button>
+  </div>
+</div>
+
+{% endblock %}

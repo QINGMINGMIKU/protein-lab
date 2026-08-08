@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>蛋白库</h1>
+  <div style="display:flex;gap:8px">
+    <button class="btn btn-outline" onclick="refreshAllProteins()">🔄 刷新全部</button>
+    <button class="btn btn-primary" onclick="showAddModal()">+ 添加蛋白</button>
+  </div>
+</div>
+
+<div class="toolbar">
+  <input type="text" id="searchBox" placeholder="搜索蛋白名称/标签..." oninput="loadProteins()">
+  <button class="btn btn-outline" onclick="showImportModal()">📥 FASTA 导入</button>
+</div>
+
+<table id="proteinTable" class="datatable">
+  <thead>
+    <tr>
+      <th>名称</th>
+      <th>MW (Da)</th>
+      <th>ε_ox</th>
+      <th>Abs[0.1%]</th>
+      <th>标签</th>
+      <th>序列</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<!-- ── 详情面板 ── -->
+<div id="detailPanel" class="panel hidden">
+  <div class="panel-header">
+    <h2 id="detailName"></h2>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm btn-primary" id="detailCreateExpBtn" onclick="createExpFromProtein()">📋 新建实验</button>
+      <button class="btn btn-sm" onclick="closeDetail()">✕</button>
+    </div>
+  </div>
+  <div id="detailContent"></div>
+</div>
+
+<!-- ── 添加蛋白弹窗 ── -->
+<div id="addModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>添加蛋白</h3>
+      <button class="btn btn-sm" onclick="closeAddModal()">✕</button>
+    </div>
+    <form id="addForm" onsubmit="addProtein(event)">
+      <label>名称 <input type="text" name="name" required placeholder="如 TIM-WT"></label>
+      <label>序列 <textarea name="sequence" required rows="4" placeholder="单字母氨基酸序列"></textarea></label>
+      <label>标签/载体 <input type="text" name="tag" placeholder="如 His6, pET28a"></label>
+      <label>备注 <input type="text" name="notes" placeholder=""></label>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">确定添加</button>
+        <button type="button" class="btn btn-outline" onclick="closeAddModal()">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── FASTA 导入弹窗 ── -->
+<div id="importModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>FASTA 批量导入</h3>
+      <button class="btn btn-sm" onclick="closeImportModal()">✕</button>
+    </div>
+    <form id="importForm" onsubmit="importFasta(event)">
+      <label>上传文件 <input type="file" id="fastaFile" accept=".fasta,.fa,.txt" onchange="loadFastaFile()"></label>
+      <label>或直接粘贴 FASTA 文本 <textarea name="fasta" required rows="10" placeholder=">蛋白名1&#10;MGHHHHHHSSG...&#10;>蛋白名2&#10;MARTFFVGG..."></textarea></label>
+      <label>统一标签 <input type="text" name="tag" placeholder="可选"></label>
+      <label>统一备注 <input type="text" name="notes" placeholder="可选"></label>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">导入</button>
+        <button type="button" class="btn btn-outline" onclick="closeImportModal()">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

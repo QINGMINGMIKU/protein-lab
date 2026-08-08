@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>实验归档</h1>
+  <div style="display:flex;gap:8px">
+    <a class="btn btn-outline" href="/api/experiments/export" id="exportBtn">📥 导出全部</a>
+    <button class="btn btn-primary" onclick="showExpAddModal()">+ 新建实验</button>
+  </div>
+</div>
+
+<div class="toolbar">
+  <select id="expTypeFilter" onchange="loadExperiments()">
+    <option value="">全部类型</option>
+    <option value="BLI">BLI</option>
+    <option value="SDS-PAGE">SDS-PAGE</option>
+    <option value="AKTA">AKTA</option>
+    <option value="浓度测定">浓度测定</option>
+    <option value="其他">其他</option>
+  </select>
+</div>
+
+<table id="expTable" class="datatable">
+  <thead>
+    <tr>
+      <th>日期</th>
+      <th>标题</th>
+      <th>类型</th>
+      <th>关联蛋白</th>
+      <th>备注</th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<!-- ── 实验详情面板 ── -->
+<div id="expDetailPanel" class="panel hidden">
+  <div class="panel-header">
+    <h2 id="expDetailTitle"></h2>
+    <button class="btn btn-sm" onclick="closeExpDetail()">✕</button>
+  </div>
+  <div id="expDetailContent"></div>
+</div>
+
+<!-- ── 新建实验弹窗 ── -->
+<div id="expModal" class="modal hidden">
+  <div class="modal-box modal-wide">
+    <div class="modal-header">
+      <h3 id="expModalTitle">新建实验</h3>
+      <button class="btn btn-sm" onclick="closeExpModal()">✕</button>
+    </div>
+    <form id="expForm" onsubmit="saveExperiment(event)">
+      <label>标题 <input type="text" name="title" id="expTitle" required></label>
+      <div class="form-row">
+        <label>类型
+          <select name="exp_type" id="expType" required>
+            <option value="">-- 选择 --</option>
+            <option value="BLI">BLI</option>
+            <option value="SDS-PAGE">SDS-PAGE</option>
+            <option value="AKTA">AKTA</option>
+            <option value="浓度测定">浓度测定</option>
+            <option value="其他">其他</option>
+          </select>
+        </label>
+        <label>日期 <input type="date" name="date" id="expDate"></label>
+      </div>
+      <label>关联蛋白 <span style="font-weight:400;color:#888">（多选）</span>
+        <div id="proteinCheckboxes" class="checkbox-group"></div>
+      </label>
+      <label>实验参数 (JSON) <textarea name="params" id="expParams" rows="3" placeholder='{"buffer":"PBS","temp":"25°C"}'></textarea></label>
+      <label>实验结果 (JSON) <textarea name="results" id="expResults" rows="3" placeholder='{"KD":"1.2e-7"}'></textarea></label>
+      <label>备注 <input type="text" name="notes" id="expNotes"></label>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <button type="button" class="btn btn-outline" onclick="closeExpModal()">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
