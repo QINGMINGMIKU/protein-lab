@@ -502,12 +502,14 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
 # ═══════════════════════════════════════════════════════════
 
 def open_browser():
+    import time
+    time.sleep(0.5)  # 等 Flask 完全就绪
     webbrowser.open("http://127.0.0.1:5000")
 
 
 if __name__ == "__main__":
     print("Protein Lab 启动中...")
-    print("   -> http://127.0.0.1:5000")
+    print("   浏览器即将打开 -> http://127.0.0.1:5000")
     print("   关闭此窗口即可停止服务")
-    Timer(1.0, open_browser).start()
+    Timer(0.5, open_browser).start()
     app.run(host="127.0.0.1", port=5000, debug=False)
