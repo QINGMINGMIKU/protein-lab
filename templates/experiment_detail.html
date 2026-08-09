@@ -89,6 +89,46 @@
 <!-- ═══════════════════════════════════════════════ -->
 <!--  Weblogo                                       -->
 <!-- ═══════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════ -->
+<!--  酶活测定                                      -->
+<!-- ═══════════════════════════════════════════════ -->
+{% if calc_type == "enzyme" %}
+{% set wells = params.get("wells", {}) %}
+{% set emeta = params.get("meta", {}) %}
+<div class="calc-card" style="margin-bottom:20px">
+  <h2>酶活测定</h2>
+  <p style="color:#888;font-size:13px;margin:4px 0 12px">
+    {{ emeta.sample or "" }} | {{ emeta.wavelength or "?" }} nm | {{ params.well_count or wells.keys()|length }} 孔
+  </p>
+  <div class="table-scroll">
+    <table class="calc-table">
+      <thead><tr>
+        <th>井</th><th>命名</th><th>参考</th><th>ng/mL</th><th>μM</th>
+        <th>OD 范围</th><th>ΔOD/min</th><th>R²</th>
+      </tr></thead>
+      <tbody>
+      {% for id, w in wells.items()|sort %}
+        <tr>
+          <td>{{ id }}</td>
+          <td>{{ w.name or "-" }}</td>
+          <td>
+            {% if w.ref == "blank" %}空白{% elif w.ref == "neg" %}阴性{% elif w.ref == "pos" %}阳性{% else %}-{% endif %}
+          </td>
+          <td>{{ w.conc_ng_ml if w.conc_ng_ml != None else "-" }}</td>
+          <td>{{ w.conc_uM if w.conc_uM != None else "-" }}</td>
+          <td>{{ w.od_range[0] ~ " → " ~ w.od_range[1] if w.od_range else "-" }}</td>
+          <td>{{ "%.5f"|format(w.fit.slope) if w.fit and w.fit.slope != None else "-" }}</td>
+          <td style="color:{{ '#e74c3c' if w.fit and w.fit.r2 != None and w.fit.r2 < 0.95 else '#333' }}">
+            {{ "%.4f"|format(w.fit.r2) if w.fit and w.fit.r2 != None else "-" }}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {% if calc_type == "weblogo" %}
 <div class="calc-card" style="margin-bottom:20px;text-align:center">
   <h2>Weblogo</h2>

@@ -1354,15 +1354,33 @@ async function enzymeSaveExp() {
   if (!enzymeData) { toast("请先上传数据", true); return; }
   const title = prompt("实验名称:", enzymeData.meta.sample || "酶活测定");
   if (!title) return;
+
+  const proteinIds = new Set();
+  const wells = {};
+  for (const [id, wd] of Object.entries(enzymeData.wells)) {
+    const info = enzymeWellInfo[id] || {};
+    if (info.protein_id) proteinIds.add(info.protein_id);
+    wells[id] = {
+      name: info.name,
+      ref: info.ref,
+      protein_id: info.protein_id,
+      conc_ng_ml: info.conc_ng_ml,
+      conc_uM: info.conc_uM,
+      fit: info.fit || null,
+      od_range: wd.od.length ? [wd.od[0].toFixed(4), wd.od[wd.od.length - 1].toFixed(4)] : null,
+    };
+  }
+
   try {
     await API.post("/api/experiments/from-calculation", {
       title, exp_type: "酶活测定",
-      protein_ids: [],
+      protein_ids: Array.from(proteinIds),
       date: new Date().toISOString().slice(0, 10),
       calc_type: "enzyme",
       calc_params: {
         meta: enzymeData.meta,
-        well_info: enzymeWellInfo,
+        wells,
+        well_count: Object.keys(enzymeData.wells).length,
       },
       calc_result: {},
     });

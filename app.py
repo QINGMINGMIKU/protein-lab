@@ -744,17 +744,17 @@ def api_enzyme_plot():
             conc = wd.get("conc_ng_ml", "")
             lbl = f"{label}" + (f" ({conc} ng/mL)" if conc else "")
             times_min = [t / 60 for t in wd["times"]]
-            ax.plot(times_min, wd["od"], ".-", label=lbl, linewidth=1, markersize=3)
-            # 拟合线
+            line = ax.plot(times_min, wd["od"], ".-", label=lbl, linewidth=1, markersize=3)
+            # 拟合线 — 用同一条数据线的颜色
             fit = wd.get("fit")
             if fit and fit.get("slope") is not None:
                 t_fit = np.linspace(times_min[0], times_min[-1], 100)
                 od_fit = [fit["intercept"] + fit["slope"] / 60 * t for t in t_fit]
-                ax.plot(t_fit, od_fit, "--", linewidth=1, alpha=0.6,
-                        color=ax.lines[-2].get_color() if ax.lines else None)
+                ax.plot(t_fit, od_fit, "--", linewidth=1, alpha=0.6, color=line[0].get_color())
         ax.set_xlabel("Time (min)")
         ax.set_ylabel("OD")
-        ax.legend(ncol=3, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), frameon=False)
+        if wells_data:
+            ax.legend(ncol=3, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), frameon=False)
     elif plot_type == "michaelis":
         points = []
         for well_id, wd in wells_data.items():
