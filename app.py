@@ -58,6 +58,21 @@ def page_experiments():
     return render_template("experiments.html")
 
 
+@app.route("/experiments/<int:eid>")
+def page_experiment_detail(eid):
+    e = models.exp_get(eid)
+    if not e:
+        return "实验不存在", 404
+    # 解析 JSON 字符串字段供模板使用
+    if isinstance(e.get("params"), str):
+        try: e["params"] = json.loads(e["params"])
+        except: e["params"] = {}
+    if isinstance(e.get("results"), str):
+        try: e["results"] = json.loads(e["results"])
+        except: e["results"] = {}
+    return render_template("experiment_detail.html", exp=e)
+
+
 @app.route("/weblogo")
 def page_weblogo():
     return render_template("weblogo.html")

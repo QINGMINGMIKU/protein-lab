@@ -8,6 +8,7 @@
   <button class="tab-btn active" data-tab="conc">蛋白浓度</button>
   <button class="tab-btn" data-tab="dilution">BLI 浓度梯度</button>
   <button class="tab-btn" data-tab="copy">从实验复制</button>
+  <button class="tab-btn" data-tab="weblogo">Weblogo</button>
 </nav>
 
 <!-- ══════════════════════════════════════════════════ -->
@@ -128,6 +129,44 @@
   <div id="copyPreview" class="hidden">
     <p id="copySummary" style="margin-bottom:8px"></p>
     <button class="btn btn-primary" onclick="applyCopyAndSwitch()">加载到蛋白浓度表格</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!--  Tab 4: Weblogo                                     -->
+<!-- ══════════════════════════════════════════════════ -->
+<div id="tab-weblogo" class="tab-panel hidden">
+  <div style="display:grid;grid-template-columns:320px 1fr;gap:20px">
+    <!-- 左侧：蛋白选择 -->
+    <div style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+      <input type="text" id="weblogoSearch" placeholder="搜索蛋白..." oninput="filterWeblogoProteins()" style="width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-bottom:10px">
+      <div style="margin-bottom:8px">
+        <label class="checkbox-label" style="display:inline-flex!important"><input type="checkbox" id="weblogoSelectAll" onchange="toggleAllWeblogoProteins(this)"> 全选</label>
+      </div>
+      <div id="weblogoProteinList" style="max-height:350px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:6px;padding:8px;font-size:13px">
+        <span style="color:#888">加载中...</span>
+      </div>
+      <div style="margin-top:10px">
+        <label style="font-size:13px">颜色方案
+          <select id="weblogoColor" style="width:100%;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-top:4px">
+            <option value="chemistry">chemistry</option>
+            <option value="hydrophobicity">hydrophobicity</option>
+            <option value="charge">charge</option>
+            <option value="classic">classic</option>
+          </select>
+        </label>
+      </div>
+      <button class="btn btn-primary" onclick="generateWeblogo()" style="width:100%;margin-top:10px">生成 Logo</button>
+      <button class="btn btn-outline" onclick="saveWeblogoExp()" id="weblogoSaveBtn" style="width:100%;margin-top:6px;display:none">💾 保存为实验</button>
+    </div>
+    <!-- 右侧：结果 -->
+    <div id="weblogoResult" class="hidden" style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px">
+      <div style="align-self:stretch;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span id="weblogoInfo" style="font-size:13px;color:#888"></span>
+        <button class="btn btn-sm btn-outline" onclick="downloadWeblogo()">📥 下载 PNG</button>
+      </div>
+      <img id="weblogoImage" style="max-width:100%" alt="Weblogo">
+    </div>
   </div>
 </div>
 

@@ -304,6 +304,7 @@ document.addEventListener("click", function (e) {
   document.getElementById("tab-" + tab.dataset.tab).classList.remove("hidden");
   if (tab.dataset.tab === "copy") loadCopyExpList();
   if (tab.dataset.tab === "dilution") loadBliImportExps();
+  if (tab.dataset.tab === "weblogo") loadWeblogoProteins();
 });
 
 // ═════════════════════════════════════════════════════
@@ -828,13 +829,20 @@ async function applyCopyAndSwitch() {
     allProteins = await API.get("/api/proteins");
   }
   copyCache.protein_ids.forEach(id => addProteinToTable(id));
-  // 预填 A280
+  // 预填完整数据
   const params = typeof copyCache.params === "string" ? JSON.parse(copyCache.params) : copyCache.params;
   if (params && params.proteins) {
     params.proteins.forEach(pp => {
-      if (selectedProteins[pp.id] && pp.a280) {
-        selectedProteins[pp.id]._a280 = pp.a280;
-      }
+      const sp = selectedProteins[pp.id];
+      if (!sp) return;
+      if (pp.a280 != null) sp._a280 = pp.a280;
+      if (pp.path != null) sp._path = pp.path;
+      if (pp.conc_uM != null) sp._conc_uM = pp.conc_uM;
+      if (pp.conc_mg_mL != null) sp._conc_mg = pp.conc_mg_mL;
+      if (pp.target_conc != null) sp._targetConc = pp.target_conc;
+      if (pp.target_vol != null) sp._targetVol = pp.target_vol;
+      if (pp.take_vol != null) sp._takeVol = pp.take_vol;
+      if (pp.buffer_vol != null) sp._bufferVol = pp.buffer_vol;
     });
     renderTable();
   }
@@ -857,7 +865,7 @@ async function loadExperiments() {
       <tr>
         <td><input type="checkbox" class="exp-check" value="${e.id}" onchange="updateExpBulkBar()"></td>
         <td>${e.date || "-"}</td>
-        <td><span class="clickable" data-action="show-exp" data-id="${e.id}">${esc(e.title)}</span></td>
+        <td><a href="/experiments/${e.id}" style="color:#4361ee;font-weight:500;text-decoration:none">${esc(e.title)}</a></td>
         <td><span class="badge">${esc(e.exp_type)}</span></td>
         <td>${esc(e.protein_names || "-")}</td>
         <td>${esc((e.notes || "").substring(0, 40))}</td>
@@ -1001,6 +1009,103 @@ function checkPrefill() {
       });
     }, 300);
   }
+}
+
+// ═════════════════════════════════════════════════════
+//  Tab 4: Weblogo
+// ═════════════════════════════════════════════════════
+
+let weblogoAllProteins = [];
+let weblogoLastImage = null;
+let weblogoLastProteins = [];
+
+async function loadWeblogoProteins() {
+  if (weblogoAllProteins.length) { renderWeblogoProteinList(); return; }
+  try {
+    weblogoAllProteins = await API.get("/api/proteins");
+    renderWeblogoProteinList();
+  } catch (_) {}
+}
+
+function renderWeblogoProteinList(filter) {
+  const container = document.getElementById("weblogoProteinList");
+  if (!container) return;
+  let list = weblogoAllProteins;
+  if (filter) {
+    const q = filter.toLowerCase();
+    list = list.filter(p => p.name.toLowerCase().includes(q));
+  }
+  container.innerHTML = list.map(p =>
+    `<label class="checkbox-label" style="display:flex!important;flex-direction:row!important;align-items:center!important;gap:4px!important;margin-bottom:2px!important;cursor:pointer;padding:2px 4px">
+      <input type="checkbox" class="weblogo-protein-check" value="${p.id}"> ${esc(p.name)}
+    </label>`
+  ).join("") || '<span style="color:#888">无匹配蛋白</span>';
+}
+
+function filterWeblogoProteins() {
+  const q = document.getElementById("weblogoSearch").value;
+  renderWeblogoProteinList(q);
+}
+
+function toggleAllWeblogoProteins(el) {
+  document.querySelectorAll(".weblogo-protein-check").forEach(cb => cb.checked = el.checked);
+}
+
+async function generateWeblogo() {
+  const checked = document.querySelectorAll(".weblogo-protein-check:checked");
+  if (checked.length < 2) { toast("至少选择 2 个蛋白", true); return; }
+
+  const ids = Array.from(checked).map(cb => parseInt(cb.value));
+  const selected = weblogoAllProteins.filter(p => ids.includes(p.id));
+  const sequences = selected.map(p => p.sequence);
+
+  // 检查序列是否等长
+  const n = sequences[0].length;
+  if (sequences.some(s => s.length !== n)) {
+    toast("所选蛋白序列长度不一致，无法对齐", true); return;
+  }
+
+  try {
+    const color = document.getElementById("weblogoColor").value;
+    const r = await API.post("/api/weblogo", { sequences, color_scheme: color });
+    weblogoLastImage = r.image;
+    weblogoLastProteins = selected.map(p => ({ id: p.id, name: p.name }));
+
+    document.getElementById("weblogoImage").src = r.image;
+    document.getElementById("weblogoInfo").textContent =
+      `${selected.length} 条序列, ${r.positions} 个位置`;
+    document.getElementById("weblogoResult").classList.remove("hidden");
+    document.getElementById("weblogoSaveBtn").style.display = "";
+    toast("Weblogo 已生成");
+  } catch (err) { toast(err.message, true); }
+}
+
+function downloadWeblogo() {
+  if (!weblogoLastImage) return;
+  const a = document.createElement("a");
+  a.href = weblogoLastImage;
+  a.download = "weblogo.png";
+  a.click();
+}
+
+async function saveWeblogoExp() {
+  if (!weblogoLastProteins.length) return;
+  const customName = document.getElementById("concExpName").value.trim();
+  const title = customName || weblogoLastProteins.map(p => p.name).join(", ") + " Weblogo";
+  try {
+    await API.post("/api/experiments/from-calculation", {
+      title, exp_type: "Weblogo",
+      protein_ids: weblogoLastProteins.map(p => p.id),
+      date: new Date().toISOString().slice(0, 10),
+      calc_type: "weblogo",
+      calc_params: {
+        proteins: weblogoLastProteins,
+        image: weblogoLastImage,
+      },
+      calc_result: {},
+    });
+    toast("已保存为实验记录");
+  } catch (err) { toast(err.message, true); }
 }
 
 // ═════════════════════════════════════════════════════
