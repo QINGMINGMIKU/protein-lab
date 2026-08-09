@@ -236,4 +236,37 @@ label textarea { resize: vertical; }
 .enzyme-ref-btn { padding: 3px 8px; font-size: 12px; border: 1.5px solid #d0d0d0; border-radius: 4px; background: #fff; cursor: pointer; }
 .enzyme-ref-btn.active { border-color: #4361ee; background: #4361ee; color: #fff; }
 
+/* ── Copy experiment cards ─────────────────────────── */
+.copy-card {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px; border: 1.5px solid #e8e8e8; border-radius: 8px;
+  cursor: pointer; transition: .12s; background: #fff; margin-bottom: 6px;
+}
+.copy-card:hover { border-color: #b0c8f0; background: #f8faff; }
+.copy-card.active { border-color: #4361ee; background: #eef2ff; }
+.copy-type-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 8px; font-size: 16px; flex-shrink: 0;
+}
+.copy-type-badge.conc { background: #e3f2fd; }
+.copy-type-badge.dilution { background: #f3e5f5; }
+.copy-type-badge.enzyme { background: #e8f5e9; }
+.copy-type-badge.weblogo { background: #fff3e0; }
+.copy-card-body { flex: 1; min-width: 0; }
+.copy-card-title { font-size: 14px; font-weight: 600; color: #1a1a2e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.copy-card-sub { font-size: 12px; color: #888; margin-top: 2px; }
+.copy-type-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+  cursor: pointer; transition: .12s; user-select: none;
+  border: 1.5px solid transparent;
+}
+.copy-type-tag.all { background: #f0f0f0; color: #555; }
+.copy-type-tag.conc { background: #e3f2fd; color: #1565c0; }
+.copy-type-tag.dilution { background: #f3e5f5; color: #7b1fa2; }
+.copy-type-tag.enzyme { background: #e8f5e9; color: #2e7d32; }
+.copy-type-tag.weblogo { background: #fff3e0; color: #e65100; }
+.copy-type-tag.other { background: #f5f5f5; color: #666; }
+.copy-type-tag.active { border-color: currentColor; }
+
 @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } }

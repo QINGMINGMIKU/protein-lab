@@ -514,9 +514,21 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
     ws = wb.active
     ws.title = "实验记录"
 
-    headers = ["实验名称", "日期", "类型", "蛋白", "MW (Da)", "ε",
-               "Abs 0.1%", "A280", "浓度 (μM)", "浓度 (mg/mL)",
-               "目标浓度 (μM)", "目标体积 (μL)", "取母液 (μL)", "加缓冲液 (μL)"]
+    # 根据实验类型选择表头
+    def _get_calc_type(e):
+        p = e.get("params", {})
+        if isinstance(p, str):
+            try: p = json.loads(p)
+            except: p = {}
+        return p.get("calc_type", "") if isinstance(p, dict) else ""
+    all_enzyme = exps and all(_get_calc_type(e) == "enzyme" for e in exps)
+    if all_enzyme:
+        headers = ["实验名称", "日期", "类型", "孔位/命名", "参考类型",
+                   "浓度 (ng/mL)", "浓度 (μM)", "ΔOD/min", "R²", "样本", "波长"]
+    else:
+        headers = ["实验名称", "日期", "类型", "蛋白", "MW (Da)", "ε",
+                   "Abs 0.1%", "A280", "浓度 (μM)", "浓度 (mg/mL)",
+                   "目标浓度 (μM)", "目标体积 (μL)", "取母液 (μL)", "加缓冲液 (μL)"]
     ws.append(headers)
     for col in range(1, len(headers) + 1):
         ws.cell(row=1, column=col).font = Font(bold=True)
@@ -595,6 +607,33 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
                           e.get("protein_names", ""), "", "", "", "", "", "", "", "", "", ""])
                 row += 1
 
+        elif calc_type == "enzyme":
+            # 酶活实验：每孔一行
+            wells = params.get("wells") or params.get("well_info") or {}
+            emeta = params.get("meta", {})
+            if wells:
+                first = True
+                for wid, w in sorted(wells.items()):
+                    if not isinstance(w, dict):
+                        continue
+                    fit = w.get("fit") or {}
+                    ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}.get(w.get("ref", ""), "")
+                    ws.append([
+                        e["title"] if first else "", e.get("date", "") if first else "",
+                        e["exp_type"] if first else "", f"{wid} {w.get('name', '')}",
+                        ref_label,
+                        w.get("conc_ng_ml", ""), w.get("conc_uM", ""),
+                        fit.get("slope", ""), fit.get("r2", ""),
+                        emeta.get("sample", ""), emeta.get("wavelength", ""),
+                    ])
+                    first = False
+                    row += 1
+            else:
+                ws.append([e["title"], e.get("date", ""), e["exp_type"],
+                          e.get("protein_names", ""), "", "", "", "",
+                          "", "", "", ""])
+                row += 1
+
         elif proteins and not calc_type:
             # 旧格式：proteins 存在但没标记 calc_type，走旧逻辑
             for i, prot in enumerate(proteins):
@@ -620,7 +659,10 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
             ])
             row += 1
 
-    widths = [30, 12, 10, 20, 12, 10, 10, 10, 12, 12, 14, 14, 12, 12]
+    if all_enzyme:
+        widths = [30, 12, 10, 20, 10, 14, 12, 12, 10, 22, 10]
+    else:
+        widths = [30, 12, 10, 20, 12, 10, 10, 10, 12, 12, 14, 14, 12, 12]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
 

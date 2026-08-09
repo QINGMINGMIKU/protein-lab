@@ -7,9 +7,9 @@
 <nav class="tab-nav">
   <button class="tab-btn active" data-tab="conc">蛋白浓度</button>
   <button class="tab-btn" data-tab="dilution">BLI 浓度梯度</button>
-  <button class="tab-btn" data-tab="copy">从实验复制</button>
   <button class="tab-btn" data-tab="weblogo">Weblogo</button>
   <button class="tab-btn" data-tab="enzyme">酶活计算</button>
+  <button class="tab-btn" data-tab="copy">从实验复制</button>
 </nav>
 
 <!-- ══════════════════════════════════════════════════ -->
@@ -115,27 +115,8 @@
 
   <div id="bliResults" style="margin-top:16px"></div>
 </div>
-
 <!-- ══════════════════════════════════════════════════ -->
-<!--  Tab 3: 从实验复制                                   -->
-<!-- ══════════════════════════════════════════════════ -->
-<div id="tab-copy" class="tab-panel hidden">
-  <div style="max-width:500px;margin-bottom:20px">
-    <label>选择历史实验
-      <select id="copyExpSelect" onchange="loadExpForCopy()">
-        <option value="">-- 选择实验 --</option>
-      </select>
-    </label>
-    <p style="color:#888;font-size:13px;margin-top:4px">选择后将加载该实验的蛋白列表和参数到"蛋白浓度"表格中</p>
-  </div>
-  <div id="copyPreview" class="hidden">
-    <p id="copySummary" style="margin-bottom:8px"></p>
-    <button class="btn btn-primary" onclick="applyCopyAndSwitch()">加载到蛋白浓度表格</button>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════════════════════ -->
-<!--  Tab 4: Weblogo                                     -->
+<!--  Tab 3: Weblogo                                     -->
 <!-- ══════════════════════════════════════════════════ -->
 <div id="tab-weblogo" class="tab-panel hidden">
   <div style="display:grid;grid-template-columns:320px 1fr;gap:20px">
@@ -234,7 +215,7 @@
           <button class="btn btn-sm enzyme-ref-btn" id="refNeg" onclick="enzymeSetRef('neg')">⊖ 阴性</button>
           <button class="btn btn-sm enzyme-ref-btn" id="refPos" onclick="enzymeSetRef('pos')">⊕ 阳性</button>
         </div>
-        <button class="btn btn-sm btn-outline" onclick="enzymeBatchConc()" style="margin-top:6px">📐 选中孔批量设浓度</button>
+        <button class="btn btn-sm btn-outline" onclick="enzymeBatchConc()" style="margin-top:6px">📐 选中孔等比设浓度</button>
       </div>
       <div id="wellFit" class="hidden" style="margin-top:8px;font-size:13px"></div>
     </div>
@@ -271,6 +252,34 @@
 
   <!-- 曲线图 -->
   <div id="enzymePlotArea" style="margin-top:12px"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!--  Tab 5: 从实验复制                                   -->
+<!-- ══════════════════════════════════════════════════ -->
+<div id="tab-copy" class="tab-panel hidden">
+  <div style="display:grid;grid-template-columns:1fr 360px;gap:20px">
+    <!-- 左侧：实验列表 -->
+    <div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input type="text" id="copySearchInput" placeholder="搜索实验标题..." oninput="filterCopyExps()"
+               style="flex:1;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+      </div>
+      <div id="copyTypeTags" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"></div>
+      <div id="copyExpList" style="max-height:420px;overflow-y:auto">
+        <p style="color:#888;font-size:13px;text-align:center;padding:40px">加载中...</p>
+      </div>
+    </div>
+    <!-- 右侧：详情预览 -->
+    <div id="copyPreview" class="hidden" style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);position:sticky;top:16px;align-self:start">
+      <h3 id="copyPreviewTitle" style="margin-bottom:4px;font-size:16px"></h3>
+      <div id="copyPreviewMeta" style="font-size:13px;color:#888;margin-bottom:10px"></div>
+      <div id="copyPreviewDetail" style="font-size:13px;line-height:1.7"></div>
+      <button class="btn btn-primary" onclick="applyCopyAndSwitch()" style="margin-top:12px;width:100%">
+        📋 加载到对应工具
+      </button>
+    </div>
+  </div>
 </div>
 
 {% endblock %}

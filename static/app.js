@@ -424,7 +424,7 @@ document.addEventListener("click", function (e) {
   if (tab.dataset.tab === "copy") loadCopyExpList();
   if (tab.dataset.tab === "dilution") loadBliImportExps();
   if (tab.dataset.tab === "weblogo") loadWeblogoProteins();
-  if (tab.dataset.tab === "enzyme") loadEnzymeProteinSelect();
+  if (tab.dataset.tab === "enzyme") loadEnzymeProteinList();
 });
 
 // ═════════════════════════════════════════════════════
@@ -953,25 +953,147 @@ async function saveBliTable() {
 // ═════════════════════════════════════════════════════
 //  Tab 3: Copy from experiment
 // ═════════════════════════════════════════════════════
+//  Tab 5: 从实验复制 (卡片式 UI)
+// ═════════════════════════════════════════════════════
 
-async function loadCopyExpList() {
-  const sel = document.getElementById("copyExpSelect");
-  if (sel.options.length > 1) return;  // already loaded
-  const exps = await API.get("/api/experiments?limit=50");
-  sel.innerHTML = '<option value="">-- 选择实验 --</option>' +
-    exps.map(e => `<option value="${e.id}">${esc(e.title)} (${e.date || ""})</option>`).join("");
+let copyAllExps = [];
+let copyTypeFilter = "all";
+
+const COPY_TYPE_META = {
+  "浓度测定": { icon: "🧪", css: "conc", label: "浓度" },
+  "BLI 浓度梯度": { icon: "📊", css: "dilution", label: "BLI" },
+  "酶活测定": { icon: "⚡", css: "enzyme", label: "酶活" },
+  "Weblogo": { icon: "🧬", css: "weblogo", label: "Logo" },
+};
+
+function copyExpTypeInfo(e) {
+  const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
+  const calcType = params.calc_type || "";
+  if (calcType === "concentration") return COPY_TYPE_META["浓度测定"];
+  if (calcType === "dilution") return COPY_TYPE_META["BLI 浓度梯度"];
+  if (calcType === "enzyme") return COPY_TYPE_META["酶活测定"];
+  if (calcType === "weblogo") return COPY_TYPE_META["Weblogo"];
+  // fallback: match exp_type
+  for (const [key, meta] of Object.entries(COPY_TYPE_META)) {
+    if ((e.exp_type || "").includes(key.replace("测定", "").replace("浓度梯度", "")))
+      return meta;
+  }
+  return { icon: "📋", css: "other", label: "其他" };
 }
 
-async function loadExpForCopy() {
-  const expId = document.getElementById("copyExpSelect").value;
-  if (!expId) return;
-  const e = await API.get(`/api/experiments/${expId}`);
-  copyCache = e;
-  const calcType = (typeof e.params === "string" ? JSON.parse(e.params) : e.params)?.calc_type || "";
-  document.getElementById("copySummary").textContent =
-    `${e.exp_type} | ${e.title} | ${e.protein_names || "无"} | ${e.date}` +
-    (calcType ? ` → 将加载到「${calcType === "enzyme" ? "酶活计算" : calcType === "dilution" ? "BLI浓度梯度" : "蛋白浓度"}」` : "");
-  document.getElementById("copyPreview").classList.remove("hidden");
+async function loadCopyExpList() {
+  if (copyAllExps.length) { renderCopyExpList(); return; }
+  try {
+    copyAllExps = await API.get("/api/experiments?limit=100");
+    renderCopyExpList();
+    renderCopyTypeTags();
+  } catch (err) { document.getElementById("copyExpList").innerHTML = '<p style="color:#888;text-align:center;padding:40px">加载失败</p>'; }
+}
+
+function renderCopyTypeTags() {
+  const counts = { all: copyAllExps.length };
+  for (const e of copyAllExps) {
+    const t = copyExpTypeInfo(e);
+    counts[t.css] = (counts[t.css] || 0) + 1;
+  }
+  const tags = [
+    { key: "all", label: "全部", icon: "📋" },
+    { key: "conc", label: "浓度", icon: "🧪" },
+    { key: "dilution", label: "BLI", icon: "📊" },
+    { key: "enzyme", label: "酶活", icon: "⚡" },
+    { key: "weblogo", label: "Logo", icon: "🧬" },
+    { key: "other", label: "其他", icon: "📋" },
+  ].filter(t => counts[t.key]);
+  document.getElementById("copyTypeTags").innerHTML = tags.map(t =>
+    `<span class="copy-type-tag ${t.key}${copyTypeFilter === t.key ? ' active' : ''}"
+          onclick="copyTypeFilter='${t.key}';renderCopyTypeTags();renderCopyExpList()">
+      ${t.icon} ${t.label} <span style="opacity:.6">${counts[t.key]}</span>
+    </span>`
+  ).join("");
+}
+
+function filterCopyExps() { renderCopyExpList(); }
+
+function renderCopyExpList() {
+  const container = document.getElementById("copyExpList");
+  const q = (document.getElementById("copySearchInput")?.value || "").trim().toLowerCase();
+  let exps = copyAllExps;
+  if (copyTypeFilter !== "all") {
+    exps = exps.filter(e => copyExpTypeInfo(e).css === copyTypeFilter);
+  }
+  if (q) {
+    exps = exps.filter(e => (e.title || "").toLowerCase().includes(q) || (e.protein_names || "").toLowerCase().includes(q));
+  }
+  if (!exps.length) {
+    container.innerHTML = '<p style="color:#888;font-size:13px;text-align:center;padding:40px">无匹配实验</p>';
+    return;
+  }
+  container.innerHTML = exps.map(e => {
+    const ti = copyExpTypeInfo(e);
+    const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
+    const proteins = params.proteins || [];
+    const wells = params.wells || params.well_info || {};
+    let detail = "";
+    if (params.calc_type === "enzyme") {
+      detail = `${Object.keys(wells).length} 孔 | ${params.meta?.sample || ""}`;
+    } else if (proteins.length) {
+      detail = `${proteins.length} 蛋白 | ${proteins.map(p => p.name).join(", ")}`;
+    } else {
+      detail = e.protein_names || "无蛋白数据";
+    }
+    return `<div class="copy-card" onclick="selectCopyExp(${e.id})" id="copy-card-${e.id}">
+      <div class="copy-type-badge ${ti.css}">${ti.icon}</div>
+      <div class="copy-card-body">
+        <div class="copy-card-title">${esc(e.title)}</div>
+        <div class="copy-card-sub">${e.date || ""} · ${ti.label} · ${esc(detail)}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function selectCopyExp(eid) {
+  document.querySelectorAll(".copy-card").forEach(c => c.classList.remove("active"));
+  document.getElementById("copy-card-" + eid)?.classList.add("active");
+  try {
+    const e = await API.get(`/api/experiments/${eid}`);
+    copyCache = e;
+    const ti = copyExpTypeInfo(e);
+    const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
+    const calcType = params.calc_type || "";
+    let detailHtml = "";
+    const proteins = params.proteins || [];
+    const wells = params.wells || params.well_info || {};
+
+    if (calcType === "concentration" && proteins.length) {
+      detailHtml = `<b>${proteins.length} 个蛋白</b><br>` +
+        proteins.map(p => `· ${esc(p.name)}: A₂₈₀=${p.a280 ?? "?"}, ${p.conc_uM ?? "?"} μM`).join("<br>");
+    } else if (calcType === "dilution" && proteins.length) {
+      detailHtml = `<b>${proteins.length} 个蛋白</b><br>` +
+        proteins.map(p => `· ${esc(p.name)}: ${p.stock_uM}→${p.start_uM} μM, ${p.factor}×${p.steps}步`).join("<br>");
+    } else if (calcType === "enzyme") {
+      const withData = Object.entries(wells).filter(([_, w]) => w.fit || w.times);
+      detailHtml = `<b>${Object.keys(wells).length} 孔</b> (${withData.length} 有数据)<br>` +
+        `${params.meta?.sample || ""} | ${params.meta?.wavelength || "?"} nm`;
+      const negWells = Object.entries(wells).filter(([_, w]) => w.ref === "neg" || w.ref === "blank");
+      if (negWells.length) detailHtml += `<br>阴性/空白: ${negWells.map(([id]) => id).join(", ")}`;
+    } else if (calcType === "weblogo") {
+      detailHtml = `<b>${proteins.length} 条序列</b> | ${params.positions || "?"} 位点`;
+    } else {
+      detailHtml = `${e.protein_names || "无蛋白"} | ${e.notes || "无额外信息"}`;
+    }
+
+    const targetLabel = calcType === "enzyme" ? "酶活计算" : calcType === "dilution" ? "BLI 浓度梯度" : calcType === "weblogo" ? "Weblogo" : "蛋白浓度";
+
+    document.getElementById("copyPreviewTitle").textContent = e.title;
+    document.getElementById("copyPreviewMeta").innerHTML = `<span class="copy-type-tag ${ti.css}">${ti.icon} ${ti.label}</span> ${e.date || ""} → <b>${targetLabel}</b>`;
+    document.getElementById("copyPreviewDetail").innerHTML = detailHtml;
+    document.getElementById("copyPreview").classList.remove("hidden");
+  } catch (err) { toast(err.message, true); }
+}
+
+// helper: safe JSON parse
+function safeJson(s) {
+  try { return JSON.parse(s); } catch (_) { return {}; }
 }
 
 async function applyCopyAndSwitch() {
@@ -1349,7 +1471,7 @@ function enzymeUpdateWells() {
     if (!isNaN(conc)) {
       if (unit === "ng_ml") {
         enzymeWellInfo[id].conc_ng_ml = conc;
-        enzymeWellInfo[id].conc_uM = mw ? +(conc / 1000 / mw * 1000).toFixed(4) : null;
+        enzymeWellInfo[id].conc_uM = mw ? +(conc / mw).toFixed(4) : null;
       } else {
         enzymeWellInfo[id].conc_uM = conc;
         enzymeWellInfo[id].conc_ng_ml = mw ? +(conc * mw).toFixed(1) : null;
@@ -1373,7 +1495,7 @@ function enzymeBatchConc() {
     enzymeWellInfo[id].mw = mw;
     if (unit === "ng_ml") {
       enzymeWellInfo[id].conc_ng_ml = c;
-      enzymeWellInfo[id].conc_uM = mw ? +(c / 1000 / mw * 1000).toFixed(4) : null;
+      enzymeWellInfo[id].conc_uM = mw ? +(c / mw).toFixed(4) : null;
     } else {
       enzymeWellInfo[id].conc_uM = c;
       enzymeWellInfo[id].conc_ng_ml = mw ? +(c * mw).toFixed(1) : null;
@@ -1403,21 +1525,25 @@ async function enzymeCalc(wellIds) {
   }
   try {
     const r = await API.post("/api/enzyme/fit", payload);
-    // 找阴性/空白孔，算均值
+    // 先写入新的拟合结果
+    for (const [id, fit] of Object.entries(r)) {
+      if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
+      enzymeWellInfo[id].fit = fit;
+    }
+    // 再从新拟合结果中找阴性/空白孔均值
     let blankSlopes = [];
     for (const [wid, info] of Object.entries(enzymeWellInfo)) {
-      if ((info.ref === "blank" || info.ref === "neg") && info.fit) {
+      if ((info.ref === "blank" || info.ref === "neg") && info.fit && info.fit.slope != null) {
         blankSlopes.push(info.fit.slope);
       }
     }
     const blankAvg = blankSlopes.length ? blankSlopes.reduce((a, b) => a + b, 0) / blankSlopes.length : 0;
 
-    for (const [id, fit] of Object.entries(r)) {
-      if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
-      enzymeWellInfo[id].fit = fit;
-      enzymeWellInfo[id].fit.blank_corrected = blankAvg !== 0;
-      if (blankAvg !== 0) {
-        enzymeWellInfo[id].fit.slope_corrected = +(fit.slope - blankAvg).toFixed(6);
+    for (const [id, info] of Object.entries(enzymeWellInfo)) {
+      if (!info.fit || info.fit.slope == null) continue;
+      info.fit.blank_corrected = blankSlopes.length > 0;
+      if (blankSlopes.length > 0) {
+        info.fit.slope_corrected = +(info.fit.slope - blankAvg).toFixed(6);
       }
     }
     renderEnzymeTable(wellIds);
@@ -1425,15 +1551,6 @@ async function enzymeCalc(wellIds) {
     const msg = blankSlopes.length ? `计算完成 (已扣除 ${blankSlopes.length} 个阴性/空白孔均值 ΔOD/min=${blankAvg.toFixed(6)})` : "计算完成";
     toast(msg);
   } catch (err) { toast(err.message, true); }
-}
-
-async function loadEnzymeProteinSelect() {
-  try {
-    const proteins = await API.get("/api/proteins");
-    const sel = document.getElementById("wellProtein");
-    if (sel) sel.innerHTML = '<option value="">-- 选择蛋白 --</option>' +
-      proteins.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
-  } catch (_) {}
 }
 
 function renderEnzymeTable(wellIds) {
@@ -1523,14 +1640,15 @@ async function enzymeSaveExp() {
 }
 
 let enzymeProteinList = [];
-async function loadEnzymeProteinSelect() {
+async function loadEnzymeProteinList() {
   if (enzymeProteinList.length) return;
   try {
     enzymeProteinList = await API.get("/api/proteins");
   } catch (_) {}
 }
 
-function enzymeSearchProtein() {
+async function enzymeSearchProtein() {
+  if (!enzymeProteinList.length) await loadEnzymeProteinList();
   const q = document.getElementById("enzymeProteinSearch").value.trim().toLowerCase();
   const dropdown = document.getElementById("enzymeProteinResults");
   if (!q) { dropdown.classList.add("hidden"); return; }
