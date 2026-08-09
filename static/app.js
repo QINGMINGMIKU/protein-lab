@@ -1455,7 +1455,8 @@ async function enzymePlot(type) {
   const ids = enzymeSelection.size ? Array.from(enzymeSelection) : Object.keys(enzymeData.wells);
   const alignStart = document.getElementById("enzymeAlignStart")?.checked || false;
   const alignEnd = document.getElementById("enzymeAlignEnd")?.checked || false;
-  const payload = { type, align_start: alignStart, align_end: alignEnd, wells: {} };
+  const showBlank = document.getElementById("enzymeShowBlank")?.checked || false;
+  const payload = { type, align_start: alignStart, align_end: alignEnd, show_blank: showBlank, wells: {} };
   for (const id of ids) {
     const wd = enzymeData.wells[id];
     if (!wd) continue;

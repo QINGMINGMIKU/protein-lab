@@ -244,7 +244,10 @@
   <div class="tab-actions" style="margin-top:12px">
     <button class="btn btn-primary" onclick="enzymeCalcSelected()">🧪 计算选中孔</button>
     <button class="btn btn-outline" onclick="enzymeCalcAll()">计算全部</button>
-    <label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-left:8px">
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px">
+      <input type="checkbox" id="enzymeShowBlank" onchange="enzymePlot('kinetics')"> 显示阴性
+    </label>
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px">
       <input type="checkbox" id="enzymeAlignStart" onchange="enzymePlot('kinetics')"> 对齐起始
     </label>
     <label style="font-size:12px;display:flex;align-items:center;gap:4px">

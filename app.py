@@ -750,16 +750,22 @@ def api_enzyme_plot():
         avg_first = sum(all_first_od) / len(all_first_od) if all_first_od else 0.0
         avg_last = sum(all_last_od) / len(all_last_od) if all_last_od else 0.0
 
+        has_blank = any(wd.get("ref") in ("blank", "neg") for wd in wells_data.values())
+
         for well_id, wd in wells_data.items():
             if not wd.get("times") or not wd.get("od"):
                 continue
+            ref = wd.get("ref", "")
+            # 默认隐藏阴性/空白
+            if ref in ("blank", "neg") and not body.get("show_blank", False):
+                continue
+
             label = wd.get("name", well_id)
             conc = wd.get("conc_ng_ml", "")
             lbl = f"{label}" + (f" ({conc} ng/mL)" if conc else "")
             times_min = [t / 60 for t in wd["times"]]
             od_vals = list(wd["od"])
 
-            # 应用对齐
             if align_start and od_vals:
                 shift = avg_first - od_vals[0]
                 od_vals = [v + shift for v in od_vals]
@@ -767,17 +773,33 @@ def api_enzyme_plot():
                 shift = avg_last - od_vals[-1]
                 od_vals = [v + shift for v in od_vals]
 
-            line = ax.plot(times_min, od_vals, ".-", label=lbl, linewidth=1, markersize=3)
+            # 阳性对照：加粗突出
+            lw = 2 if ref == "pos" else 1
+            alpha_val = 1.0 if ref == "pos" else 0.85
+            line = ax.plot(times_min, od_vals, ".-", label=lbl, linewidth=lw, markersize=3, alpha=alpha_val)
+            # 阳性拟合线也更粗
             fit = wd.get("fit")
             if fit and fit.get("slope") is not None:
                 t_fit = np.linspace(times_min[0], times_min[-1], 100)
                 intercept = fit.get("intercept", od_vals[0]) if fit.get("intercept") is not None else od_vals[0]
                 od_fit = [intercept + fit["slope"] / 60 * t for t in t_fit]
-                # 对齐拟合线
                 if align_start and fit.get("intercept") is not None:
                     shift_fit = avg_first - fit["intercept"]
                     od_fit = [v + shift_fit for v in od_fit]
-                ax.plot(t_fit, od_fit, "--", linewidth=1, alpha=0.6, color=line[0].get_color())
+                ax.plot(t_fit, od_fit, "--", linewidth=lw + 0.5, alpha=0.6, color=line[0].get_color())
+
+        # 标注：说明做了哪些修正
+        notes = []
+        if has_blank:
+            notes.append("已扣除阴性/空白 ΔOD/min")
+        if align_start:
+            notes.append("已对齐起始值")
+        if align_end:
+            notes.append("已对齐终止值")
+        title = "Kinetics"
+        if notes:
+            title += "  (" + ", ".join(notes) + ")"
+        ax.set_title(title, fontsize=12, color="#555")
         ax.set_xlabel("Time (min)")
         ax.set_ylabel("OD")
         if wells_data:
