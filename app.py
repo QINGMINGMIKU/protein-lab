@@ -729,6 +729,14 @@ def api_enzyme_plot():
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+
+    # 中文字体
+    font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts", "simhei.ttf")
+    if os.path.exists(font_path):
+        font_manager.fontManager.addfont(font_path)
+        plt.rcParams["font.family"] = "SimHei"
+    plt.rcParams["axes.unicode_minus"] = False
 
     body = request.get_json()
     wells_data = body.get("wells", {})
@@ -788,17 +796,18 @@ def api_enzyme_plot():
                     od_fit = [v + shift_fit for v in od_fit]
                 ax.plot(t_fit, od_fit, "--", linewidth=lw + 0.5, alpha=0.6, color=line[0].get_color())
 
-        # 标注：说明做了哪些修正
+        # 标注：中文/英文自适应
+        use_cn = os.path.exists(font_path)
         notes = []
         if has_blank:
-            notes.append("已扣除阴性/空白 ΔOD/min")
+            notes.append("已扣除阴性/空白" if use_cn else "blank subtracted")
         if align_start:
-            notes.append("已对齐起始值")
+            notes.append("已对齐起始值" if use_cn else "start aligned")
         if align_end:
-            notes.append("已对齐终止值")
+            notes.append("已对齐终止值" if use_cn else "end aligned")
         title = "Kinetics"
         if notes:
-            title += "  (" + ", ".join(notes) + ")"
+            title += " (" + ", ".join(notes) + ")"
         ax.set_title(title, fontsize=12, color="#555")
         ax.set_xlabel("Time (min)")
         ax.set_ylabel("OD")
