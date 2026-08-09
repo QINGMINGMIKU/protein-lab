@@ -21,6 +21,7 @@
       <div class="picker-header">
         <input type="text" id="proteinSearch" placeholder="搜索蛋白名称..." oninput="searchProteins()" autocomplete="off">
         <div id="searchResults" class="search-dropdown hidden"></div>
+        <div id="calcTagFilter" class="tag-filter-bar" style="margin-top:6px"></div>
       </div>
       <div class="cys-inline">Cys:
         <select id="concOxidized" onchange="updateTableExtCoeff()">
@@ -139,7 +140,8 @@
   <div style="display:grid;grid-template-columns:320px 1fr;gap:20px">
     <!-- 左侧：蛋白选择 -->
     <div style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-      <input type="text" id="weblogoSearch" placeholder="搜索蛋白..." oninput="filterWeblogoProteins()" style="width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-bottom:10px">
+      <input type="text" id="weblogoSearch" placeholder="搜索蛋白..." oninput="filterWeblogoProteins()" style="width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-bottom:6px">
+      <div id="weblogoTagFilter" class="tag-filter-bar" style="margin-bottom:6px"></div>
       <div style="margin-bottom:8px">
         <label class="checkbox-label" style="display:inline-flex!important"><input type="checkbox" id="weblogoSelectAll" onchange="toggleAllWeblogoProteins(this)"> 全选</label>
       </div>

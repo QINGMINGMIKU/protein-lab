@@ -61,6 +61,78 @@ function toast(msg, error, undoAction) {
   setTimeout(() => el.remove(), undoAction ? 8000 : 2500);
 }
 
+// ── Tag system ──────────────────────────────────────
+let activeTagFilter = [];
+
+function renderTagChips(tagStr) {
+  if (!tagStr) return "";
+  return tagStr.split(",").map(t => {
+    const s = t.trim();
+    return s ? `<span class="tag-chip">${esc(s)}</span>` : "";
+  }).join(" ");
+}
+
+async function loadTagFilter() {
+  const bar = document.getElementById("tagFilterBar");
+  if (!bar) return;
+  try {
+    const tags = await API.get("/api/proteins/tags");
+    bar.innerHTML = tags.map(t => {
+      const active = activeTagFilter.includes(t) ? " active" : "";
+      return `<span class="tag-chip filter${active}" onclick="toggleTagFilter('${esc(t.replace(/'/g, "\\'"))}')">${esc(t)}</span>`;
+    }).join(" ") || "";
+  } catch (_) { bar.innerHTML = ""; }
+}
+
+function toggleTagFilter(tag) {
+  const idx = activeTagFilter.indexOf(tag);
+  if (idx >= 0) activeTagFilter.splice(idx, 1);
+  else activeTagFilter.push(tag);
+  loadTagFilter();
+  loadProteins().catch(() => {});
+}
+
+// ── Tag input helper ─────────────────────────────────
+function handleTagKey(event, containerId) {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  const container = document.getElementById(containerId);
+  const input = container.querySelector("input");
+  const val = input.value.trim();
+  if (!val) return;
+  const chip = document.createElement("span");
+  chip.className = "tag-chip";
+  chip.innerHTML = `${esc(val)} <span class="chip-x" onclick="this.parentElement.remove()">✕</span>`;
+  container.insertBefore(chip, input);
+  input.value = "";
+  syncTagHidden(containerId);
+}
+
+function getTagChips(containerId) {
+  const container = document.getElementById(containerId);
+  const chips = container.querySelectorAll(".tag-chip");
+  return Array.from(chips).map(c => c.textContent.replace("✕", "").trim()).filter(Boolean).join(", ");
+}
+
+function syncTagHidden(containerId) {
+  if (containerId === "addTagInput") {
+    document.getElementById("addTagHidden").value = getTagChips("addTagInput");
+  }
+}
+
+// 关闭弹窗时清理 chip
+const _origCloseAddModal = closeAddModal;
+closeAddModal = function() {
+  const inp = document.querySelector("#addTagInput");
+  if (inp) {
+    inp.querySelectorAll(".tag-chip").forEach(c => c.remove());
+    inp.querySelector("input").value = "";
+    document.getElementById("addTagHidden").value = "";
+  }
+  document.getElementById("addForm").reset();
+  document.getElementById("addModal").classList.add("hidden");
+};
+
 // ── Delegated click handler ──────────────────────────
 document.addEventListener("click", function (e) {
   const target = e.target.closest("[data-action]");
@@ -87,7 +159,9 @@ async function loadProteins() {
   if (!tbody) return;
   try {
     const q = document.getElementById("searchBox")?.value || "";
-    const proteins = await API.get(`/api/proteins?q=${encodeURIComponent(q)}`);
+    let url = `/api/proteins?q=${encodeURIComponent(q)}`;
+    if (activeTagFilter.length) url += `&tag=${encodeURIComponent(activeTagFilter.join(","))}`;
+    const proteins = await API.get(url);
     tbody.innerHTML = proteins.map(p => `
       <tr>
         <td><input type="checkbox" class="protein-check" value="${p.id}" onchange="updateBulkBar()"></td>
@@ -95,11 +169,12 @@ async function loadProteins() {
         <td>${p.mw ? p.mw.toLocaleString() : "-"}</td>
         <td>${p.ext_ox || "-"}</td>
         <td>${p.abs_0_1pct ?? "-"}</td>
-        <td>${esc(p.tag || "")}</td>
+        <td>${renderTagChips(p.tag)}</td>
         <td><span class="seq-preview" onclick="this.classList.toggle('expanded')" title="点击展开/收起">${esc(p.sequence)}</span></td>
         <td><button class="btn btn-sm btn-danger" data-action="delete-protein" data-id="${p.id}" data-name="${escAttr(p.name)}">删除</button></td>
       </tr>
     `).join("");
+    loadTagFilter();
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="7" style="color:#c0392b;text-align:center;padding:20px">加载失败: ${esc(err.message)}</td></tr>`;
   }
@@ -314,6 +389,8 @@ document.addEventListener("click", function (e) {
 let selectedProteins = {};  // { id: { name, mw, ext_ox, abs_0_1pct, ... } }
 let allProteins = [];
 let copyCache = null;       // cached experiment data for copy tab
+let calcTagFilter = [];     // 计算工具标签筛选
+let weblogoTagFilter = [];  // Weblogo 标签筛选
 
 async function searchProteins() {
   const q = document.getElementById("proteinSearch").value.trim();
@@ -323,10 +400,17 @@ async function searchProteins() {
   if (!allProteins.length) {
     allProteins = await API.get("/api/proteins");
   }
-  const matches = allProteins.filter(p =>
-    p.name.toLowerCase().includes(q.toLowerCase())
-    || (p.tag || "").toLowerCase().includes(q.toLowerCase())
-  );
+  const matches = allProteins.filter(p => {
+    const nameMatch = p.name.toLowerCase().includes(q.toLowerCase());
+    const tagMatch = (p.tag || "").toLowerCase().includes(q.toLowerCase());
+    if (!nameMatch && !tagMatch) return false;
+    // 标签筛选
+    if (calcTagFilter.length) {
+      const proteinTags = (p.tag || "").split(",").map(t => t.trim());
+      if (!calcTagFilter.every(ft => proteinTags.includes(ft))) return false;
+    }
+    return true;
+  });
 
   if (!matches.length) {
     dropdown.innerHTML = '<div class="search-item" style="color:#888">无匹配结果</div>';
@@ -340,6 +424,26 @@ async function searchProteins() {
     `).join("");
   }
   dropdown.classList.remove("hidden");
+  loadCalcTagFilter();
+}
+
+async function loadCalcTagFilter() {
+  const bar = document.getElementById("calcTagFilter");
+  if (!bar) return;
+  try {
+    const tags = await API.get("/api/proteins/tags");
+    bar.innerHTML = tags.map(t => {
+      const active = calcTagFilter.includes(t) ? " active" : "";
+      return `<span class="tag-chip filter${active}" onclick="toggleCalcTag('${esc(t.replace(/'/g, "\\'"))}')">${esc(t)}</span>`;
+    }).join(" ") || "";
+  } catch (_) {}
+}
+
+function toggleCalcTag(tag) {
+  const idx = calcTagFilter.indexOf(tag);
+  if (idx >= 0) calcTagFilter.splice(idx, 1);
+  else calcTagFilter.push(tag);
+  searchProteins();
 }
 
 // Close dropdown on outside click
@@ -1035,6 +1139,12 @@ function renderWeblogoProteinList(filter) {
     const q = filter.toLowerCase();
     list = list.filter(p => p.name.toLowerCase().includes(q));
   }
+  if (weblogoTagFilter.length) {
+    list = list.filter(p => {
+      const proteinTags = (p.tag || "").split(",").map(t => t.trim());
+      return weblogoTagFilter.every(ft => proteinTags.includes(ft));
+    });
+  }
   container.innerHTML = list.map(p =>
     `<label class="checkbox-label" style="display:flex!important;flex-direction:row!important;align-items:center!important;gap:4px!important;margin-bottom:2px!important;cursor:pointer;padding:2px 4px">
       <input type="checkbox" class="weblogo-protein-check" value="${p.id}"> ${esc(p.name)}
@@ -1042,8 +1152,28 @@ function renderWeblogoProteinList(filter) {
   ).join("") || '<span style="color:#888">无匹配蛋白</span>';
 }
 
+async function loadWeblogoTagFilter() {
+  const bar = document.getElementById("weblogoTagFilter");
+  if (!bar) return;
+  try {
+    const tags = await API.get("/api/proteins/tags");
+    bar.innerHTML = tags.map(t => {
+      const active = weblogoTagFilter.includes(t) ? " active" : "";
+      return `<span class="tag-chip filter${active}" onclick="toggleWeblogoTag('${esc(t.replace(/'/g, "\\'"))}')">${esc(t)}</span>`;
+    }).join(" ") || "";
+  } catch (_) {}
+}
+
+function toggleWeblogoTag(tag) {
+  const idx = weblogoTagFilter.indexOf(tag);
+  if (idx >= 0) weblogoTagFilter.splice(idx, 1);
+  else weblogoTagFilter.push(tag);
+  filterWeblogoProteins();
+}
+
 function filterWeblogoProteins() {
   const q = document.getElementById("weblogoSearch").value;
+  loadWeblogoTagFilter();
   renderWeblogoProteinList(q);
 }
 

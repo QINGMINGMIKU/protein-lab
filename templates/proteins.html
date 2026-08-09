@@ -13,6 +13,7 @@
   <input type="text" id="searchBox" placeholder="搜索蛋白名称/标签..." oninput="loadProteins()">
   <button class="btn btn-outline" onclick="showImportModal()">📥 FASTA 导入</button>
 </div>
+<div id="tagFilterBar" class="tag-filter-bar" style="margin-bottom:8px"></div>
 
 <!-- ── 批量操作栏 ── -->
 <div id="bulkBar" class="bulk-bar hidden">
@@ -60,7 +61,12 @@
     <form id="addForm" onsubmit="addProtein(event)">
       <label>名称 <input type="text" name="name" required placeholder="如 TIM-WT"></label>
       <label>序列 <textarea name="sequence" required rows="4" placeholder="单字母氨基酸序列"></textarea></label>
-      <label>标签/载体 <input type="text" name="tag" placeholder="如 His6, pET28a"></label>
+      <label>标签 <span style="font-weight:400;color:#888">（回车添加）</span>
+        <div class="tag-input" id="addTagInput">
+          <input type="text" placeholder="输入后回车" onkeydown="handleTagKey(event, 'addTagInput')">
+        </div>
+        <input type="hidden" name="tag" id="addTagHidden">
+      </label>
       <label>备注 <input type="text" name="notes" placeholder=""></label>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">确定添加</button>

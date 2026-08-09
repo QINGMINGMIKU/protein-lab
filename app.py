@@ -63,13 +63,15 @@ def page_experiment_detail(eid):
     e = models.exp_get(eid)
     if not e:
         return "实验不存在", 404
-    # 解析 JSON 字符串字段供模板使用
-    if isinstance(e.get("params"), str):
-        try: e["params"] = json.loads(e["params"])
-        except: e["params"] = {}
-    if isinstance(e.get("results"), str):
-        try: e["results"] = json.loads(e["results"])
-        except: e["results"] = {}
+    # 解析 JSON 字符串字段供模板使用（处理历史双编码问题）
+    for field in ("params", "results"):
+        val = e.get(field)
+        while isinstance(val, str):
+            try: val = json.loads(val)
+            except: break
+        if not isinstance(val, dict):
+            val = {}
+        e[field] = val
     return render_template("experiment_detail.html", exp=e)
 
 
@@ -85,8 +87,14 @@ def page_weblogo():
 @app.route("/api/proteins", methods=["GET"])
 def api_protein_list():
     search = request.args.get("q", "")
-    proteins = models.protein_list(search)
+    tag_filter = request.args.get("tag", "")
+    proteins = models.protein_list(search, tag_filter)
     return jsonify(proteins)
+
+
+@app.route("/api/proteins/tags", methods=["GET"])
+def api_protein_tags():
+    return jsonify(models.protein_tags())
 
 
 @app.route("/api/proteins/<int:pid>", methods=["GET"])

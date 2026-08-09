@@ -1,17 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% set params = exp.params if exp.params is mapping else {} %}
+{% set results = exp.results if exp.results is mapping else {} %}
+{% set calc_type = params.get("calc_type", "") %}
+{% set proteins = params.get("proteins", []) %}
+
 <div class="page-header">
   <h1>{{ exp.title }}</h1>
   <div style="display:flex;gap:8px">
     <a class="btn btn-outline" href="/api/experiments/{{ exp.id }}/export">📥 导出 Excel</a>
-    <button class="btn btn-outline" onclick="editExpTitle({{ exp.id }})">✏️ 编辑标题</button>
+    <button class="btn btn-outline" onclick="editExpTitle({{ exp.id }})">✏️ 编辑</button>
     <button class="btn btn-sm btn-danger" onclick="deleteExpDetail({{ exp.id }})">🗑 删除</button>
   </div>
 </div>
 
-<!-- ── 基本信息 ── -->
-<div class="panel" style="margin-bottom:16px">
+<div class="panel" style="margin-bottom:20px">
   <div class="info-grid">
     <dt>类型</dt><dd><span class="badge">{{ exp.exp_type }}</span></dd>
     <dt>日期</dt><dd>{{ exp.date or "-" }}</dd>
@@ -20,33 +24,18 @@
   </div>
 </div>
 
-<!-- ── 实验参数 & 结果 ── -->
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-  <div class="panel">
-    <h3 style="margin-bottom:12px">实验参数</h3>
-    <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto">{{ exp.params | tojson(indent=2) if exp.params is mapping else (exp.params or "{}") }}</pre>
-  </div>
-  <div class="panel">
-    <h3 style="margin-bottom:12px">实验结果</h3>
-    <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto">{{ exp.results | tojson(indent=2) if exp.results is mapping else (exp.results or "{}") }}</pre>
-  </div>
-</div>
-
-<!-- ── 计算数据表格 ── -->
-{% set params = exp.params if exp.params is mapping else {} %}
-{% set results = exp.results if exp.results is mapping else {} %}
-{% set calc_type = params.get("calc_type", "") %}
-{% set proteins = params.get("proteins", []) %}
-
+<!-- ═══════════════════════════════════════════════ -->
+<!--  浓度测定                                      -->
+<!-- ═══════════════════════════════════════════════ -->
 {% if calc_type == "concentration" and proteins %}
-<div class="panel">
-  <h3 style="margin-bottom:12px">浓度计算数据</h3>
-  <div class="table-scroll">
+<div class="calc-card" style="margin-bottom:20px">
+  <h2>浓度计算</h2>
+  <div class="table-scroll" style="margin-top:12px">
     <table class="calc-table">
       <thead><tr>
         <th>蛋白</th><th>MW (Da)</th><th>ε</th><th>Abs 0.1%</th>
-        <th>A₂₈₀</th><th>浓度 (μM)</th><th>浓度 (mg/mL)</th>
-        <th>目标浓度</th><th>目标体积</th><th>取母液</th><th>加缓冲液</th>
+        <th>A₂₈₀</th><th class="col-result">浓度 (μM)</th><th class="col-result">浓度 (mg/mL)</th>
+        <th>目标浓度 (μM)</th><th>目标体积 (μL)</th><th class="col-result">取母液 (μL)</th><th class="col-result">加缓冲液 (μL)</th>
       </tr></thead>
       <tbody>
       {% for p in proteins %}
@@ -56,12 +45,12 @@
           <td>{{ "%.0f"|format(p.epsilon) if p.epsilon else "-" }}</td>
           <td>{{ "%.4f"|format(p.abs_0_1pct) if p.abs_0_1pct else "-" }}</td>
           <td>{{ p.a280 if p.a280 != None else "-" }}</td>
-          <td>{{ p.conc_uM if p.conc_uM != None else "-" }}</td>
-          <td>{{ p.conc_mg_mL if p.conc_mg_mL != None else "-" }}</td>
+          <td class="col-result">{{ p.conc_uM if p.conc_uM != None else "-" }}</td>
+          <td class="col-result">{{ p.conc_mg_mL if p.conc_mg_mL != None else "-" }}</td>
           <td>{{ p.target_conc if p.target_conc != None else "-" }}</td>
           <td>{{ p.target_vol if p.target_vol != None else "-" }}</td>
-          <td>{{ p.take_vol if p.take_vol != None else "-" }}</td>
-          <td>{{ p.buffer_vol if p.buffer_vol != None else "-" }}</td>
+          <td class="col-result">{{ p.take_vol if p.take_vol != None else "-" }}</td>
+          <td class="col-result">{{ p.buffer_vol if p.buffer_vol != None else "-" }}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -70,35 +59,66 @@
 </div>
 {% endif %}
 
+<!-- ═══════════════════════════════════════════════ -->
+<!--  BLI 稀释                                      -->
+<!-- ═══════════════════════════════════════════════ -->
 {% if calc_type == "dilution" and proteins %}
-<div class="panel">
-  <h3 style="margin-bottom:12px">BLI 稀释参数</h3>
+<div class="calc-card" style="margin-bottom:20px">
+  <h2>BLI 梯度稀释</h2>
   {% for p in proteins %}
     {% set pr = results.get(p.id|string) if results else none %}
-    <h4 style="margin-top:12px">{{ p.name }} (母液 {{ p.stock_uM }} μM, {{ p.factor }}×, {{ p.steps }} 步)</h4>
-    {% if pr and pr.steps %}
-    <table class="calc-table" style="margin-top:4px">
-      <thead><tr><th>#</th><th>浓度 (μM)</th><th>总体积 (μL)</th><th>取上步 (μL)</th><th>缓冲液 (μL)</th></tr></thead>
-      <tbody>
-      {% for s in pr.steps %}
-        <tr><td>{{ s.step }}</td><td>{{ s.conc_uM }}</td><td>{{ s.total_vol_uL }}</td><td>{{ s.stock_vol_uL }}</td><td>{{ s.buffer_vol_uL }}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
+    <div class="result-box" style="margin-top:14px">
+      <strong>{{ p.name }}</strong>
+      &nbsp; 母液 {{ p.stock_uM }} μM &nbsp;|&nbsp; {{ p.factor }}× 稀释 &nbsp;|&nbsp; {{ p.steps }} 步
+      {% if pr and pr.steps %}
+      <table style="margin-top:8px">
+        <thead><tr><th>#</th><th>浓度 (μM)</th><th>总体积 (μL)</th><th>取上步 (μL)</th><th>缓冲液 (μL)</th></tr></thead>
+        <tbody>
+        {% for s in pr.steps %}
+          <tr><td>{{ s.step }}</td><td>{{ s.conc_uM }}</td><td>{{ s.total_vol_uL }}</td><td>{{ s.stock_vol_uL }}</td><td>{{ s.buffer_vol_uL }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p style="margin-top:4px;font-size:12px;color:#888">第一步总需求 ≈ {{ pr.steps[0].total_vol_uL }} μL</p>
+      {% endif %}
+    </div>
   {% endfor %}
 </div>
 {% endif %}
 
+<!-- ═══════════════════════════════════════════════ -->
+<!--  Weblogo                                       -->
+<!-- ═══════════════════════════════════════════════ -->
 {% if calc_type == "weblogo" %}
-<div class="panel" style="text-align:center">
-  <h3 style="margin-bottom:12px">Weblogo</h3>
-  {% set img = (exp.params or {}).get("image", "") %}
-  {% if img %}<img src="{{ img }}" style="max-width:100%" alt="Weblogo">{% endif %}
+<div class="calc-card" style="margin-bottom:20px;text-align:center">
+  <h2>Weblogo</h2>
+  {% set img = params.get("image", "") %}
+  {% if img %}
+  <p style="color:#888;font-size:13px;margin-bottom:12px">{{ proteins|length }} 条序列</p>
+  <img src="{{ img }}" style="max-width:100%;border-radius:8px" alt="Weblogo">
+  {% else %}
+  <p style="color:#888">无图像数据</p>
+  {% endif %}
 </div>
 {% endif %}
 
-<a href="/experiments" style="display:inline-block;margin-top:16px;color:#888;font-size:14px">← 返回实验列表</a>
+<!-- ═══════════════════════════════════════════════ -->
+<!--  其他实验：显示原始 JSON                         -->
+<!-- ═══════════════════════════════════════════════ -->
+{% if not calc_type or not proteins %}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+  <div class="calc-card">
+    <h2>实验参数</h2>
+    <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ params | tojson(indent=2) if params else "{}" }}</pre>
+  </div>
+  <div class="calc-card">
+    <h2>实验结果</h2>
+    <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ results | tojson(indent=2) if results else "{}" }}</pre>
+  </div>
+</div>
+{% endif %}
+
+<a href="/experiments" style="display:inline-block;margin-top:8px;color:#888;font-size:14px">← 返回实验列表</a>
 
 <script>
 async function editExpTitle(id) {

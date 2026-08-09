@@ -67,17 +67,40 @@ def init_db():
 
 # ── Proteins CRUD ──────────────────────────────────────────
 
-def protein_list(search: str = "") -> list[dict]:
+def protein_list(search: str = "", tag_filter: str = "") -> list[dict]:
     conn = get_db()
+    clauses = []
+    params = []
     if search:
-        rows = conn.execute(
-            "SELECT * FROM proteins WHERE name LIKE ? OR tag LIKE ? OR notes LIKE ? ORDER BY updated_at DESC",
-            (f"%{search}%", f"%{search}%", f"%{search}%")
-        ).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM proteins ORDER BY updated_at DESC").fetchall()
+        clauses.append("(name LIKE ? OR tag LIKE ? OR notes LIKE ?)")
+        params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+    if tag_filter:
+        # tag_filter 逗号分隔，要求同时匹配多个标签（交集）
+        for t in tag_filter.split(","):
+            t = t.strip()
+            if t:
+                clauses.append("(',' || tag || ',' LIKE ?)")
+                params.append(f"%,{t},%")
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM proteins{where} ORDER BY updated_at DESC", params
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def protein_tags() -> list[str]:
+    """提取所有已有标签（去重排序）"""
+    conn = get_db()
+    rows = conn.execute("SELECT tag FROM proteins WHERE tag != ''").fetchall()
+    conn.close()
+    tags = set()
+    for r in rows:
+        for t in r["tag"].split(","):
+            t = t.strip()
+            if t:
+                tags.add(t)
+    return sorted(tags)
 
 
 def protein_get(protein_id: int) -> dict | None:
