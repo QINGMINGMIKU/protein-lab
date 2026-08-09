@@ -936,9 +936,12 @@ async function applyCopyAndSwitch() {
   const calcType = params.calc_type || "";
 
   if (calcType === "enzyme") {
-    // 复制到酶活 Tab
-    const wells = params.wells || {};
+    // 复制到酶活 Tab — 重建 enzymeData + enzymeWellInfo
+    const wells = params.wells || params.well_info || {};
+    const emeta = params.meta || {};
+    enzymeData = { meta: emeta, wells: {} };
     enzymeWellInfo = {};
+    enzymeSelection.clear();
     for (const [id, w] of Object.entries(wells)) {
       enzymeWellInfo[id] = {
         name: w.name,
@@ -948,8 +951,16 @@ async function applyCopyAndSwitch() {
         conc_uM: w.conc_uM,
         fit: w.fit,
       };
+      if (w.times && w.od) {
+        enzymeData.wells[id] = { times: w.times, od: w.od };
+      }
     }
-    if (enzymeData) renderPlate();
+    document.getElementById("enzymeMeta").textContent =
+      `${emeta.sample || ""} | ${emeta.wavelength || "?"} nm | ${Object.keys(wells).length} wells (复制)`;
+    renderPlate();
+    if (Object.values(enzymeWellInfo).some(i => i.fit)) {
+      renderEnzymeTable(Object.keys(wells));
+    }
     document.querySelector(".tab-btn[data-tab='enzyme']").click();
     toast(`已加载 ${Object.keys(wells).length} 个孔位数据`);
     return;
@@ -1415,6 +1426,8 @@ async function enzymeSaveExp() {
       conc_ng_ml: info.conc_ng_ml,
       conc_uM: info.conc_uM,
       fit: info.fit || null,
+      times: wd.times,
+      od: wd.od,
       od_range: wd.od.length ? [wd.od[0].toFixed(4), wd.od[wd.od.length - 1].toFixed(4)] : null,
     };
   }
