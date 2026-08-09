@@ -733,10 +733,23 @@ def api_enzyme_plot():
     body = request.get_json()
     wells_data = body.get("wells", {})
     plot_type = body.get("type", "kinetics")  # kinetics | michaelis
+    align_start = body.get("align_start", False)
+    align_end = body.get("align_end", False)
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
 
     if plot_type == "kinetics":
+        # 对齐：计算全部孔的起始/终止均值
+        all_first_od = []
+        all_last_od = []
+        if align_start or align_end:
+            for wd in wells_data.values():
+                if wd.get("od") and len(wd["od"]) > 0:
+                    all_first_od.append(wd["od"][0])
+                    all_last_od.append(wd["od"][-1])
+        avg_first = sum(all_first_od) / len(all_first_od) if all_first_od else 0.0
+        avg_last = sum(all_last_od) / len(all_last_od) if all_last_od else 0.0
+
         for well_id, wd in wells_data.items():
             if not wd.get("times") or not wd.get("od"):
                 continue
@@ -744,12 +757,26 @@ def api_enzyme_plot():
             conc = wd.get("conc_ng_ml", "")
             lbl = f"{label}" + (f" ({conc} ng/mL)" if conc else "")
             times_min = [t / 60 for t in wd["times"]]
-            line = ax.plot(times_min, wd["od"], ".-", label=lbl, linewidth=1, markersize=3)
-            # 拟合线 — 用同一条数据线的颜色
+            od_vals = list(wd["od"])
+
+            # 应用对齐
+            if align_start and od_vals:
+                shift = avg_first - od_vals[0]
+                od_vals = [v + shift for v in od_vals]
+            if align_end and od_vals:
+                shift = avg_last - od_vals[-1]
+                od_vals = [v + shift for v in od_vals]
+
+            line = ax.plot(times_min, od_vals, ".-", label=lbl, linewidth=1, markersize=3)
             fit = wd.get("fit")
             if fit and fit.get("slope") is not None:
                 t_fit = np.linspace(times_min[0], times_min[-1], 100)
-                od_fit = [fit["intercept"] + fit["slope"] / 60 * t for t in t_fit]
+                intercept = fit.get("intercept", od_vals[0]) if fit.get("intercept") is not None else od_vals[0]
+                od_fit = [intercept + fit["slope"] / 60 * t for t in t_fit]
+                # 对齐拟合线
+                if align_start and fit.get("intercept") is not None:
+                    shift_fit = avg_first - fit["intercept"]
+                    od_fit = [v + shift_fit for v in od_fit]
                 ax.plot(t_fit, od_fit, "--", linewidth=1, alpha=0.6, color=line[0].get_color())
         ax.set_xlabel("Time (min)")
         ax.set_ylabel("OD")

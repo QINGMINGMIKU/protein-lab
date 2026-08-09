@@ -1398,13 +1398,27 @@ async function enzymeCalc(wellIds) {
   }
   try {
     const r = await API.post("/api/enzyme/fit", payload);
+    // 找阴性/空白孔，算均值
+    let blankSlopes = [];
+    for (const [wid, info] of Object.entries(enzymeWellInfo)) {
+      if ((info.ref === "blank" || info.ref === "neg") && info.fit) {
+        blankSlopes.push(info.fit.slope);
+      }
+    }
+    const blankAvg = blankSlopes.length ? blankSlopes.reduce((a, b) => a + b, 0) / blankSlopes.length : 0;
+
     for (const [id, fit] of Object.entries(r)) {
       if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
       enzymeWellInfo[id].fit = fit;
+      enzymeWellInfo[id].fit.blank_corrected = blankAvg !== 0;
+      if (blankAvg !== 0) {
+        enzymeWellInfo[id].fit.slope_corrected = +(fit.slope - blankAvg).toFixed(6);
+      }
     }
     renderEnzymeTable(wellIds);
     updateWellForm();
-    toast("计算完成");
+    const msg = blankSlopes.length ? `计算完成 (已扣除 ${blankSlopes.length} 个阴性/空白孔均值 ΔOD/min=${blankAvg.toFixed(6)})` : "计算完成";
+    toast(msg);
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1429,7 +1443,7 @@ function renderEnzymeTable(wellIds) {
       <td>${id}</td><td>${esc(info.name || "")}</td>
       <td>${refLabel}</td>
       <td>${info.conc_ng_ml ?? "-"}</td><td>${info.conc_uM ?? "-"}</td>
-      <td>${f.slope?.toFixed(5) || "-"}</td>
+      <td>${f.blank_corrected ? (f.slope_corrected?.toFixed(5) + ' <span style=color:#888;font-size:11px>(校正)</span>') : (f.slope?.toFixed(5) || "-")}</td>
       <td style="color:${f.r2 != null && f.r2 < 0.95 ? '#e74c3c' : '#333'}">${f.r2 ?? "-"}</td>
       <td>${info.activity ?? "-"}</td>
     </tr>`;
@@ -1439,7 +1453,9 @@ function renderEnzymeTable(wellIds) {
 async function enzymePlot(type) {
   if (!enzymeData) { toast("请先上传数据", true); return; }
   const ids = enzymeSelection.size ? Array.from(enzymeSelection) : Object.keys(enzymeData.wells);
-  const payload = { type, wells: {} };
+  const alignStart = document.getElementById("enzymeAlignStart")?.checked || false;
+  const alignEnd = document.getElementById("enzymeAlignEnd")?.checked || false;
+  const payload = { type, align_start: alignStart, align_end: alignEnd, wells: {} };
   for (const id of ids) {
     const wd = enzymeData.wells[id];
     if (!wd) continue;

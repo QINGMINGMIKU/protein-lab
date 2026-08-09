@@ -244,6 +244,12 @@
   <div class="tab-actions" style="margin-top:12px">
     <button class="btn btn-primary" onclick="enzymeCalcSelected()">🧪 计算选中孔</button>
     <button class="btn btn-outline" onclick="enzymeCalcAll()">计算全部</button>
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-left:8px">
+      <input type="checkbox" id="enzymeAlignStart" onchange="enzymePlot('kinetics')"> 对齐起始
+    </label>
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px">
+      <input type="checkbox" id="enzymeAlignEnd" onchange="enzymePlot('kinetics')"> 对齐终止
+    </label>
     <button class="btn btn-outline" onclick="enzymePlot('kinetics')">📈 动力学曲线</button>
     <button class="btn btn-outline" onclick="enzymePlot('michaelis')">📊 MM 曲线</button>
     <button class="btn btn-outline" onclick="enzymeSaveExp()">💾 保存为实验</button>
