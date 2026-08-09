@@ -923,20 +923,68 @@ async function loadExpForCopy() {
   if (!expId) return;
   const e = await API.get(`/api/experiments/${expId}`);
   copyCache = e;
+  const calcType = (typeof e.params === "string" ? JSON.parse(e.params) : e.params)?.calc_type || "";
   document.getElementById("copySummary").textContent =
-    `实验: ${e.title} | 类型: ${e.exp_type} | 蛋白: ${e.protein_names || "无"} | 日期: ${e.date}`;
+    `${e.exp_type} | ${e.title} | ${e.protein_names || "无"} | ${e.date}` +
+    (calcType ? ` → 将加载到「${calcType === "enzyme" ? "酶活计算" : calcType === "dilution" ? "BLI浓度梯度" : "蛋白浓度"}」` : "");
   document.getElementById("copyPreview").classList.remove("hidden");
 }
 
 async function applyCopyAndSwitch() {
-  if (!copyCache || !copyCache.protein_ids) { toast("无蛋白数据可复制", true); return; }
+  if (!copyCache) { toast("请先选择实验", true); return; }
+  const params = typeof copyCache.params === "string" ? JSON.parse(copyCache.params) : copyCache.params || {};
+  const calcType = params.calc_type || "";
+
+  if (calcType === "enzyme") {
+    // 复制到酶活 Tab
+    const wells = params.wells || {};
+    enzymeWellInfo = {};
+    for (const [id, w] of Object.entries(wells)) {
+      enzymeWellInfo[id] = {
+        name: w.name,
+        ref: w.ref,
+        protein_id: w.protein_id,
+        conc_ng_ml: w.conc_ng_ml,
+        conc_uM: w.conc_uM,
+        fit: w.fit,
+      };
+    }
+    if (enzymeData) renderPlate();
+    document.querySelector(".tab-btn[data-tab='enzyme']").click();
+    toast(`已加载 ${Object.keys(wells).length} 个孔位数据`);
+    return;
+  }
+
+  if (calcType === "dilution") {
+    // 复制到 BLI Tab
+    const proteins = params.proteins || [];
+    for (const p of proteins) {
+      const pid = String(p.id);
+      if (!bliProteins[pid]) {
+        bliProteins[pid] = {
+          name: p.name,
+          stock_uM: p.stock_uM || 50,
+          start_uM: p.start_uM || 10,
+          factor: p.factor || 2,
+          steps: p.steps || 8,
+          vol: p.vol || 200,
+          dead: p.dead || 0,
+        };
+      }
+    }
+    renderBliTable();
+    document.querySelector(".tab-btn[data-tab='dilution']").click();
+    toast(`已加载 ${proteins.length} 个蛋白`);
+    return;
+  }
+
+  // 默认: 浓度实验 → Tab 1
+  if (!copyCache.protein_ids) { toast("无蛋白数据可复制", true); return; }
   if (!allProteins.length) {
     allProteins = await API.get("/api/proteins");
   }
   copyCache.protein_ids.forEach(id => addProteinToTable(id));
-  // 预填完整数据
-  const params = typeof copyCache.params === "string" ? JSON.parse(copyCache.params) : copyCache.params;
-  if (params && params.proteins) {
+  if (params.proteins) {
     params.proteins.forEach(pp => {
       const sp = selectedProteins[pp.id];
       if (!sp) return;

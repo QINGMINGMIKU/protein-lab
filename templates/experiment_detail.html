@@ -107,7 +107,7 @@
         <th>OD 范围</th><th>ΔOD/min</th><th>R²</th>
       </tr></thead>
       <tbody>
-      {% for id, w in wells.items()|sort %}
+      {% for id, w in wells|dictsort %}
         <tr>
           <td>{{ id }}</td>
           <td>{{ w.name or "-" }}</td>
