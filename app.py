@@ -670,9 +670,35 @@ def open_browser():
     webbrowser.open("http://127.0.0.1:5000")
 
 
+def backup_database():
+    """启动时自动备份数据库，保留最近 10 份"""
+    db_path = models.DB_PATH
+    if not os.path.exists(db_path):
+        return
+    backup_dir = os.path.join(os.path.dirname(db_path), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    from datetime import datetime
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(backup_dir, f"protein_lab_{stamp}.db")
+    import shutil
+    shutil.copy2(db_path, backup_path)
+
+    # 清理旧备份，只保留最近 10 份
+    existing = sorted(
+        [f for f in os.listdir(backup_dir) if f.endswith(".db")],
+        reverse=True,
+    )
+    for old in existing[10:]:
+        os.remove(os.path.join(backup_dir, old))
+
+    print(f"   数据库已备份 -> backups/ ({min(len(existing), 10)} 份)")
+
+
 if __name__ == "__main__":
     print("Protein Lab 启动中...")
     print("   浏览器即将打开 -> http://127.0.0.1:5000")
     print("   关闭此窗口即可停止服务")
+    backup_database()
     Timer(0.5, open_browser).start()
     app.run(host="127.0.0.1", port=5000, debug=False)
