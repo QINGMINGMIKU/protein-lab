@@ -142,3 +142,77 @@ def calc_dilution_series(stock_conc_uM: float, start_conc_uM: float,
             total_vol_uL=round(total_needed, 2),
         ))
     return steps
+
+
+# ═══════════════════════════════════════════════════════════
+#  酶活动力学计算
+# ═══════════════════════════════════════════════════════════
+
+import numpy as np
+import openpyxl
+
+ROW_ORDER = "ABCDEFGH"
+
+
+def parse_tecan_xlsx(filepath: str) -> dict:
+    """解析 TECAN Spark xlsx，返回 {meta: {...}, wells: {A1: {times:[], od:[]}, ...}}"""
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb.active
+    meta = {"sample": "", "wavelength": "", "temps": []}
+    wells = {}
+
+    for r in range(1, ws.max_row + 1):
+        v = ws.cell(r, 1).value
+        if v is None:
+            continue
+        label = str(v).strip().rstrip(":")
+
+        if label == "Name":
+            meta["sample"] = str(ws.cell(r, 2).value or "")
+        elif label == "Measurement wavelength":
+            meta["wavelength"] = ws.cell(r, 5).value
+        elif label == "Target temperature":
+            meta["target_temp"] = ws.cell(r, 5).value
+
+        elif label == "Cycle Nr.":
+            time_s = float(ws.cell(r - 2, 2).value)
+            meta.setdefault("temps", []).append(time_s)
+            header_row = r + 1
+            col_map = {}
+            for c in range(2, 14):
+                vh = ws.cell(header_row, c).value
+                if vh is not None:
+                    col_map[c] = int(vh)
+            for rr in range(header_row + 1, header_row + 9):
+                rl = str(ws.cell(rr, 1).value or "").strip()
+                if rl not in ROW_ORDER:
+                    continue
+                for c, wcol in col_map.items():
+                    vv = ws.cell(rr, c).value
+                    if vv is None or str(vv).strip() == "":
+                        continue
+                    key = f"{rl}{wcol}"
+                    wells.setdefault(key, {"times": [], "od": []})
+                    wells[key]["times"].append(time_s)
+                    wells[key]["od"].append(float(vv))
+    wb.close()
+    return {"meta": meta, "wells": {k: v for k, v in sorted(wells.items())}}
+
+
+def fit_kinetics(times: list, od: list) -> dict:
+    """线性拟合 → ΔOD/min、R²"""
+    t = np.asarray(times, float)
+    od_arr = np.asarray(od, float)
+    n = len(t)
+    if n < 2:
+        return {"slope": None, "intercept": None, "r2": None, "n": n}
+    k, b = np.polyfit(t, od_arr, 1)
+    dod_min = round(float(k * 60), 6)
+    if n > 2:
+        pred = k * t + b
+        ss_res = float(np.sum((od_arr - pred) ** 2))
+        ss_tot = float(np.sum((od_arr - od_arr.mean()) ** 2))
+        r2 = round(float(1 - ss_res / ss_tot), 4) if ss_tot > 0 else None
+    else:
+        r2 = None
+    return {"slope": dod_min, "intercept": round(float(b), 6), "r2": r2, "n": n}

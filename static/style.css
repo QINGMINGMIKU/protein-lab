@@ -210,4 +210,25 @@ label textarea { resize: vertical; }
 }
 .toast.error { background: #c0392b; }
 .toast .undo-link { color: #ffd700; cursor: pointer; font-weight: 600; margin-left: 8px; text-decoration: underline; }
+/* ── 96-well plate ────────────────────────────────── */
+.plate-grid {
+  display: grid; grid-template-columns: 28px repeat(12, 1fr);
+  gap: 2px; user-select: none;
+}
+.plate-corner { height: 22px; }
+.plate-col-hdr, .plate-row-hdr {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: #888; height: 22px;
+}
+.plate-well {
+  aspect-ratio: 1; border: 1.5px solid #d0d0d0; border-radius: 3px;
+  background: #fafafa; cursor: pointer; transition: .12s;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; color: #aaa; min-width: 24px;
+}
+.plate-well:hover { border-color: #4361ee; background: #f0f5ff; }
+.plate-well.has-data { background: #e8f0fe; border-color: #90b4f0; color: #4361ee; font-weight: 600; }
+.plate-well.selected { background: #4361ee; color: #fff; border-color: #2c4dc4; font-weight: 700; }
+.plate-well.selected.has-data { background: #2e7d32; border-color: #1b5e20; }
+
 @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } }

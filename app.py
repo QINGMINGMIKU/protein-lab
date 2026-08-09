@@ -15,8 +15,9 @@ from openpyxl.styles import Font
 # 确保能找到同目录模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import numpy as np
 import models
-from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq
+from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics
 
 app = Flask(__name__)
 
@@ -685,6 +686,100 @@ def api_weblogo():
     img_b64 = base64.b64encode(buf.read()).decode()
 
     return jsonify({"image": f"data:image/png;base64,{img_b64}", "positions": n_pos})
+
+
+# ═══════════════════════════════════════════════════════════
+#  Enzyme Activity API
+# ═══════════════════════════════════════════════════════════
+
+@app.route("/api/enzyme/parse", methods=["POST"])
+def api_enzyme_parse():
+    """上传 TECAN xlsx，返回井数据"""
+    if "file" not in request.files:
+        return jsonify({"error": "请上传 xlsx 文件"}), 400
+    f = request.files["file"]
+    tmp = os.path.join(os.path.dirname(models.DB_PATH), "_upload.xlsx")
+    f.save(tmp)
+    try:
+        data = parse_tecan_xlsx(tmp)
+    except Exception as e:
+        return jsonify({"error": f"解析失败: {e}"}), 400
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return jsonify(data)
+
+
+@app.route("/api/enzyme/fit", methods=["POST"])
+def api_enzyme_fit():
+    """对指定孔做线性拟合，返回 ΔOD/min + R²"""
+    body = request.get_json()
+    wells_data = body.get("wells", {})
+    results = {}
+    for well_id, wd in wells_data.items():
+        if wd.get("times") and wd.get("od"):
+            results[well_id] = fit_kinetics(wd["times"], wd["od"])
+    return jsonify(results)
+
+
+@app.route("/api/enzyme/plot", methods=["POST"])
+def api_enzyme_plot():
+    """生成动力学曲线图，返回 base64 PNG"""
+    import base64
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    body = request.get_json()
+    wells_data = body.get("wells", {})
+    plot_type = body.get("type", "kinetics")  # kinetics | michaelis
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+
+    if plot_type == "kinetics":
+        for well_id, wd in wells_data.items():
+            if not wd.get("times") or not wd.get("od"):
+                continue
+            label = wd.get("name", well_id)
+            conc = wd.get("conc_ng_ml", "")
+            lbl = f"{label}" + (f" ({conc} ng/mL)" if conc else "")
+            times_min = [t / 60 for t in wd["times"]]
+            ax.plot(times_min, wd["od"], ".-", label=lbl, linewidth=1, markersize=3)
+            # 拟合线
+            fit = wd.get("fit")
+            if fit and fit.get("slope") is not None:
+                t_fit = np.linspace(times_min[0], times_min[-1], 100)
+                od_fit = [fit["intercept"] + fit["slope"] / 60 * t for t in t_fit]
+                ax.plot(t_fit, od_fit, "--", linewidth=1, alpha=0.6,
+                        color=ax.lines[-2].get_color() if ax.lines else None)
+        ax.set_xlabel("Time (min)")
+        ax.set_ylabel("OD")
+        ax.legend(ncol=3, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), frameon=False)
+    elif plot_type == "michaelis":
+        points = []
+        for well_id, wd in wells_data.items():
+            s = wd.get("substrate_uM")
+            v = wd.get("rate")
+            if s is not None and v is not None:
+                points.append((s, v, wd.get("name", well_id)))
+        if points:
+            points.sort()
+            sx = [p[0] for p in points]
+            sy = [p[1] for p in points]
+            ax.scatter(sx, sy, c="#4361ee")
+            for p in points:
+                ax.annotate(p[2], (p[0], p[1]), fontsize=8,
+                           textcoords="offset points", xytext=(0, 8))
+            ax.set_xlabel("Substrate (μM)")
+            ax.set_ylabel("Rate (ΔOD/min)")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return jsonify({"image": f"data:image/png;base64,{base64.b64encode(buf.read()).decode()}"})
 
 
 def open_browser():

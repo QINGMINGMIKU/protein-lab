@@ -9,6 +9,7 @@
   <button class="tab-btn" data-tab="dilution">BLI 浓度梯度</button>
   <button class="tab-btn" data-tab="copy">从实验复制</button>
   <button class="tab-btn" data-tab="weblogo">Weblogo</button>
+  <button class="tab-btn" data-tab="enzyme">酶活计算</button>
 </nav>
 
 <!-- ══════════════════════════════════════════════════ -->
@@ -170,6 +171,83 @@
       <img id="weblogoImage" style="max-width:100%" alt="Weblogo">
     </div>
   </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!--  Tab 5: 酶活计算                                    -->
+<!-- ══════════════════════════════════════════════════ -->
+<div id="tab-enzyme" class="tab-panel hidden">
+  <div class="toolbar" style="flex-wrap:wrap">
+    <input type="file" id="enzymeFile" accept=".xlsx" onchange="uploadEnzymeFile()" style="display:none">
+    <button class="btn btn-outline" onclick="document.getElementById('enzymeFile').click()">📁 上传 TECAN xlsx</button>
+    <span id="enzymeMeta" style="font-size:13px;color:#888;margin-left:8px"></span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;margin-top:12px">
+    <!-- 左侧: 96 孔板 -->
+    <div class="calc-card" style="padding:12px">
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-sm btn-outline" onclick="enzymeSelectAll()">全选</button>
+        <button class="btn btn-sm btn-outline" onclick="enzymeClearAll()">清除</button>
+        <button class="btn btn-sm btn-outline" onclick="enzymeInvertSelect()">反选</button>
+        <span style="color:#888;font-size:12px;margin-left:4px">Ctrl+点击多选</span>
+      </div>
+      <div id="plateGrid" class="plate-grid">
+        <div class="plate-corner"></div>
+        <script>for(let c=1;c<=12;c++)document.write('<div class=plate-col-hdr>'+c+'</div>');</script>
+        <script>
+          for(let r=0;r<8;r++){
+            document.write('<div class=plate-row-hdr>'+"ABCDEFGH"[r]+'</div>');
+            for(let c=1;c<=12;c++)document.write('<div class=plate-well id=well-'+"ABCDEFGH"[r]+c+' onclick=enzymeClickWell(event,"'+"ABCDEFGH"[r]+c+'")></div>');
+          }
+        </script>
+      </div>
+    </div>
+
+    <!-- 右侧: 孔详情 + 浓度设置 -->
+    <div class="calc-card" style="padding:12px">
+      <h3 style="margin-bottom:8px">孔位详情</h3>
+      <div id="wellDetail" style="font-size:13px;color:#888">选择孔位查看详情</div>
+      <div id="wellForm" class="hidden" style="margin-top:8px">
+        <label style="font-size:13px">命名 <input type="text" id="wellName" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
+        <div style="display:flex;gap:8px;align-items:end">
+          <label style="font-size:13px;flex:1">浓度
+            <input type="number" id="wellConc" step="any" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+          </label>
+          <select id="wellConcUnit" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+            <option value="ng_ml">ng/mL</option>
+            <option value="uM">μM</option>
+          </select>
+        </div>
+        <label style="font-size:13px;margin-top:4px">MW (Da) <input type="number" id="wellMW" step="any" onchange="enzymeUpdateWells()" placeholder="用于 ng/mL ↔ μM 换算" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
+        <button class="btn btn-sm btn-outline" onclick="enzymeBatchConc()" style="margin-top:6px">📐 选中孔批量设浓度</button>
+      </div>
+      <div id="wellFit" class="hidden" style="margin-top:8px;font-size:13px"></div>
+    </div>
+  </div>
+
+  <!-- 工具栏 -->
+  <div class="tab-actions" style="margin-top:12px">
+    <button class="btn btn-primary" onclick="enzymeCalcSelected()">🧪 计算选中孔</button>
+    <button class="btn btn-outline" onclick="enzymeCalcAll()">计算全部</button>
+    <button class="btn btn-outline" onclick="enzymePlot('kinetics')">📈 动力学曲线</button>
+    <button class="btn btn-outline" onclick="enzymePlot('michaelis')">📊 MM 曲线</button>
+    <button class="btn btn-outline" onclick="enzymeSaveExp()">💾 保存为实验</button>
+  </div>
+
+  <!-- 结果表 -->
+  <div class="table-scroll" style="margin-top:12px">
+    <table id="enzymeTable" class="calc-table hidden">
+      <thead><tr>
+        <th>井</th><th>命名</th><th>ng/mL</th><th>μM</th>
+        <th>ΔOD/min</th><th>R²</th><th>U/mL</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- 曲线图 -->
+  <div id="enzymePlotArea" style="margin-top:12px"></div>
 </div>
 
 {% endblock %}

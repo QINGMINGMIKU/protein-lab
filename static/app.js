@@ -1116,6 +1116,251 @@ function checkPrefill() {
 }
 
 // ═════════════════════════════════════════════════════
+//  Tab 5: Enzyme Activity
+// ═════════════════════════════════════════════════════
+
+let enzymeData = null;         // {meta, wells: {A1: {times, od}, ...}}
+let enzymeSelection = new Set();
+let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw}}
+
+async function uploadEnzymeFile() {
+  const file = document.getElementById("enzymeFile").files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const r = await fetch("/api/enzyme/parse", { method: "POST", body: form });
+    const data = await r.json();
+    if (!r.ok) { toast(data.error, true); return; }
+    enzymeData = data;
+    enzymeSelection.clear();
+    enzymeWellInfo = {};
+    renderPlate();
+    document.getElementById("enzymeMeta").textContent =
+      `${data.meta.sample || file.name} | ${data.meta.wavelength || "?"} nm | ${Object.keys(data.wells).length} wells`;
+    document.getElementById("enzymeTable").classList.add("hidden");
+    document.getElementById("enzymePlotArea").innerHTML = "";
+    toast("解析完成");
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderPlate() {
+  document.querySelectorAll(".plate-well").forEach(el => {
+    el.classList.remove("has-data", "selected");
+    el.textContent = "";
+  });
+  if (!enzymeData) return;
+  for (const [id, wd] of Object.entries(enzymeData.wells)) {
+    const el = document.getElementById("well-" + id);
+    if (!el) continue;
+    el.classList.add("has-data");
+    el.textContent = enzymeWellInfo[id]?.name || "●";
+  }
+  updatePlateSelection();
+}
+
+function updatePlateSelection() {
+  document.querySelectorAll(".plate-well").forEach(el => {
+    const id = el.id.replace("well-", "");
+    el.classList.toggle("selected", enzymeSelection.has(id));
+  });
+  updateWellForm();
+}
+
+function enzymeClickWell(e, id) {
+  if (!enzymeData) return;
+  if (e.ctrlKey || e.metaKey) {
+    enzymeSelection.has(id) ? enzymeSelection.delete(id) : enzymeSelection.add(id);
+  } else {
+    if (!enzymeSelection.has(id)) enzymeSelection.clear();
+    enzymeSelection.add(id);
+  }
+  updatePlateSelection();
+}
+
+function updateWellForm() {
+  const detail = document.getElementById("wellDetail");
+  const form = document.getElementById("wellForm");
+  const fit = document.getElementById("wellFit");
+  if (enzymeSelection.size === 0) {
+    detail.textContent = "选择孔位查看详情"; detail.classList.remove("hidden");
+    form.classList.add("hidden"); fit.classList.add("hidden");
+    return;
+  }
+  detail.classList.add("hidden");
+  form.classList.remove("hidden");
+  const ids = Array.from(enzymeSelection);
+  // 取第一个孔的 info 显示
+  const info = enzymeWellInfo[ids[0]] || {};
+  document.getElementById("wellName").value = info.name || "";
+  const unit = document.getElementById("wellConcUnit").value;
+  document.getElementById("wellConc").value =
+    unit === "ng_ml" ? (info.conc_ng_ml ?? "") : (info.conc_uM ?? "");
+  document.getElementById("wellMW").value = info.mw || "";
+  document.getElementById("wellName").placeholder = `${enzymeSelection.size} 个孔选中`;
+
+  // 拟合结果
+  if (enzymeSelection.size === 1 && enzymeWellInfo[ids[0]]?.fit) {
+    fit.classList.remove("hidden");
+    const f = enzymeWellInfo[ids[0]].fit;
+    fit.innerHTML = `ΔOD/min: <b>${f.slope?.toFixed(5) || "-"}</b> | R²: <b>${f.r2 ?? "-"}</b>`;
+  } else {
+    fit.classList.add("hidden");
+  }
+}
+
+function enzymeUpdateWells() {
+  const name = document.getElementById("wellName").value.trim();
+  const conc = parseFloat(document.getElementById("wellConc").value);
+  const unit = document.getElementById("wellConcUnit").value;
+  const mw = parseFloat(document.getElementById("wellMW").value) || null;
+
+  for (const id of enzymeSelection) {
+    if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
+    if (name) enzymeWellInfo[id].name = name;
+    enzymeWellInfo[id].mw = mw;
+    if (!isNaN(conc)) {
+      if (unit === "ng_ml") {
+        enzymeWellInfo[id].conc_ng_ml = conc;
+        enzymeWellInfo[id].conc_uM = mw ? +(conc / 1000 / mw * 1000).toFixed(4) : null;
+      } else {
+        enzymeWellInfo[id].conc_uM = conc;
+        enzymeWellInfo[id].conc_ng_ml = mw ? +(conc * mw).toFixed(1) : null;
+      }
+    }
+  }
+  renderPlate();
+}
+
+function enzymeBatchConc() {
+  if (enzymeSelection.size < 2) { toast("请选中多个孔", true); return; }
+  const start = parseFloat(prompt("起始浓度:"));
+  if (isNaN(start)) return;
+  const factor = parseFloat(prompt("每孔递增倍数（如 2 表示 2× 递增）:", "2")) || 2;
+  const unit = document.getElementById("wellConcUnit").value;
+  const mw = parseFloat(document.getElementById("wellMW").value) || null;
+  const ids = Array.from(enzymeSelection).sort();
+  ids.forEach((id, i) => {
+    const c = +(start * Math.pow(factor, i)).toFixed(4);
+    if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
+    enzymeWellInfo[id].mw = mw;
+    if (unit === "ng_ml") {
+      enzymeWellInfo[id].conc_ng_ml = c;
+      enzymeWellInfo[id].conc_uM = mw ? +(c / 1000 / mw * 1000).toFixed(4) : null;
+    } else {
+      enzymeWellInfo[id].conc_uM = c;
+      enzymeWellInfo[id].conc_ng_ml = mw ? +(c * mw).toFixed(1) : null;
+    }
+  });
+  renderPlate();
+  updateWellForm();
+  toast(`已设置 ${ids.length} 孔，起始 ${start}，${factor}× 递增`);
+}
+
+async function enzymeCalcSelected() {
+  if (!enzymeSelection.size) { toast("请先选中孔位", true); return; }
+  await enzymeCalc(Array.from(enzymeSelection));
+}
+
+async function enzymeCalcAll() {
+  if (!enzymeData) { toast("请先上传数据", true); return; }
+  await enzymeCalc(Object.keys(enzymeData.wells));
+}
+
+async function enzymeCalc(wellIds) {
+  const payload = { wells: {} };
+  for (const id of wellIds) {
+    const wd = enzymeData.wells[id];
+    if (!wd) continue;
+    payload.wells[id] = { times: wd.times, od: wd.od };
+  }
+  try {
+    const r = await API.post("/api/enzyme/fit", payload);
+    for (const [id, fit] of Object.entries(r)) {
+      if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
+      enzymeWellInfo[id].fit = fit;
+    }
+    renderEnzymeTable(wellIds);
+    updateWellForm();
+    toast("计算完成");
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderEnzymeTable(wellIds) {
+  const table = document.getElementById("enzymeTable");
+  const tbody = table.querySelector("tbody");
+  table.classList.remove("hidden");
+  tbody.innerHTML = wellIds.map(id => {
+    const info = enzymeWellInfo[id] || {};
+    const f = info.fit || {};
+    return `<tr>
+      <td>${id}</td><td>${esc(info.name || "")}</td>
+      <td>${info.conc_ng_ml ?? "-"}</td><td>${info.conc_uM ?? "-"}</td>
+      <td>${f.slope?.toFixed(5) || "-"}</td>
+      <td style="color:${f.r2 != null && f.r2 < 0.95 ? '#e74c3c' : '#333'}">${f.r2 ?? "-"}</td>
+      <td>${info.activity ?? "-"}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function enzymePlot(type) {
+  if (!enzymeData) { toast("请先上传数据", true); return; }
+  const ids = enzymeSelection.size ? Array.from(enzymeSelection) : Object.keys(enzymeData.wells);
+  const payload = { type, wells: {} };
+  for (const id of ids) {
+    const wd = enzymeData.wells[id];
+    if (!wd) continue;
+    const info = enzymeWellInfo[id] || {};
+    payload.wells[id] = {
+      times: wd.times, od: wd.od,
+      name: info.name || id,
+      conc_ng_ml: info.conc_ng_ml,
+      substrate_uM: info.conc_uM,
+      rate: info.fit?.slope,
+      fit: info.fit,
+    };
+  }
+  try {
+    const r = await API.post("/api/enzyme/plot", payload);
+    document.getElementById("enzymePlotArea").innerHTML =
+      `<img src="${r.image}" style="max-width:100%;border-radius:8px" alt="plot">`;
+  } catch (err) { toast(err.message, true); }
+}
+
+async function enzymeSaveExp() {
+  if (!enzymeData) { toast("请先上传数据", true); return; }
+  const title = prompt("实验名称:", enzymeData.meta.sample || "酶活测定");
+  if (!title) return;
+  try {
+    await API.post("/api/experiments/from-calculation", {
+      title, exp_type: "酶活测定",
+      protein_ids: [],
+      date: new Date().toISOString().slice(0, 10),
+      calc_type: "enzyme",
+      calc_params: {
+        meta: enzymeData.meta,
+        well_info: enzymeWellInfo,
+      },
+      calc_result: {},
+    });
+    toast("已保存为实验记录");
+  } catch (err) { toast(err.message, true); }
+}
+
+function enzymeSelectAll() {
+  if (!enzymeData) return;
+  enzymeSelection = new Set(Object.keys(enzymeData.wells));
+  updatePlateSelection();
+}
+function enzymeClearAll() { enzymeSelection.clear(); updatePlateSelection(); }
+function enzymeInvertSelect() {
+  if (!enzymeData) return;
+  const all = new Set(Object.keys(enzymeData.wells));
+  enzymeSelection = new Set([...all].filter(x => !enzymeSelection.has(x)));
+  updatePlateSelection();
+}
+
+// ═════════════════════════════════════════════════════
 //  Tab 4: Weblogo
 // ═════════════════════════════════════════════════════
 
