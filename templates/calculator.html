@@ -220,6 +220,17 @@
           </select>
         </div>
         <label style="font-size:13px;margin-top:4px">MW (Da) <input type="number" id="wellMW" step="any" onchange="enzymeUpdateWells()" placeholder="用于 ng/mL ↔ μM 换算" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
+        <label style="font-size:13px;margin-top:4px">关联蛋白
+          <select id="wellProtein" onchange="enzymeLinkProtein()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+            <option value="">-- 选择蛋白 --</option>
+          </select>
+        </label>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-sm enzyme-ref-btn" id="refNone" onclick="enzymeSetRef(null)">● 样品</button>
+          <button class="btn btn-sm enzyme-ref-btn" id="refBlank" onclick="enzymeSetRef('blank')">○ 空白</button>
+          <button class="btn btn-sm enzyme-ref-btn" id="refNeg" onclick="enzymeSetRef('neg')">⊖ 阴性</button>
+          <button class="btn btn-sm enzyme-ref-btn" id="refPos" onclick="enzymeSetRef('pos')">⊕ 阳性</button>
+        </div>
         <button class="btn btn-sm btn-outline" onclick="enzymeBatchConc()" style="margin-top:6px">📐 选中孔批量设浓度</button>
       </div>
       <div id="wellFit" class="hidden" style="margin-top:8px;font-size:13px"></div>
@@ -239,7 +250,7 @@
   <div class="table-scroll" style="margin-top:12px">
     <table id="enzymeTable" class="calc-table hidden">
       <thead><tr>
-        <th>井</th><th>命名</th><th>ng/mL</th><th>μM</th>
+        <th>井</th><th>命名</th><th>参考</th><th>ng/mL</th><th>μM</th>
         <th>ΔOD/min</th><th>R²</th><th>U/mL</th>
       </tr></thead>
       <tbody></tbody>

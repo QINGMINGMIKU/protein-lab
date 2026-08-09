@@ -230,5 +230,10 @@ label textarea { resize: vertical; }
 .plate-well.has-data { background: #e8f0fe; border-color: #90b4f0; color: #4361ee; font-weight: 600; }
 .plate-well.selected { background: #4361ee; color: #fff; border-color: #2c4dc4; font-weight: 700; }
 .plate-well.selected.has-data { background: #2e7d32; border-color: #1b5e20; }
+.plate-well.ref-blank { background: #fff; border-color: #ccc; }
+.plate-well.ref-neg { background: #fff3e0; border-color: #ff9800; }
+.plate-well.ref-pos { background: #e8f5e9; border-color: #4caf50; }
+.enzyme-ref-btn { padding: 3px 8px; font-size: 12px; border: 1.5px solid #d0d0d0; border-radius: 4px; background: #fff; cursor: pointer; }
+.enzyme-ref-btn.active { border-color: #4361ee; background: #4361ee; color: #fff; }
 
 @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } }

@@ -380,6 +380,7 @@ document.addEventListener("click", function (e) {
   if (tab.dataset.tab === "copy") loadCopyExpList();
   if (tab.dataset.tab === "dilution") loadBliImportExps();
   if (tab.dataset.tab === "weblogo") loadWeblogoProteins();
+  if (tab.dataset.tab === "enzyme") loadEnzymeProteinSelect();
 });
 
 // ═════════════════════════════════════════════════════
@@ -1154,7 +1155,11 @@ function renderPlate() {
     const el = document.getElementById("well-" + id);
     if (!el) continue;
     el.classList.add("has-data");
-    el.textContent = enzymeWellInfo[id]?.name || "●";
+    const info = enzymeWellInfo[id] || {};
+    el.classList.remove("ref-blank", "ref-neg", "ref-pos");
+    if (info.ref) el.classList.add("ref-" + info.ref);
+    const symbol = info.ref === "blank" ? "○" : info.ref === "neg" ? "⊖" : info.ref === "pos" ? "⊕" : "●";
+    el.textContent = info.name ? info.name.slice(0, 4) : symbol;
   }
   updatePlateSelection();
 }
@@ -1190,14 +1195,21 @@ function updateWellForm() {
   detail.classList.add("hidden");
   form.classList.remove("hidden");
   const ids = Array.from(enzymeSelection);
-  // 取第一个孔的 info 显示
   const info = enzymeWellInfo[ids[0]] || {};
   document.getElementById("wellName").value = info.name || "";
   const unit = document.getElementById("wellConcUnit").value;
   document.getElementById("wellConc").value =
     unit === "ng_ml" ? (info.conc_ng_ml ?? "") : (info.conc_uM ?? "");
   document.getElementById("wellMW").value = info.mw || "";
+  document.getElementById("wellProtein").value = info.protein_id || "";
   document.getElementById("wellName").placeholder = `${enzymeSelection.size} 个孔选中`;
+
+  // 参考孔按钮状态
+  const ref = info.ref;
+  ["None", "Blank", "Neg", "Pos"].forEach(r => {
+    const btn = document.getElementById("ref" + r);
+    if (btn) btn.classList.toggle("active", (r === "None" && !ref) || (r !== "None" && ref === r.toLowerCase()));
+  });
 
   // 拟合结果
   if (enzymeSelection.size === 1 && enzymeWellInfo[ids[0]]?.fit) {
@@ -1286,6 +1298,15 @@ async function enzymeCalc(wellIds) {
   } catch (err) { toast(err.message, true); }
 }
 
+async function loadEnzymeProteinSelect() {
+  try {
+    const proteins = await API.get("/api/proteins");
+    const sel = document.getElementById("wellProtein");
+    if (sel) sel.innerHTML = '<option value="">-- 选择蛋白 --</option>' +
+      proteins.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+  } catch (_) {}
+}
+
 function renderEnzymeTable(wellIds) {
   const table = document.getElementById("enzymeTable");
   const tbody = table.querySelector("tbody");
@@ -1293,8 +1314,10 @@ function renderEnzymeTable(wellIds) {
   tbody.innerHTML = wellIds.map(id => {
     const info = enzymeWellInfo[id] || {};
     const f = info.fit || {};
+    const refLabel = info.ref === "blank" ? "空白" : info.ref === "neg" ? "阴性" : info.ref === "pos" ? "阳性" : "";
     return `<tr>
       <td>${id}</td><td>${esc(info.name || "")}</td>
+      <td>${refLabel}</td>
       <td>${info.conc_ng_ml ?? "-"}</td><td>${info.conc_uM ?? "-"}</td>
       <td>${f.slope?.toFixed(5) || "-"}</td>
       <td style="color:${f.r2 != null && f.r2 < 0.95 ? '#e74c3c' : '#333'}">${f.r2 ?? "-"}</td>
@@ -1345,6 +1368,40 @@ async function enzymeSaveExp() {
     });
     toast("已保存为实验记录");
   } catch (err) { toast(err.message, true); }
+}
+
+async function enzymeLinkProtein() {
+  const pid = document.getElementById("wellProtein").value;
+  if (!pid) {
+    // 清除关联
+    for (const id of enzymeSelection) {
+      if (enzymeWellInfo[id]) { enzymeWellInfo[id].protein_id = null; enzymeWellInfo[id].mw = null; }
+    }
+    renderPlate();
+    return;
+  }
+  try {
+    const p = await API.get(`/api/proteins/${pid}`);
+    for (const id of enzymeSelection) {
+      if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
+      enzymeWellInfo[id].protein_id = p.id;
+      enzymeWellInfo[id].mw = p.mw;
+      enzymeWellInfo[id].name = p.name;
+    }
+    document.getElementById("wellName").value = p.name;
+    document.getElementById("wellMW").value = p.mw;
+    renderPlate();
+    toast(`已关联蛋白: ${p.name} (MW=${p.mw})`);
+  } catch (err) { toast(err.message, true); }
+}
+
+function enzymeSetRef(refType) {
+  for (const id of enzymeSelection) {
+    if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
+    enzymeWellInfo[id].ref = refType;
+  }
+  updateWellForm();
+  renderPlate();
 }
 
 function enzymeSelectAll() {
