@@ -221,9 +221,12 @@
         </div>
         <label style="font-size:13px;margin-top:4px">MW (Da) <input type="number" id="wellMW" step="any" onchange="enzymeUpdateWells()" placeholder="用于 ng/mL ↔ μM 换算" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
         <label style="font-size:13px;margin-top:4px">关联蛋白
-          <select id="wellProtein" onchange="enzymeLinkProtein()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
-            <option value="">-- 选择蛋白 --</option>
-          </select>
+          <div style="position:relative">
+            <input type="text" id="enzymeProteinSearch" placeholder="搜索蛋白..." oninput="enzymeSearchProtein()" autocomplete="off"
+                   style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%;font-size:13px">
+            <div id="enzymeProteinResults" class="search-dropdown hidden"></div>
+          </div>
+          <input type="hidden" id="wellProtein">
         </label>
         <div style="display:flex;gap:6px;margin-top:6px">
           <button class="btn btn-sm enzyme-ref-btn" id="refNone" onclick="enzymeSetRef(null)">● 样品</button>

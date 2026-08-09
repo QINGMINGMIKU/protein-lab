@@ -269,8 +269,52 @@ async function showDetail(id) {
         <dt>备注</dt><dd>${esc(p.notes || "-")}</dd>
       </dl>
       <div class="sequence-full">${esc(p.sequence)}</div>
+      <div style="margin-top:12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <strong style="font-size:13px">标签</strong>
+          <button class="btn btn-sm btn-outline" onclick="editProteinTags(${p.id})" id="editTagsBtn">✏️ 编辑</button>
+        </div>
+        <div id="proteinTagsDisplay">${renderTagChips(p.tag)}</div>
+        <div id="proteinTagsEdit" class="hidden" style="margin-top:4px">
+          <div class="tag-input" id="detailTagInput">
+            <input type="text" placeholder="输入后回车" onkeydown="handleTagKey(event, 'detailTagInput')">
+          </div>
+          <div style="display:flex;gap:6px;margin-top:4px">
+            <button class="btn btn-sm btn-primary" onclick="saveProteinTags(${p.id})">保存</button>
+            <button class="btn btn-sm btn-outline" onclick="cancelEditTags()">取消</button>
+          </div>
+        </div>
+      </div>
     `;
     document.getElementById("detailPanel").classList.remove("hidden");
+  } catch (err) { toast(err.message, true); }
+}
+
+function editProteinTags(pid) {
+  document.getElementById("proteinTagsDisplay").classList.add("hidden");
+  document.getElementById("editTagsBtn").classList.add("hidden");
+  document.getElementById("proteinTagsEdit").classList.remove("hidden");
+  document.getElementById("detailTagInput").querySelector("input").focus();
+}
+
+function cancelEditTags() {
+  document.getElementById("proteinTagsDisplay").classList.remove("hidden");
+  document.getElementById("editTagsBtn").classList.remove("hidden");
+  document.getElementById("proteinTagsEdit").classList.add("hidden");
+  document.getElementById("detailTagInput").querySelectorAll(".tag-chip").forEach(c => c.remove());
+  document.getElementById("detailTagInput").querySelector("input").value = "";
+}
+
+async function saveProteinTags(pid) {
+  const tag = getTagChips("detailTagInput");
+  try {
+    await API.put(`/api/proteins/${pid}`, { tag });
+    toast("标签已更新");
+    // 刷新显示
+    cancelEditTags();
+    showDetail(pid);
+    loadProteins().catch(() => {});
+    loadProteinSelects();
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1260,7 +1304,14 @@ function updateWellForm() {
   document.getElementById("wellConc").value =
     unit === "ng_ml" ? (info.conc_ng_ml ?? "") : (info.conc_uM ?? "");
   document.getElementById("wellMW").value = info.mw || "";
-  document.getElementById("wellProtein").value = info.protein_id || "";
+  if (info.protein_id) {
+    document.getElementById("wellProtein").value = info.protein_id;
+    const p = enzymeProteinList.find(x => x.id === info.protein_id);
+    document.getElementById("enzymeProteinSearch").value = p ? p.name : "";
+  } else {
+    document.getElementById("wellProtein").value = "";
+    document.getElementById("enzymeProteinSearch").value = "";
+  }
   document.getElementById("wellName").placeholder = `${enzymeSelection.size} 个孔选中`;
 
   // 参考孔按钮状态
@@ -1449,10 +1500,39 @@ async function enzymeSaveExp() {
   } catch (err) { toast(err.message, true); }
 }
 
-async function enzymeLinkProtein() {
-  const pid = document.getElementById("wellProtein").value;
+let enzymeProteinList = [];
+async function loadEnzymeProteinSelect() {
+  if (enzymeProteinList.length) return;
+  try {
+    enzymeProteinList = await API.get("/api/proteins");
+  } catch (_) {}
+}
+
+function enzymeSearchProtein() {
+  const q = document.getElementById("enzymeProteinSearch").value.trim().toLowerCase();
+  const dropdown = document.getElementById("enzymeProteinResults");
+  if (!q) { dropdown.classList.add("hidden"); return; }
+  const matches = enzymeProteinList.filter(p =>
+    p.name.toLowerCase().includes(q) || (p.tag || "").toLowerCase().includes(q)
+  );
+  dropdown.innerHTML = matches.length
+    ? matches.map(p => `<div class="search-item" onclick="enzymeSelectProtein(${p.id},'${esc(p.name)}')">
+        <strong>${esc(p.name)}</strong><span style="color:#888;font-size:11px">${p.mw?.toLocaleString()} Da</span>
+      </div>`).join("")
+    : '<div class="search-item" style="color:#888">无匹配</div>';
+  dropdown.classList.remove("hidden");
+}
+
+function enzymeSelectProtein(pid, name) {
+  document.getElementById("wellProtein").value = pid;
+  document.getElementById("enzymeProteinSearch").value = name;
+  document.getElementById("enzymeProteinResults").classList.add("hidden");
+  enzymeLinkProtein(pid);
+}
+
+async function enzymeLinkProtein(pid) {
+  pid = pid || document.getElementById("wellProtein").value;
   if (!pid) {
-    // 清除关联
     for (const id of enzymeSelection) {
       if (enzymeWellInfo[id]) { enzymeWellInfo[id].protein_id = null; enzymeWellInfo[id].mw = null; }
     }
@@ -1465,14 +1545,22 @@ async function enzymeLinkProtein() {
       if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
       enzymeWellInfo[id].protein_id = p.id;
       enzymeWellInfo[id].mw = p.mw;
-      enzymeWellInfo[id].name = p.name;
+      if (!enzymeWellInfo[id].name) enzymeWellInfo[id].name = p.name;
     }
     document.getElementById("wellName").value = p.name;
     document.getElementById("wellMW").value = p.mw;
     renderPlate();
-    toast(`已关联蛋白: ${p.name} (MW=${p.mw})`);
+    toast(`已关联 ${enzymeSelection.size} 个孔到蛋白: ${p.name}`);
   } catch (err) { toast(err.message, true); }
 }
+
+// 关闭搜索下拉
+document.addEventListener("click", function (e) {
+  if (!e.target.closest("#enzymeProteinSearch") && !e.target.closest("#enzymeProteinResults")) {
+    const d = document.getElementById("enzymeProteinResults");
+    if (d) d.classList.add("hidden");
+  }
+});
 
 function enzymeSetRef(refType) {
   for (const id of enzymeSelection) {
