@@ -14,9 +14,18 @@
   <button class="btn btn-outline" onclick="showImportModal()">📥 FASTA 导入</button>
 </div>
 
+<!-- ── 批量操作栏 ── -->
+<div id="bulkBar" class="bulk-bar hidden">
+  <span class="bulk-count" id="bulkCount">已选 0 项</span>
+  <button class="btn btn-sm btn-danger" onclick="batchDeleteProteins()">🗑 删除选中</button>
+  <button class="btn btn-sm btn-outline" onclick="deleteAllProteins()">全部删除</button>
+  <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
+</div>
+
 <table id="proteinTable" class="datatable">
   <thead>
     <tr>
+      <th style="width:36px"><input type="checkbox" id="selectAllProteins" onchange="toggleSelectAllProteins(this)" title="全选"></th>
       <th>名称</th>
       <th>MW (Da)</th>
       <th>ε_ox</th>

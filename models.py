@@ -142,6 +142,15 @@ def protein_delete(protein_id: int) -> bool:
     return True
 
 
+def protein_delete_all() -> int:
+    conn = get_db()
+    cur = conn.execute("DELETE FROM proteins")
+    conn.commit()
+    count = cur.rowcount
+    conn.close()
+    return count
+
+
 # ── Experiments CRUD ───────────────────────────────────────
 
 def _set_exp_proteins(conn: sqlite3.Connection, experiment_id: int,
@@ -268,6 +277,15 @@ def exp_delete(exp_id: int) -> bool:
     conn.commit()
     conn.close()
     return True
+
+
+def exp_delete_all() -> int:
+    conn = get_db()
+    cur = conn.execute("DELETE FROM experiments")
+    conn.commit()
+    count = cur.rowcount
+    conn.close()
+    return count
 
 
 # ── Init on import ─────────────────────────────────────────

@@ -10,5 +10,9 @@ echo.
 echo   Starting... browser will open shortly
 echo   Close this window to stop the server
 echo.
-python app.py
+if exist ".venv\Scripts\python.exe" (
+    .venv\Scripts\python app.py
+) else (
+    python app.py
+)
 pause

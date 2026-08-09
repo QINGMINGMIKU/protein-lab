@@ -170,6 +170,14 @@ label textarea { resize: vertical; }
 .cell-input { width: 80px; padding: 6px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 13px; text-align: center; }
 .cell-input:focus { border-color: #4361ee; outline: none; }
 
+/* ── Bulk action bar ───────────────────────────────── */
+.bulk-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; margin-bottom: 8px;
+  background: #fff3cd; border: 1px solid #e0c878; border-radius: 6px;
+}
+.bulk-count { font-size: 13px; font-weight: 600; color: #856404; }
+
 /* ── Toast ─────────────────────────────────────────── */
 .toast {
   position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
@@ -178,4 +186,5 @@ label textarea { resize: vertical; }
   box-shadow: 0 4px 12px rgba(0,0,0,.2);
 }
 .toast.error { background: #c0392b; }
+.toast .undo-link { color: #ffd700; cursor: pointer; font-weight: 600; margin-left: 8px; text-decoration: underline; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } }

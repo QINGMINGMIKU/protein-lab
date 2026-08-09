@@ -20,9 +20,18 @@
   </select>
 </div>
 
+<!-- ── 批量操作栏 ── -->
+<div id="expBulkBar" class="bulk-bar hidden">
+  <span class="bulk-count" id="expBulkCount">已选 0 项</span>
+  <button class="btn btn-sm btn-danger" onclick="batchDeleteExperiments()">🗑 删除选中</button>
+  <button class="btn btn-sm btn-outline" onclick="deleteAllExperiments()">全部删除</button>
+  <button class="btn btn-sm" onclick="clearExpSelection()">取消选择</button>
+</div>
+
 <table id="expTable" class="datatable">
   <thead>
     <tr>
+      <th style="width:36px"><input type="checkbox" id="selectAllExps" onchange="toggleSelectAllExps(this)" title="全选"></th>
       <th>日期</th>
       <th>标题</th>
       <th>类型</th>

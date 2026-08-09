@@ -1,60 +1,36 @@
 """
-蛋白质计算核心：MW、消光系数、浓度、BLI 稀释规划
+蛋白质计算核心：MW、消光系数（Biopython ProtParam）、浓度、BLI 稀释规划
 """
 from dataclasses import dataclass
 from typing import List
 
-# 氨基酸分子量 (Da)
-AA_MW = {
-    "A": 71.08, "R": 156.19, "N": 114.10, "D": 115.09,
-    "C": 103.14, "E": 129.12, "Q": 128.13, "G": 57.05,
-    "H": 137.14, "I": 113.16, "L": 113.16, "K": 128.17,
-    "M": 131.19, "F": 147.18, "P": 97.12,  "S": 87.08,
-    "T": 101.11, "W": 186.21, "Y": 163.18, "V": 99.13,
-}
-WATER_MW = 18.015
-
-# Pace et al. (1995) — 天然蛋白水溶液，与 Expasy ProtParam 一致
-# ε₂₈₀ = #Trp×5500 + #Tyr×1490 + #cystine×125
-# 游离 Cys (-SH) 在 280nm 几乎不吸收；二硫键 (-S-S-) 每对贡献 125
-EXT_W = 5500   # Trp
-EXT_Y = 1490   # Tyr
-EXT_SS = 125   # 二硫键 (-S-S-), 每对胱氨酸
+from Bio.SeqUtils.ProtParam import ProteinAnalysis
 
 
 def sanitize_seq(sequence: str) -> str:
     """清洗序列：去换行/空格/终止符/非氨基酸字符"""
     import re
     seq = sequence.upper()
-    # 移除空白和换行
     seq = re.sub(r'\s+', '', seq)
-    # 移除终止符 *
     seq = seq.replace('*', '')
-    # 只保留标准 20 种氨基酸
     seq = re.sub(r'[^ACDEFGHIKLMNPQRSTVWY]', '', seq)
     return seq
 
 
 def calc_mw(sequence: str) -> float:
-    """蛋白质分子量 (Da)
-    AA_MW 是残基质量（已扣除肽键水），只需加一分子末端水 (H + OH)
-    与 Expasy ProtParam / Compute pI/Mw 一致
-    """
-    seq = sanitize_seq(sequence)
-    total = sum(AA_MW.get(aa, 0) for aa in seq)
-    return total + WATER_MW  # 末端 H + OH
+    """蛋白质分子量 (Da) — 使用 Biopython ProtParam"""
+    return ProteinAnalysis(sanitize_seq(sequence)).molecular_weight()
 
 
 def calc_ext_coeff(sequence: str) -> dict:
-    """计算还原态和氧化态消光系数"""
+    """计算还原态和氧化态消光系数 — 使用 Biopython ProtParam (Pace et al. 1995)"""
     seq = sanitize_seq(sequence)
+    pa = ProteinAnalysis(seq)
+    ext_red, ext_ox = pa.molar_extinction_coefficient()  # → (reduced, oxidized)
+    mw = pa.molecular_weight()
     nW = seq.count("W")
     nY = seq.count("Y")
     nC = seq.count("C")
-    ext_red = nW * EXT_W + nY * EXT_Y                  # 游离 Cys 不贡献
-    ext_ox = nW * EXT_W + nY * EXT_Y + (nC // 2) * EXT_SS  # 每对二硫键 +125
-    mw = calc_mw(seq)
-    # abs_0_1pct: 1 mg/mL (0.1% w/v) 的 A280, 氧化态为默认
     abs_0_1pct = ext_ox / mw if mw > 0 else 0
     return {
         "mw": round(mw, 1),

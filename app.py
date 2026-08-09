@@ -20,6 +20,19 @@ from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitiz
 
 app = Flask(__name__)
 
+# ── Undo 栈（内存中，最多 20 条）──────────────────────────
+_undo_stack = []
+
+
+def _push_undo(item_type: str, data: dict):
+    _undo_stack.append({"type": item_type, "data": data})
+    if len(_undo_stack) > 20:
+        _undo_stack.pop(0)
+
+
+def _pop_undo():
+    return _undo_stack.pop() if _undo_stack else None
+
 
 # ═══════════════════════════════════════════════════════════
 #  页面路由
@@ -43,6 +56,11 @@ def page_calculator():
 @app.route("/experiments")
 def page_experiments():
     return render_template("experiments.html")
+
+
+@app.route("/weblogo")
+def page_weblogo():
+    return render_template("weblogo.html")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -112,8 +130,33 @@ def api_protein_update(pid):
 
 @app.route("/api/proteins/<int:pid>", methods=["DELETE"])
 def api_protein_delete(pid):
+    p = models.protein_get(pid)
+    if p:
+        _push_undo("protein", dict(p))
     models.protein_delete(pid)
     return jsonify({"ok": True})
+
+
+@app.route("/api/proteins/batch-delete", methods=["POST"])
+def api_protein_batch_delete():
+    ids = request.get_json().get("ids", [])
+    deleted = 0
+    for pid in ids:
+        p = models.protein_get(int(pid))
+        if p:
+            _push_undo("protein", dict(p))
+            models.protein_delete(int(pid))
+            deleted += 1
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.route("/api/proteins/delete-all", methods=["POST"])
+def api_protein_delete_all():
+    proteins = models.protein_list()
+    for p in proteins:
+        _push_undo("protein", dict(p))
+    models.protein_delete_all()
+    return jsonify({"ok": True, "deleted": len(proteins)})
 
 
 @app.route("/api/proteins/refresh-all", methods=["POST"])
@@ -352,8 +395,75 @@ def api_exp_update_proteins(eid):
 
 @app.route("/api/experiments/<int:eid>", methods=["DELETE"])
 def api_exp_delete(eid):
+    e = models.exp_get(eid)
+    if e:
+        _push_undo("experiment", dict(e))
     models.exp_delete(eid)
     return jsonify({"ok": True})
+
+
+@app.route("/api/experiments/batch-delete", methods=["POST"])
+def api_exp_batch_delete():
+    ids = request.get_json().get("ids", [])
+    deleted = 0
+    for eid in ids:
+        e = models.exp_get(int(eid))
+        if e:
+            _push_undo("experiment", dict(e))
+            models.exp_delete(int(eid))
+            deleted += 1
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.route("/api/experiments/delete-all", methods=["POST"])
+def api_exp_delete_all():
+    exps = models.exp_list(limit=9999)
+    for e in exps:
+        _push_undo("experiment", dict(e))
+    models.exp_delete_all()
+    return jsonify({"ok": True, "deleted": len(exps)})
+
+
+# ═══════════════════════════════════════════════════════════
+#  Undo API
+# ═══════════════════════════════════════════════════════════
+
+@app.route("/api/undo/status", methods=["GET"])
+def api_undo_status():
+    return jsonify({"count": len(_undo_stack)})
+
+
+@app.route("/api/undo", methods=["POST"])
+def api_undo_restore():
+    item = _pop_undo()
+    if not item:
+        return jsonify({"error": "无撤销项"}), 404
+    data = item["data"]
+    if item["type"] == "protein":
+        existing = models.protein_get_by_name(data["name"])
+        if existing:
+            return jsonify({"error": f"蛋白 '{data['name']}' 已存在，无法撤销"}), 409
+        models.protein_create(
+            name=data["name"], sequence=data["sequence"],
+            tag=data.get("tag", ""), notes=data.get("notes", ""),
+            mw=data.get("mw", 0), nW=data.get("nW", 0),
+            nY=data.get("nY", 0), nC=data.get("nC", 0),
+            ext_red=data.get("ext_red", 0), ext_ox=data.get("ext_ox", 0),
+            abs_0_1pct=data.get("abs_0_1pct", 0),
+        )
+        return jsonify({"ok": True, "restored": data["name"]})
+    elif item["type"] == "experiment":
+        protein_ids = data.get("protein_ids", [])
+        models.exp_create(
+            title=data["title"], exp_type=data["exp_type"],
+            protein_ids=protein_ids,
+            date=data.get("date", ""),
+            params=data.get("params", {}),
+            results=data.get("results", {}),
+            notes=data.get("notes", ""),
+        )
+        return jsonify({"ok": True, "restored": data["title"]})
+    return jsonify({"error": "未知类型"}), 400
 
 
 @app.route("/api/experiments/<int:eid>/export", methods=["GET"])
@@ -500,6 +610,59 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
 # ═══════════════════════════════════════════════════════════
 #  启动
 # ═══════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════
+#  Weblogo API
+# ═══════════════════════════════════════════════════════════
+
+@app.route("/api/weblogo", methods=["POST"])
+def api_weblogo():
+    """用 logomaker 生成序列标识图，返回 base64 PNG"""
+    import base64
+    import pandas as pd
+    import logomaker
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    data = request.get_json()
+    sequences = data.get("sequences", [])
+    color_scheme = data.get("color_scheme", "chemistry")
+
+    if not sequences or len(sequences) < 2:
+        return jsonify({"error": "至少需要 2 条对齐序列"}), 400
+
+    n_pos = len(sequences[0])
+    for s in sequences:
+        if len(s) != n_pos:
+            return jsonify({"error": "所有序列必须等长（已对齐）"}), 400
+
+    # 构建频率矩阵
+    chars = sorted(set("".join(sequences)))
+    counts = {c: [0] * n_pos for c in chars}
+    for seq in sequences:
+        for i, c in enumerate(seq):
+            if c in counts:
+                counts[c][i] += 1
+
+    counts_df = pd.DataFrame(counts)
+    prob_df = counts_df.div(counts_df.sum(axis=1), axis=0)
+    info_df = logomaker.transform_matrix(prob_df, from_type="probability", to_type="information")
+
+    # 生成图表
+    fig, ax = plt.subplots(figsize=(max(6, n_pos * 0.4), 2.5))
+    logo = logomaker.Logo(info_df, ax=ax, color_scheme=color_scheme)
+    logo.style_xticks(anchor=0, spacing=1)
+    ax.set_ylabel("bits")
+
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode()
+
+    return jsonify({"image": f"data:image/png;base64,{img_b64}", "positions": n_pos})
+
 
 def open_browser():
     import time

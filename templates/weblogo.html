@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>Weblogo</h1>
+<p style="color:#888;font-size:14px;margin-bottom:16px">粘贴对齐的氨基酸序列，生成序列标识图（Sequence Logo）。每条序列一行，必须等长。</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+  <div>
+    <label>对齐序列 <span style="color:#888;font-weight:400">（每行一条，等长）</span>
+      <textarea id="logoSequences" rows="12" placeholder="MAPIWTRKSYQGC&#10;MAPFWTRKSYQGC&#10;MAPIWTRKAYQGC&#10;MAPIWTRKSHQGC&#10;MTPIWTRKSYQGC" style="font-family:Consolas,monospace;font-size:13px"></textarea>
+    </label>
+    <label>颜色方案
+      <select id="logoColorScheme">
+        <option value="chemistry">chemistry</option>
+        <option value="hydrophobicity">hydrophobicity</option>
+        <option value="charge">charge</option>
+        <option value="classic">classic</option>
+      </select>
+    </label>
+    <button class="btn btn-primary" onclick="generateLogo()" style="margin-top:8px">生成 Logo</button>
+  </div>
+
+  <div id="logoResult" class="hidden" style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span id="logoInfo" style="font-size:13px;color:#888"></span>
+      <button class="btn btn-sm btn-outline" onclick="downloadLogo()">📥 下载 PNG</button>
+    </div>
+    <img id="logoImage" style="width:100%" alt="Sequence Logo">
+  </div>
+</div>
+
+<script>
+let lastLogoData = null;
+
+async function generateLogo() {
+  const text = document.getElementById("logoSequences").value.trim();
+  if (!text) { toast("请粘贴对齐序列", true); return; }
+
+  const sequences = text.split("\n").map(s => s.trim().toUpperCase()).filter(s => s);
+  if (sequences.length < 2) { toast("至少需要 2 条序列", true); return; }
+
+  const n = sequences[0].length;
+  for (const s of sequences) {
+    if (s.length !== n) { toast("所有序列必须等长（已对齐）", true); return; }
+  }
+
+  try {
+    const color = document.getElementById("logoColorScheme").value;
+    const r = await API.post("/api/weblogo", { sequences, color_scheme: color });
+    lastLogoData = r.image;
+    document.getElementById("logoImage").src = r.image;
+    document.getElementById("logoInfo").textContent = `${sequences.length} 条序列, ${r.positions} 个位置`;
+    document.getElementById("logoResult").classList.remove("hidden");
+  } catch (err) { toast(err.message, true); }
+}
+
+function downloadLogo() {
+  if (!lastLogoData) return;
+  const a = document.createElement("a");
+  a.href = lastLogoData;
+  a.download = "weblogo.png";
+  a.click();
+}
+
+function toast(msg, error) {
+  const el = document.createElement("div");
+  el.className = "toast" + (error ? " error" : "");
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+</script>
+
+{% endblock %}

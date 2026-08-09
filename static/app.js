@@ -46,12 +46,19 @@ function esc(s) {
 function escAttr(s) { return esc(s); }
 
 // ── Toast ────────────────────────────────────────────
-function toast(msg, error) {
+function toast(msg, error, undoAction) {
   const el = document.createElement("div");
   el.className = "toast" + (error ? " error" : "");
   el.textContent = msg;
+  if (undoAction) {
+    const link = document.createElement("span");
+    link.className = "undo-link";
+    link.textContent = "撤销";
+    link.onclick = () => { undoAction(); el.remove(); };
+    el.appendChild(link);
+  }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2500);
+  setTimeout(() => el.remove(), undoAction ? 8000 : 2500);
 }
 
 // ── Delegated click handler ──────────────────────────
@@ -83,6 +90,7 @@ async function loadProteins() {
     const proteins = await API.get(`/api/proteins?q=${encodeURIComponent(q)}`);
     tbody.innerHTML = proteins.map(p => `
       <tr>
+        <td><input type="checkbox" class="protein-check" value="${p.id}" onchange="updateBulkBar()"></td>
         <td><span class="clickable" data-action="show-detail" data-id="${p.id}">${esc(p.name)}</span></td>
         <td>${p.mw ? p.mw.toLocaleString() : "-"}</td>
         <td>${p.ext_ox || "-"}</td>
@@ -847,6 +855,7 @@ async function loadExperiments() {
     const exps = await API.get(`/api/experiments?type=${encodeURIComponent(type)}`);
     tbody.innerHTML = exps.map(e => `
       <tr>
+        <td><input type="checkbox" class="exp-check" value="${e.id}" onchange="updateExpBulkBar()"></td>
         <td>${e.date || "-"}</td>
         <td><span class="clickable" data-action="show-exp" data-id="${e.id}">${esc(e.title)}</span></td>
         <td><span class="badge">${esc(e.exp_type)}</span></td>
@@ -992,6 +1001,134 @@ function checkPrefill() {
       });
     }, 300);
   }
+}
+
+// ═════════════════════════════════════════════════════
+//  Bulk actions & Undo
+// ═════════════════════════════════════════════════════
+
+// ── Proteins bulk ─────────────────────────────────────
+function toggleSelectAllProteins(el) {
+  document.querySelectorAll(".protein-check").forEach(cb => cb.checked = el.checked);
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const checked = document.querySelectorAll(".protein-check:checked");
+  const bar = document.getElementById("bulkBar");
+  const count = document.getElementById("bulkCount");
+  if (!bar || !count) return;
+  if (checked.length) {
+    bar.classList.remove("hidden");
+    count.textContent = `已选 ${checked.length} 项`;
+  } else {
+    bar.classList.add("hidden");
+  }
+  // 同步全选框
+  const all = document.querySelectorAll(".protein-check");
+  const selAll = document.getElementById("selectAllProteins");
+  if (selAll) selAll.checked = all.length > 0 && checked.length === all.length;
+}
+
+function clearSelection() {
+  document.querySelectorAll(".protein-check").forEach(cb => cb.checked = false);
+  document.getElementById("selectAllProteins").checked = false;
+  updateBulkBar();
+}
+
+async function batchDeleteProteins() {
+  const checked = document.querySelectorAll(".protein-check:checked");
+  if (!checked.length) return;
+  if (!confirm(`确定删除选中的 ${checked.length} 个蛋白？`)) return;
+  const ids = Array.from(checked).map(cb => parseInt(cb.value));
+  try {
+    const r = await API.post("/api/proteins/batch-delete", { ids });
+    toast(`已删除 ${r.deleted} 个蛋白`, false, () => undoRestore());
+    clearSelection();
+    loadProteins().catch(() => {});
+    loadProteinSelects();
+    closeDetail();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function deleteAllProteins() {
+  if (!confirm("⚠️ 确定删除全部蛋白？此操作可以撤销。")) return;
+  if (prompt("输入「全部删除」确认:") !== "全部删除") { toast("已取消", true); return; }
+  try {
+    const r = await API.post("/api/proteins/delete-all", {});
+    toast(`已删除全部 ${r.deleted} 个蛋白`, false, () => undoRestore());
+    document.getElementById("selectAllProteins").checked = false;
+    loadProteins().catch(() => {});
+    loadProteinSelects();
+    closeDetail();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ── Experiments bulk ──────────────────────────────────
+function toggleSelectAllExps(el) {
+  document.querySelectorAll(".exp-check").forEach(cb => cb.checked = el.checked);
+  updateExpBulkBar();
+}
+
+function updateExpBulkBar() {
+  const checked = document.querySelectorAll(".exp-check:checked");
+  const bar = document.getElementById("expBulkBar");
+  const count = document.getElementById("expBulkCount");
+  if (!bar || !count) return;
+  if (checked.length) {
+    bar.classList.remove("hidden");
+    count.textContent = `已选 ${checked.length} 项`;
+  } else {
+    bar.classList.add("hidden");
+  }
+  const all = document.querySelectorAll(".exp-check");
+  const selAll = document.getElementById("selectAllExps");
+  if (selAll) selAll.checked = all.length > 0 && checked.length === all.length;
+}
+
+function clearExpSelection() {
+  document.querySelectorAll(".exp-check").forEach(cb => cb.checked = false);
+  document.getElementById("selectAllExps").checked = false;
+  updateExpBulkBar();
+}
+
+async function batchDeleteExperiments() {
+  const checked = document.querySelectorAll(".exp-check:checked");
+  if (!checked.length) return;
+  if (!confirm(`确定删除选中的 ${checked.length} 条实验？`)) return;
+  const ids = Array.from(checked).map(cb => parseInt(cb.value));
+  try {
+    const r = await API.post("/api/experiments/batch-delete", { ids });
+    toast(`已删除 ${r.deleted} 条实验`, false, () => undoRestore());
+    clearExpSelection();
+    loadExperiments().catch(() => {});
+  } catch (err) { toast(err.message, true); }
+}
+
+async function deleteAllExperiments() {
+  if (!confirm("⚠️ 确定删除全部实验？此操作可以撤销。")) return;
+  if (prompt("输入「全部删除」确认:") !== "全部删除") { toast("已取消", true); return; }
+  try {
+    const r = await API.post("/api/experiments/delete-all", {});
+    toast(`已删除全部 ${r.deleted} 条实验`, false, () => undoRestore());
+    document.getElementById("selectAllExps").checked = false;
+    loadExperiments().catch(() => {});
+  } catch (err) { toast(err.message, true); }
+}
+
+// ── Undo ──────────────────────────────────────────────
+async function undoRestore() {
+  try {
+    const r = await API.post("/api/undo", {});
+    if (r.ok) {
+      toast(`已撤销: ${r.restored} 已恢复`);
+      loadProteins().catch(() => {});
+      loadExperiments().catch(() => {});
+      loadProteinSelects();
+    } else {
+      toast(r.error || "无法撤销", true);
+    }
+  } catch (err) { toast("撤销失败: " + err.message, true); }
 }
 
 // ═════════════════════════════════════════════════════
