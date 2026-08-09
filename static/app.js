@@ -1278,9 +1278,14 @@ function updatePlateSelection() {
 function enzymeClickWell(e, id) {
   if (!enzymeData) return;
   if (e.ctrlKey || e.metaKey) {
+    // Ctrl+点击: 追加/移除，不影响其他选中
     enzymeSelection.has(id) ? enzymeSelection.delete(id) : enzymeSelection.add(id);
+  } else if (enzymeSelection.has(id) && enzymeSelection.size === 1) {
+    // 单击已选中的唯一孔 → 取消选择
+    enzymeSelection.delete(id);
   } else {
-    if (!enzymeSelection.has(id)) enzymeSelection.clear();
+    // 单击未选中的孔 → 清空并选中
+    enzymeSelection.clear();
     enzymeSelection.add(id);
   }
   updatePlateSelection();
