@@ -93,7 +93,7 @@
 <!--  酶活测定                                      -->
 <!-- ═══════════════════════════════════════════════ -->
 {% if calc_type == "enzyme" %}
-{% set wells = params.get("wells", {}) %}
+{% set wells = params.get("wells") or params.get("well_info") or {} %}
 {% set emeta = params.get("meta", {}) %}
 <div class="calc-card" style="margin-bottom:20px">
   <h2>酶活测定</h2>
