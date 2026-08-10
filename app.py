@@ -76,11 +76,6 @@ def page_experiment_detail(eid):
     return render_template("experiment_detail.html", exp=e)
 
 
-@app.route("/weblogo")
-def page_weblogo():
-    return render_template("weblogo.html")
-
-
 # ═══════════════════════════════════════════════════════════
 #  Proteins API
 # ═══════════════════════════════════════════════════════════
