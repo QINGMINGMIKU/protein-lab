@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "protein-lab": {
+      "type": "stdio",
+      "command": "C:\\WorkSpace\\WeeklyReport\\protein_lab\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\WorkSpace\\WeeklyReport\\protein_lab\\mcp_server.py"
+      ],
+      "env": {}
+    }
+  }
+}
