@@ -14,13 +14,8 @@ jobs:
         include:
           - os: windows-latest
             zip: protein-lab-windows.zip
-            pkg_shell: pwsh
-            pkg_cmd: cd dist && Compress-Archive -Path protein_lab -DestinationPath protein-lab-windows.zip
           - os: macos-latest
             zip: protein-lab-macos.zip
-            pkg_shell: bash
-            # 用原生 zip 保留执行权限（macOS 二进制解压后仍需可执行）
-            pkg_cmd: cd dist && zip -r protein-lab-macos.zip protein_lab
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -35,9 +30,16 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller protein_lab.spec --noconfirm
 
+      # 注意：shell 字段不能用 ${{ matrix.* }}（GitHub 规范限制），固定 pwsh（双平台预装）。
+      # Windows 用 Compress-Archive；macOS 用原生 zip 以保留二进制执行位。
       - name: Package onedir to zip
-        shell: ${{ matrix.pkg_shell }}
-        run: ${{ matrix.pkg_cmd }}
+        shell: pwsh
+        env:
+          ZIP_NAME: ${{ matrix.zip }}
+        run: |
+          cd dist
+          if ($env:RUNNER_OS -eq 'Windows') { Compress-Archive -Path protein_lab -DestinationPath $env:ZIP_NAME }
+          else { & zip -r $env:ZIP_NAME protein_lab }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
