@@ -139,6 +139,17 @@
             <option value="classic">classic</option>
           </select>
         </label>
+        <label style="font-size:13px;margin-top:4px">位点区间（可选）
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+            <input type="number" id="weblogoStart" min="1" placeholder="起始" style="flex:1;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+            <span style="color:#888">–</span>
+            <input type="number" id="weblogoEnd" min="1" placeholder="结束" style="flex:1;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+          </div>
+        </label>
+        <label style="font-size:13px;margin-top:4px">多聚体
+          <span style="font-weight:400;color:#888">（二聚体填 2，自动裁剪为单亚基）</span>
+          <input type="number" id="weblogoMultimer" min="1" value="1" style="width:70px;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-top:4px">
+        </label>
       </div>
       <button class="btn btn-primary" onclick="generateWeblogo()" style="width:100%;margin-top:10px">生成 Logo</button>
       <button class="btn btn-outline" onclick="saveWeblogoExp()" id="weblogoSaveBtn" style="width:100%;margin-top:6px;display:none">💾 保存为实验</button>

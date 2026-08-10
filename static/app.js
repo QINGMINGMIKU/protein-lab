@@ -1838,13 +1838,19 @@ async function generateWeblogo() {
 
   try {
     const color = document.getElementById("weblogoColor").value;
-    const r = await API.post("/api/weblogo", { sequences, color_scheme: color });
+    const start = parseInt(document.getElementById("weblogoStart").value) || null;
+    const end = parseInt(document.getElementById("weblogoEnd").value) || null;
+    const multimer = parseInt(document.getElementById("weblogoMultimer").value) || 1;
+    const r = await API.post("/api/weblogo", { sequences, color_scheme: color, start, end, multimer });
     weblogoLastImage = r.image;
     weblogoLastProteins = selected.map(p => ({ id: p.id, name: p.name }));
 
     document.getElementById("weblogoImage").src = r.image;
+    const notes = [];
+    if (multimer > 1) notes.push(`${multimer} 聚体裁剪`);
+    if (start || end) notes.push(`位点 ${r.range ? r.range[0] + "–" + r.range[1] : ""}`);
     document.getElementById("weblogoInfo").textContent =
-      `${selected.length} 条序列, ${r.positions} 个位置`;
+      `${selected.length} 条序列, ${r.positions} 个位置` + (notes.length ? " (" + notes.join(", ") + ")" : "");
     document.getElementById("weblogoResult").classList.remove("hidden");
     document.getElementById("weblogoSaveBtn").style.display = "";
     toast("Weblogo 已生成");

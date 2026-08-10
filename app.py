@@ -719,14 +719,37 @@ def api_weblogo():
     data = request.get_json()
     sequences = data.get("sequences", [])
     color_scheme = data.get("color_scheme", "chemistry")
+    multimer = int(data.get("multimer") or 1)
+    start = data.get("start")
+    end = data.get("end")
 
     if not sequences or len(sequences) < 2:
         return jsonify({"error": "至少需要 2 条对齐序列"}), 400
+    if multimer < 1:
+        return jsonify({"error": "多聚体数需 ≥ 1"}), 400
 
     n_pos = len(sequences[0])
     for s in sequences:
         if len(s) != n_pos:
             return jsonify({"error": "所有序列必须等长（已对齐）"}), 400
+
+    # 多聚体模式：序列为 N 个相同亚基串联，裁剪为单亚基
+    if multimer > 1:
+        if n_pos % multimer != 0:
+            return jsonify({"error": f"序列长度 {n_pos} 不能被多聚体数 {multimer} 整除"}), 400
+        n_pos //= multimer
+        sequences = [s[:n_pos] for s in sequences]
+
+    # 位点区间（1-based 闭区间）
+    offset = 0
+    if start is not None or end is not None:
+        lo = int(start) if start is not None else 1
+        hi = int(end) if end is not None else n_pos
+        if lo < 1 or hi > n_pos or lo > hi:
+            return jsonify({"error": f"位点区间超出范围（1--{n_pos}）"}), 400
+        sequences = [s[lo - 1:hi] for s in sequences]
+        n_pos = hi - lo + 1
+        offset = lo - 1
 
     # 构建频率矩阵
     chars = sorted(set("".join(sequences)))
@@ -761,11 +784,11 @@ def api_weblogo():
         logomaker.Logo(sub, ax=axes[i], color_scheme=color_scheme)
         axes[i].set_xlim(start - 0.5, start + blk - 0.5)
         axes[i].set_xticks(range(start, start + blk))
-        axes[i].set_xticklabels([str(x + 1) for x in range(start, start + blk)], fontsize=8)
+        axes[i].set_xticklabels([str(offset + x + 1) for x in range(start, start + blk)], fontsize=8)
         axes[i].set_ylim(0, ymax)
         axes[i].set_ylabel("bits")
         if n_rows > 1:
-            axes[i].set_title(f"位置 {start + 1}--{start + blk}", fontsize=10, color="#555", pad=8)
+            axes[i].set_title(f"位置 {offset + start + 1}--{offset + start + blk}", fontsize=10, color="#555", pad=8)
 
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
@@ -773,7 +796,11 @@ def api_weblogo():
     buf.seek(0)
     img_b64 = base64.b64encode(buf.read()).decode()
 
-    return jsonify({"image": f"data:image/png;base64,{img_b64}", "positions": n_pos})
+    return jsonify({
+        "image": f"data:image/png;base64,{img_b64}",
+        "positions": n_pos,
+        "range": [offset + 1, offset + n_pos],
+    })
 
 
 # ═══════════════════════════════════════════════════════════
