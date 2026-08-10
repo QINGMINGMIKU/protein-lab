@@ -28,15 +28,21 @@
 
 ```
 protein_lab/
-├── app.py              Flask 主应用
+├── app.py              Flask 主应用（含 --mcp / --import-db 入口分发）
 ├── calculators.py      计算核心（MW / ε / 浓度 / 稀释 / 酶活拟合）
-├── models.py           SQLite 数据模型
+├── models.py           SQLite 数据模型（DB 路径走 paths.app_base_dir()）
 ├── mcp_server.py       MCP stdio 服务器
-├── requirements.txt    依赖
+├── paths.py            路径解析（PyInstaller 打包与 dev 双模式）
+├── fonts.py            CJK 字体解析 + matplotlib 中文配置
+├── protein_lab.spec    PyInstaller 打包配置
+├── requirements.txt    运行时依赖
+├── requirements-build.txt  打包依赖（pyinstaller）
 ├── 启动.bat            一键启动（Windows）
 ├── 启动.command        一键启动（macOS）
 ├── templates/          Jinja2 页面模板
 ├── static/             JS + CSS
+├── fonts/              Noto Sans SC（OFL，打包进二进制）
+├── .github/workflows/  CI 双平台构建
 ├── backups/            数据库自动备份
 └── protein_lab.db     自动生成，首次运行创建
 ```
@@ -49,6 +55,9 @@ protein_lab/
 - **undo 栈是内存态**（app.py `_undo_stack`，上限 20 条），重启即失。
 - **跨工作区字体依赖**：weblogo 与酶活绘图读 `../fonts/simhei.ttf`（即上级 `WeeklyReport/fonts/`），缺失时中文字体静默回退。这是 protein_lab 与 WeeklyReport 唯一的耦合点。
 - **当前仓库没有任何测试文件**——`测试规范` 是约定，还没有 `test_*.py` 可跑。
+- **路径与打包（v0.0.4）**：`paths.py` 统一路径解析——`app_base_dir()` 决定 DB/backups 位置（frozen→EXE 同目录，dev→源码目录），`resource_path()` 读 templates/static/fonts（frozen→`_MEIPASS`）。`models.DB_PATH` 与 Flask `template_folder`/`static_folder` 都走它。中文字体改走 `fonts.py`（打包 Noto Sans SC，OFL 协议，仓库 `fonts/` 内），不再依赖上级工作区。
+- **CLI 入口**：同一二进制支持 `--mcp`（stdio MCP，须在 print 前短路避免污染 stdout）与 `--import-db <旧库>`（空库时一次复制迁移）。
+- **打包配置**：`protein_lab.spec`（onefile，console=True）+ `.github/workflows/build.yml`（tag 推送时 Windows/macOS 双平台构建并附到 Release）。注意 `mcp_server`、`fonts`、`paths`、`pandas`、`logomaker`、`matplotlib` 是惰性 import，需在 spec `hiddenimports` 显式声明。
 
 ## 数据安全（最高优先级）
 
@@ -88,8 +97,8 @@ protein_lab/
 
 - v0.0.1 ✓ 已发布 — 基础蛋白库 / 浓度+BLI / 实验归档 / MCP
 - v0.0.2 ✓ 已发布 (2026-08-09) — Weblogo / 撤销 / ProtParam / 酶活计算 / 启动自动备份
-- v0.0.3 代码完成 (2026-08-10)，**待发布** — 批量改标签 / 表头排序 / Weblogo 换行+区间+多聚体
-- v0.0.4 — PyInstaller 打包单文件 EXE（`sys._MEIPASS` 处理 templates/static 路径；同一 EXE 支持 `--mcp` 切 stdio 模式）
+- v0.0.3 ✓ 已发布 (2026-08-10) — 批量改标签 / 表头排序 / Weblogo 换行+区间+多聚体
+- v0.0.4 实施中 (2026-08-10) — PyInstaller 单文件二进制 + GitHub Actions CI 双平台构建（tag 推送出 Win EXE + macOS 二进制附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db`
 - v0.0.5 — Excel 导出优化
 - v0.0.6 — BLI 原始数据拟合 + 多步稀释管理
 - v0.0.7 — AKTA 峰图整理

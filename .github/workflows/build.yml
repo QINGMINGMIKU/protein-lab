@@ -1,0 +1,40 @@
+name: build
+
+# tag 推送时在 Windows + macOS 两个 runner 上构建单文件二进制，附加到 GitHub Release。
+# 无需自购 Mac —— macos-latest 负责出 macOS 产物。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        - { os: windows-latest, name: protein-lab-windows, ext: .exe }
+        - { os: macos-latest, name: protein-lab-macos-arm64, ext: '' }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'          # 与本地 venv 一致，本地可复现 CI 产物
+
+      - name: Install deps
+        run: pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller protein_lab.spec --noconfirm
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/protein_lab${{ matrix.ext }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/protein_lab${{ matrix.ext }}

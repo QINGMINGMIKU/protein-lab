@@ -7,7 +7,10 @@ import json
 import os
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "protein_lab.db")
+from paths import app_base_dir
+
+# 打包(onefile)后 __file__ 指向临时解压目录，DB 必须放 EXE 同目录；dev 下即源码目录
+DB_PATH = os.path.join(app_base_dir(), "protein_lab.db")
 
 
 def get_db() -> sqlite3.Connection:

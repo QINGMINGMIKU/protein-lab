@@ -5,6 +5,7 @@ Flask 主应用
 import sys
 import os
 import json
+import tempfile
 import webbrowser
 from io import BytesIO
 from threading import Timer
@@ -16,10 +17,13 @@ from openpyxl.styles import Font
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
+import paths
 import models
 from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics
 
-app = Flask(__name__)
+app = Flask(__name__,
+            template_folder=paths.resource_path("templates"),
+            static_folder=paths.resource_path("static"))
 
 # ── Undo 栈（内存中，最多 20 条）──────────────────────────
 _undo_stack = []
@@ -708,13 +712,9 @@ def api_weblogo():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    # 中文字体（图内块标题）
-    from matplotlib import font_manager
-    font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts", "simhei.ttf")
-    if os.path.exists(font_path):
-        font_manager.fontManager.addfont(font_path)
-        plt.rcParams["font.family"] = "SimHei"
-    plt.rcParams["axes.unicode_minus"] = False
+    # 中文字体（图内块标题），内部已 use('Agg') + 注册字体
+    from fonts import setup_matplotlib_cjk
+    setup_matplotlib_cjk()
 
     data = request.get_json()
     sequences = data.get("sequences", [])
@@ -819,7 +819,8 @@ def api_enzyme_parse():
     if "file" not in request.files:
         return jsonify({"error": "请上传 xlsx 文件"}), 400
     f = request.files["file"]
-    tmp = os.path.join(os.path.dirname(models.DB_PATH), "_upload.xlsx")
+    fd, tmp = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
     f.save(tmp)
     try:
         data = parse_tecan_xlsx(tmp)
@@ -850,14 +851,10 @@ def api_enzyme_plot():
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib import font_manager
 
-    # 中文字体
-    font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts", "simhei.ttf")
-    if os.path.exists(font_path):
-        font_manager.fontManager.addfont(font_path)
-        plt.rcParams["font.family"] = "SimHei"
-    plt.rcParams["axes.unicode_minus"] = False
+    # 中文字体（内部已 use('Agg') + 注册字体）
+    from fonts import setup_matplotlib_cjk
+    font_path = setup_matplotlib_cjk()
 
     body = request.get_json()
     wells_data = body.get("wells", {})
@@ -918,7 +915,7 @@ def api_enzyme_plot():
                 ax.plot(t_fit, od_fit, "--", linewidth=lw + 0.5, alpha=0.6, color=line[0].get_color())
 
         # 标注：中文/英文自适应
-        use_cn = os.path.exists(font_path)
+        use_cn = font_path is not None
         notes = []
         if has_blank:
             notes.append("已扣除阴性/空白" if use_cn else "blank subtracted")
@@ -993,6 +990,27 @@ def backup_database():
 
 
 if __name__ == "__main__":
+    # --mcp: 纯 stdio MCP 模式（须在 print 之前短路，避免污染 JSON-RPC stdout）
+    if "--mcp" in sys.argv:
+        import mcp_server
+        mcp_server.main()
+        sys.exit(0)
+
+    # --import-db: 一次性导入旧数据库到 EXE 同目录（仅当目标库无数据时覆盖）
+    if "--import-db" in sys.argv:
+        try:
+            src = sys.argv[sys.argv.index("--import-db") + 1]
+        except IndexError:
+            src = ""
+        if not src or not os.path.exists(src):
+            print(f"  源库不存在: {src or '(未提供路径)'}，跳过导入")
+        elif bool(models.protein_list() or models.exp_list()):
+            print("  目标库已有数据，跳过导入")
+        else:
+            import shutil
+            shutil.copy2(src, models.DB_PATH)
+            print(f"  已导入数据库 -> {models.DB_PATH}")
+
     print("Protein Lab 启动中...")
     print("   浏览器即将打开 -> http://127.0.0.1:5000")
     print("   关闭此窗口即可停止服务")

@@ -6,7 +6,6 @@ echo "  Protein Lab — Protein Lab Manager"
 echo "======================================="
 echo ""
 echo "  Installing dependencies..."
-echo "  Installing dependencies..."
 if [ ! -d ".venv" ]; then
     python3 -m venv .venv
 fi

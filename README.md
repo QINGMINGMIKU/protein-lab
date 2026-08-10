@@ -1,4 +1,4 @@
-# Protein Lab v0.0.3
+# Protein Lab v0.0.4
 
 本地蛋白质实验管理系统。Flask 后端 + 纯 SQLite，无需网络、数据完全本地。
 
@@ -14,47 +14,80 @@
 - **实验归档** — 一键保存 / 单条或多条导出 Excel / 实验详情子页面 / 批量删除 + 撤销
 - **MCP 服务器** — 7 个工具，供 Claude 等 AI 通过 MCP 协议调用
 
-## 环境要求
+## 运行方式
 
-- Python 3.9+
-- 推荐使用虚拟环境（venv），依赖：`pip install -r requirements.txt`
+### 方式一：源码 + venv（开发 / 无打包需求）
 
-## 启动
+- Windows 双击 `启动.bat`，macOS 双击 `启动.command`，浏览器自动打开 <http://127.0.0.1:5000>。
+- 首次运行自动创建 `.venv` 并安装依赖。关闭窗口即停止服务。
+- 启动时自动备份数据库到 `backups/`（保留最近 10 份）。
 
-双击 `启动.bat`（Windows）或 `启动.command`（macOS），浏览器自动打开 <http://127.0.0.1:5000>。关闭窗口即停止服务。
+### 方式二：打包单文件二进制（v0.0.4，无需 Python）
 
-启动时自动备份数据库到 `backups/`（保留最近 10 份）。
+- 从 GitHub Release 下载 `protein_lab.exe`（Windows）或 `protein_lab`（macOS），放到**可写目录**（如桌面/下载，不要放 `C:\Program Files`），双击运行。
+- 数据库 `protein_lab.db` 与 `backups/` 自动创建在**二进制同目录**。首次运行是空库，想带现有数据，用 `--import-db`：
+  ```bash
+  protein_lab.exe --import-db <旧 protein_lab.db 路径>
+  ```
+- macOS 首次打开如提示"无法验证开发者"：右键 → 打开；或终端执行 `xattr -d com.apple.quarantine /路径/protein_lab`。
+
+## 打包与发布
+
+- 本地构建（Windows）：`.venv\Scripts\pip install -r requirements-build.txt` → `.venv\Scripts\pyinstaller protein_lab.spec --noconfirm` → 产物在 `dist/protein_lab.exe`。
+- CI 自动构建：**推送 `v*` tag** 时，GitHub Actions 在 `windows-latest` + `macos-latest` 分别构建 Windows EXE 与 macOS 二进制，自动附加到该 tag 的 Release。无需自购 Mac。
+- macOS 构建产物在 Mac 上运行，Mac 的 `.venv/bin/python` 同理（路径不同）。
 
 ## 配置 MCP（可选）
 
-在项目根目录 `.mcp.json` 中添加（注意用 venv 的 python，MCP 需要 biopython）：
+**方式 A（推荐，打包版）** — 直接用二进制 + `--mcp`：
 
 ```json
 {
   "mcpServers": {
     "protein-lab": {
-      "command": "path/to/protein_lab/.venv/Scripts/python.exe",
-      "args": ["path/to/protein_lab/mcp_server.py"]
+      "type": "stdio",
+      "command": "C:/路径/protein_lab.exe",
+      "args": ["--mcp"]
     }
   }
 }
 ```
+macOS 把 command 换成二进制路径（如 `/Applications/protein_lab`）。
 
+**方式 B（源码 + venv）** — 注意用 venv 的 python（MCP 需要 biopython）：
+
+```json
+{
+  "mcpServers": {
+    "protein-lab": {
+      "type": "stdio",
+      "command": "/路径/protein_lab/.venv/Scripts/python.exe",
+      "args": ["/路径/protein_lab/mcp_server.py"]
+    }
+  }
+}
+```
 macOS 下 venv 路径为 `.venv/bin/python`。
 
 ## 目录结构
 
 ```
 protein_lab/
-├── app.py              Flask 主应用
+├── app.py              Flask 主应用（含 --mcp / --import-db 入口分发）
 ├── calculators.py      计算核心（MW / ε / 浓度 / 稀释 / 酶活拟合）
-├── models.py           SQLite 数据模型
+├── models.py           SQLite 数据模型（DB 路径由 paths.app_base_dir() 决定）
 ├── mcp_server.py       MCP stdio 服务器
-├── requirements.txt    依赖
+├── paths.py            路径解析（PyInstaller 打包与 dev 双模式）
+├── fonts.py            CJK 字体解析 + matplotlib 中文配置
+├── protein_lab.spec    PyInstaller 打包配置
+├── requirements.txt    运行时依赖
+├── requirements-build.txt  打包依赖（pyinstaller）
 ├── 启动.bat            一键启动（Windows）
 ├── 启动.command        一键启动（macOS）
 ├── templates/          Jinja2 页面模板
 ├── static/             JS + CSS
+├── fonts/              Noto Sans SC（OFL，打包进二进制）
+├── .github/workflows/  CI 双平台构建
 ├── backups/            数据库自动备份
 └── protein_lab.db     自动生成，首次运行创建
 ```
