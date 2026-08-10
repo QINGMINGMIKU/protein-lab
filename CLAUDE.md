@@ -19,6 +19,7 @@
 ## 环境
 
 - Python 3.9+，依赖见 `requirements.txt`：`flask` `openpyxl` `biopython` `logomaker`
+- **依赖隐患**：`app.py`/`calculators.py` 直接 `import numpy`，weblogo 与酶活绘图还会惰性 `import pandas`/`matplotlib`/`logomaker`——这些都不在 `requirements.txt` 里，靠 logomaker 传递安装。全新建环境只装 requirements.txt 能跑，但别以为它们被显式声明。
 - **必须用 venv python**：`.venv/Scripts/python.exe`（Windows）/ `.venv/bin/python`（macOS）。系统 python 缺依赖（biopython、logomaker），跑测试/脚本都要用 venv。
 - 前端：Jinja2 + 原生 JS + 手写 CSS，无构建步骤。
 - 启动：双击 `启动.bat` / `启动.command`，或 `.venv/Scripts/python app.py`。启动时自动备份数据库到 `backups/`（保留 10 份）。
@@ -39,6 +40,15 @@ protein_lab/
 ├── backups/            数据库自动备份
 └── protein_lab.db     自动生成，首次运行创建
 ```
+
+## 架构要点
+
+- **分层**：`app.py` 是单体 Flask（页面路由渲染 Jinja2 + `/api/*` JSON 接口 + 内存 undo 栈）；纯计算在 `calculators.py`（无 Flask 依赖，可独立复用）；SQL 全在 `models.py`；`mcp_server.py` 直接 `import models` + `calculators`，**与 Web 共用同一个 `protein_lab.db`**。
+- **`models.init_db()` 在 import 时执行**（models.py 末尾）——只要 `import models` 就触碰真实库。测试规范里的 reload 顺序就是为绕过这个副作用而设计。
+- **实验 `params`/`results` 可能是双重编码的 JSON 字符串**（历史数据遗留）——读这两个字段要 `while isinstance(val, str): json.loads` 防御性解包（见 `page_experiment_detail`、`_export_excel`）。
+- **undo 栈是内存态**（app.py `_undo_stack`，上限 20 条），重启即失。
+- **跨工作区字体依赖**：weblogo 与酶活绘图读 `../fonts/simhei.ttf`（即上级 `WeeklyReport/fonts/`），缺失时中文字体静默回退。这是 protein_lab 与 WeeklyReport 唯一的耦合点。
+- **当前仓库没有任何测试文件**——`测试规范` 是约定，还没有 `test_*.py` 可跑。
 
 ## 数据安全（最高优先级）
 
