@@ -1,5 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller onefile 打包配置 — Windows EXE / macOS 二进制共用。
+"""PyInstaller onedir 打包配置 — Windows EXE / macOS 二进制共用。
+
+onedir（非 onefile）：免启动解压、杀毒误报低、进程冷启动 <1s。
+产物是 dist/protein_lab/ 目录，CI 里压缩为 zip 分发。
 构建：pyinstaller protein_lab.spec --noconfirm
 """
 datas = [
@@ -35,10 +38,8 @@ pyz = PYZ(a.pure, a.zipped_data)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,                    # onedir：二进制交给 COLLECT，不进 EXE
     name="protein_lab",
     debug=False,
     bootloader_ignore_signals=False,
@@ -50,4 +51,12 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="protein_lab",
 )

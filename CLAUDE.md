@@ -53,11 +53,11 @@ protein_lab/
 - **`models.init_db()` 在 import 时执行**（models.py 末尾）——只要 `import models` 就触碰真实库。测试规范里的 reload 顺序就是为绕过这个副作用而设计。
 - **实验 `params`/`results` 可能是双重编码的 JSON 字符串**（历史数据遗留）——读这两个字段要 `while isinstance(val, str): json.loads` 防御性解包（见 `page_experiment_detail`、`_export_excel`）。
 - **undo 栈是内存态**（app.py `_undo_stack`，上限 20 条），重启即失。
-- **跨工作区字体依赖**：weblogo 与酶活绘图读 `../fonts/simhei.ttf`（即上级 `WeeklyReport/fonts/`），缺失时中文字体静默回退。这是 protein_lab 与 WeeklyReport 唯一的耦合点。
+- **字体解析（v0.0.4）**：weblogo 与酶活绘图走 `fonts.py` 候选链——打包 Noto Sans SC（`resource_path("fonts/NotoSansSC-Regular.otf")`）→ 旧 dev 回退 `../fonts/simhei.ttf` → Windows 系统字体 → macOS 系统字体，返回第一个存在者。已不依赖上级工作区。
 - **当前仓库没有任何测试文件**——`测试规范` 是约定，还没有 `test_*.py` 可跑。
 - **路径与打包（v0.0.4）**：`paths.py` 统一路径解析——`app_base_dir()` 决定 DB/backups 位置（frozen→EXE 同目录，dev→源码目录），`resource_path()` 读 templates/static/fonts（frozen→`_MEIPASS`）。`models.DB_PATH` 与 Flask `template_folder`/`static_folder` 都走它。中文字体改走 `fonts.py`（打包 Noto Sans SC，OFL 协议，仓库 `fonts/` 内），不再依赖上级工作区。
 - **CLI 入口**：同一二进制支持 `--mcp`（stdio MCP，须在 print 前短路避免污染 stdout）与 `--import-db <旧库>`（空库时一次复制迁移）。
-- **打包配置**：`protein_lab.spec`（onefile，console=True）+ `.github/workflows/build.yml`（tag 推送时 Windows/macOS 双平台构建并附到 Release）。注意 `mcp_server`、`fonts`、`paths`、`pandas`、`logomaker`、`matplotlib` 是惰性 import，需在 spec `hiddenimports` 显式声明。
+- **打包配置**：`protein_lab.spec`（**onedir**，console=True，`exclude_binaries` + `COLLECT`）+ `.github/workflows/build.yml`（tag 推送时 Windows/macOS 双平台构建 onedir 目录、zip 后附到 Release）。onedir（非 onefile）免启动解压、杀毒误报低——体积换体验的取舍。注意 `mcp_server`、`fonts`、`paths`、`pandas`、`logomaker`、`matplotlib` 是惰性 import，需在 spec `hiddenimports` 显式声明。
 
 ## 数据安全（最高优先级）
 
@@ -98,7 +98,7 @@ protein_lab/
 - v0.0.1 ✓ 已发布 — 基础蛋白库 / 浓度+BLI / 实验归档 / MCP
 - v0.0.2 ✓ 已发布 (2026-08-09) — Weblogo / 撤销 / ProtParam / 酶活计算 / 启动自动备份
 - v0.0.3 ✓ 已发布 (2026-08-10) — 批量改标签 / 表头排序 / Weblogo 换行+区间+多聚体
-- v0.0.4 实施中 (2026-08-10) — PyInstaller 单文件二进制 + GitHub Actions CI 双平台构建（tag 推送出 Win EXE + macOS 二进制附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db`
+- v0.0.4 实施中 (2026-08-10) — PyInstaller **onedir** 打包（免解压、秒开、误报低）+ GitHub Actions CI 双平台构建（tag 推送出 Win zip + macOS zip 附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db`
 - v0.0.5 — Excel 导出优化
 - v0.0.6 — BLI 原始数据拟合 + 多步稀释管理
 - v0.0.7 — AKTA 峰图整理

@@ -1,7 +1,7 @@
 name: build
 
-# tag 推送时在 Windows + macOS 两个 runner 上构建单文件二进制，附加到 GitHub Release。
-# 无需自购 Mac —— macos-latest 负责出 macOS 产物。
+# tag 推送时在 Windows + macOS 两个 runner 上构建 onedir 二进制，压缩为 zip 附加到 GitHub Release。
+# onedir（非 onefile）：免解压、启动快、杀毒误报低；分发形态是目录 zip。
 on:
   push:
     tags: ['v*']
@@ -11,8 +11,16 @@ jobs:
   build:
     strategy:
       matrix:
-        - { os: windows-latest, name: protein-lab-windows, ext: .exe }
-        - { os: macos-latest, name: protein-lab-macos-arm64, ext: '' }
+        include:
+          - os: windows-latest
+            zip: protein-lab-windows.zip
+            pkg_shell: pwsh
+            pkg_cmd: cd dist && Compress-Archive -Path protein_lab -DestinationPath protein-lab-windows.zip
+          - os: macos-latest
+            zip: protein-lab-macos.zip
+            pkg_shell: bash
+            # 用原生 zip 保留执行权限（macOS 二进制解压后仍需可执行）
+            pkg_cmd: cd dist && zip -r protein-lab-macos.zip protein_lab
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -27,14 +35,18 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller protein_lab.spec --noconfirm
 
+      - name: Package onedir to zip
+        shell: ${{ matrix.pkg_shell }}
+        run: ${{ matrix.pkg_cmd }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: dist/protein_lab${{ matrix.ext }}
+          name: ${{ matrix.zip }}
+          path: dist/${{ matrix.zip }}
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/protein_lab${{ matrix.ext }}
+          files: dist/${{ matrix.zip }}

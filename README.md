@@ -22,19 +22,20 @@
 - 首次运行自动创建 `.venv` 并安装依赖。关闭窗口即停止服务。
 - 启动时自动备份数据库到 `backups/`（保留最近 10 份）。
 
-### 方式二：打包单文件二进制（v0.0.4，无需 Python）
+### 方式二：打包版（v0.0.4，无需 Python）
 
-- 从 GitHub Release 下载 `protein_lab.exe`（Windows）或 `protein_lab`（macOS），放到**可写目录**（如桌面/下载，不要放 `C:\Program Files`），双击运行。
-- 数据库 `protein_lab.db` 与 `backups/` 自动创建在**二进制同目录**。首次运行是空库，想带现有数据，用 `--import-db`：
+- 从 GitHub Release 下载 `protein-lab-windows.zip` 或 `protein-lab-macos.zip`，解压后进入 `protein_lab/` 目录，双击 `protein_lab.exe`（Windows）/ 运行 `protein_lab`（macOS）即可。放在**可写目录**（如桌面/下载，不要放 `C:\Program Files`）。
+- 打包采用 **onedir 目录形态**（非单文件）：**免启动解压、秒开、杀毒误报低**。
+- 数据库 `protein_lab.db` 与 `backups/` 自动创建在**程序同目录**。首次运行是空库，想带现有数据，用 `--import-db`：
   ```bash
   protein_lab.exe --import-db <旧 protein_lab.db 路径>
   ```
-- macOS 首次打开如提示"无法验证开发者"：右键 → 打开；或终端执行 `xattr -d com.apple.quarantine /路径/protein_lab`。
+- macOS 首次打开如提示"无法验证开发者"：右键 → 打开；或终端执行 `xattr -d com.apple.quarantine /路径/protein_lab/protein_lab`。
 
 ## 打包与发布
 
-- 本地构建（Windows）：`.venv\Scripts\pip install -r requirements-build.txt` → `.venv\Scripts\pyinstaller protein_lab.spec --noconfirm` → 产物在 `dist/protein_lab.exe`。
-- CI 自动构建：**推送 `v*` tag** 时，GitHub Actions 在 `windows-latest` + `macos-latest` 分别构建 Windows EXE 与 macOS 二进制，自动附加到该 tag 的 Release。无需自购 Mac。
+- 本地构建（Windows）：`.venv\Scripts\pip install -r requirements-build.txt` → `.venv\Scripts\pyinstaller protein_lab.spec --noconfirm` → 产物在 `dist/protein_lab/` 目录。
+- CI 自动构建：**推送 `v*` tag** 时，GitHub Actions 在 `windows-latest` + `macos-latest` 分别构建 Windows / macOS 的 onedir 目录，压缩为 `protein-lab-windows.zip` / `protein-lab-macos.zip` 自动附加到该 tag 的 Release。无需自购 Mac。
 - macOS 构建产物在 Mac 上运行，Mac 的 `.venv/bin/python` 同理（路径不同）。
 
 ## 配置 MCP（可选）
@@ -46,13 +47,13 @@
   "mcpServers": {
     "protein-lab": {
       "type": "stdio",
-      "command": "C:/路径/protein_lab.exe",
+      "command": "C:/路径/protein_lab/protein_lab.exe",
       "args": ["--mcp"]
     }
   }
 }
 ```
-macOS 把 command 换成二进制路径（如 `/Applications/protein_lab`）。
+macOS 把 command 换成二进制路径（如 `/Applications/protein_lab/protein_lab`）。
 
 **方式 B（源码 + venv）** — 注意用 venv 的 python（MCP 需要 biopython）：
 
