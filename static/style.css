@@ -200,6 +200,7 @@ label textarea { resize: vertical; }
   background: #fff3cd; border: 1px solid #e0c878; border-radius: 6px;
 }
 .bulk-count { font-size: 13px; font-weight: 600; color: #856404; }
+.sort-ind { display: inline-block; width: 12px; color: #4361ee; font-size: 10px; }
 
 /* ── Toast ─────────────────────────────────────────── */
 .toast {

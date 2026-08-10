@@ -174,6 +174,28 @@ def api_protein_batch_delete():
     return jsonify({"ok": True, "deleted": deleted})
 
 
+@app.route("/api/proteins/batch-tags", methods=["POST"])
+def api_protein_batch_tags():
+    """批量修改标签：为多个蛋白添加/移除标签（不覆盖已有标签）"""
+    data = request.get_json()
+    ids = data.get("ids", [])
+    add_set = {t.strip() for t in data.get("add", "").split(",") if t.strip()}
+    remove_set = {t.strip() for t in data.get("remove", "").split(",") if t.strip()}
+    if not add_set and not remove_set:
+        return jsonify({"error": "请至少添加或移除一个标签"}), 400
+    updated = 0
+    for pid in ids:
+        p = models.protein_get(int(pid))
+        if not p:
+            continue
+        cur = {t.strip() for t in (p.get("tag") or "").split(",") if t.strip()}
+        cur.difference_update(remove_set)
+        cur.update(add_set)
+        models.protein_update(int(pid), tag=", ".join(sorted(cur)))
+        updated += 1
+    return jsonify({"ok": True, "updated": updated})
+
+
 @app.route("/api/proteins/delete-all", methods=["POST"])
 def api_protein_delete_all():
     proteins = models.protein_list()
@@ -691,6 +713,14 @@ def api_weblogo():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    # 中文字体（图内块标题）
+    from matplotlib import font_manager
+    font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts", "simhei.ttf")
+    if os.path.exists(font_path):
+        font_manager.fontManager.addfont(font_path)
+        plt.rcParams["font.family"] = "SimHei"
+    plt.rcParams["axes.unicode_minus"] = False
+
     data = request.get_json()
     sequences = data.get("sequences", [])
     color_scheme = data.get("color_scheme", "chemistry")
@@ -715,11 +745,32 @@ def api_weblogo():
     prob_df = counts_df.div(counts_df.sum(axis=1), axis=0)
     info_df = logomaker.transform_matrix(prob_df, from_type="probability", to_type="information")
 
-    # 生成图表
-    fig, ax = plt.subplots(figsize=(max(6, n_pos * 0.4), 2.5))
-    logo = logomaker.Logo(info_df, ax=ax, color_scheme=color_scheme)
-    logo.style_xticks(anchor=0, spacing=1)
-    ax.set_ylabel("bits")
+    # 长序列分块换行：每个分块一行，编号连续
+    MAX_BLOCK = 50
+    if n_pos <= MAX_BLOCK:
+        blocks = [n_pos]
+    else:
+        blocks = [MAX_BLOCK] * (n_pos // MAX_BLOCK)
+        if n_pos % MAX_BLOCK:
+            blocks.append(n_pos % MAX_BLOCK)
+    n_rows = len(blocks)
+    block_w = max(blocks)
+    fig, axes = plt.subplots(n_rows, 1, figsize=(max(8, block_w * 0.4), 2.4 * n_rows),
+                             squeeze=False)
+    axes = axes.flatten()
+    ymax = max(float(info_df.max().max()), 4.5)
+
+    for i, blk in enumerate(blocks):
+        start = sum(blocks[:i])
+        sub = info_df.iloc[start:start + blk]
+        logomaker.Logo(sub, ax=axes[i], color_scheme=color_scheme)
+        axes[i].set_xlim(start - 0.5, start + blk - 0.5)
+        axes[i].set_xticks(range(start, start + blk))
+        axes[i].set_xticklabels([str(x + 1) for x in range(start, start + blk)], fontsize=8)
+        axes[i].set_ylim(0, ymax)
+        axes[i].set_ylabel("bits")
+        if n_rows > 1:
+            axes[i].set_title(f"位置 {start + 1}--{start + blk}", fontsize=10, color="#555", pad=8)
 
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")

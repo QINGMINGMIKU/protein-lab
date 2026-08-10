@@ -115,9 +115,12 @@ function getTagChips(containerId) {
 }
 
 function syncTagHidden(containerId) {
-  if (containerId === "addTagInput") {
-    document.getElementById("addTagHidden").value = getTagChips("addTagInput");
-  }
+  const hiddenId = {
+    "addTagInput": "addTagHidden",
+    "batchTagAddInput": "batchTagAddHidden",
+    "batchTagRemoveInput": "batchTagRemoveHidden",
+  }[containerId];
+  if (hiddenId) document.getElementById(hiddenId).value = getTagChips(containerId);
 }
 
 // 关闭弹窗时清理 chip
@@ -154,6 +157,24 @@ document.addEventListener("click", function (e) {
 
 let currentDetailProtein = null;  // track which protein is shown in detail
 
+// 表头排序状态：key ∈ {mw, ext_ox}，dir 1=升序 -1=降序
+let proteinSort = { key: null, dir: 1 };
+
+function sortProteinTable(key) {
+  if (proteinSort.key === key) proteinSort.dir *= -1;
+  else { proteinSort.key = key; proteinSort.dir = 1; }
+  loadProteins().catch(() => {});
+  updateSortIndicators();
+}
+
+function updateSortIndicators() {
+  const marks = { mw: "sortMwInd", ext_ox: "sortExtInd" };
+  for (const [key, id] of Object.entries(marks)) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = proteinSort.key === key ? (proteinSort.dir === 1 ? "▲" : "▼") : "";
+  }
+}
+
 async function loadProteins() {
   const tbody = document.querySelector("#proteinTable tbody");
   if (!tbody) return;
@@ -162,6 +183,17 @@ async function loadProteins() {
     let url = `/api/proteins?q=${encodeURIComponent(q)}`;
     if (activeTagFilter.length) url += `&tag=${encodeURIComponent(activeTagFilter.join(","))}`;
     const proteins = await API.get(url);
+    // 客户端排序（MW / 消光系数）
+    if (proteinSort.key) {
+      const dir = proteinSort.dir, key = proteinSort.key;
+      proteins.sort((a, b) => {
+        const av = a[key], bv = b[key];
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return (av - bv) * dir;
+      });
+    }
     tbody.innerHTML = proteins.map(p => `
       <tr>
         <td><input type="checkbox" class="protein-check" value="${p.id}" onchange="updateBulkBar()"></td>
@@ -1905,6 +1937,43 @@ async function deleteAllProteins() {
     loadProteins().catch(() => {});
     loadProteinSelects();
     closeDetail();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ── 批量改标签 ─────────────────────────────────────────
+function batchEditTags() {
+  const checked = document.querySelectorAll(".protein-check:checked");
+  if (!checked.length) { toast("请先选中蛋白", true); return; }
+  document.getElementById("batchTagCount").textContent = checked.length;
+  document.getElementById("batchTagModal").classList.remove("hidden");
+  document.getElementById("batchTagAddInput").querySelector("input").focus();
+}
+
+function closeBatchTagModal() {
+  document.getElementById("batchTagModal").classList.add("hidden");
+  ["batchTagAddInput", "batchTagRemoveInput"].forEach(id => {
+    const c = document.getElementById(id);
+    c.querySelectorAll(".tag-chip").forEach(ch => ch.remove());
+    c.querySelector("input").value = "";
+  });
+  document.getElementById("batchTagAddHidden").value = "";
+  document.getElementById("batchTagRemoveHidden").value = "";
+}
+
+async function applyBatchTags() {
+  const checked = document.querySelectorAll(".protein-check:checked");
+  if (!checked.length) { closeBatchTagModal(); return; }
+  const add = document.getElementById("batchTagAddHidden").value;
+  const remove = document.getElementById("batchTagRemoveHidden").value;
+  if (!add && !remove) { toast("请添加或移除至少一个标签", true); return; }
+  const ids = Array.from(checked).map(cb => parseInt(cb.value));
+  try {
+    const r = await API.post("/api/proteins/batch-tags", { ids, add, remove });
+    toast(`已更新 ${r.updated} 个蛋白的标签`);
+    closeBatchTagModal();
+    loadProteins().catch(() => {});
+    loadProteinSelects();
+    loadTagFilter();
   } catch (err) { toast(err.message, true); }
 }
 

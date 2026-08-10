@@ -19,6 +19,7 @@
 <div id="bulkBar" class="bulk-bar hidden">
   <span class="bulk-count" id="bulkCount">已选 0 项</span>
   <button class="btn btn-sm btn-danger" onclick="batchDeleteProteins()">🗑 删除选中</button>
+  <button class="btn btn-sm btn-outline" onclick="batchEditTags()">🏷 改标签</button>
   <button class="btn btn-sm btn-outline" onclick="deleteAllProteins()">全部删除</button>
   <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
 </div>
@@ -28,8 +29,8 @@
     <tr>
       <th style="width:36px"><input type="checkbox" id="selectAllProteins" onchange="toggleSelectAllProteins(this)" title="全选"></th>
       <th>名称</th>
-      <th>MW (Da)</th>
-      <th>ε_ox</th>
+      <th onclick="sortProteinTable('mw')" style="cursor:pointer" title="点击排序">MW (Da) <span id="sortMwInd" class="sort-ind"></span></th>
+      <th onclick="sortProteinTable('ext_ox')" style="cursor:pointer" title="点击排序">ε_ox <span id="sortExtInd" class="sort-ind"></span></th>
       <th>Abs[0.1%]</th>
       <th>标签</th>
       <th>序列</th>
@@ -93,6 +94,33 @@
         <button type="button" class="btn btn-outline" onclick="closeImportModal()">取消</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ── 批量改标签弹窗 ── -->
+<div id="batchTagModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>批量修改标签</h3>
+      <button class="btn btn-sm" onclick="closeBatchTagModal()">✕</button>
+    </div>
+    <p style="font-size:13px;color:#888;margin-bottom:12px">将应用到 <b id="batchTagCount">0</b> 个选中的蛋白</p>
+    <label>添加标签 <span style="font-weight:400;color:#888">（回车添加，不影响已有标签）</span>
+      <div class="tag-input" id="batchTagAddInput">
+        <input type="text" placeholder="输入后回车" onkeydown="handleTagKey(event, 'batchTagAddInput')">
+      </div>
+      <input type="hidden" id="batchTagAddHidden">
+    </label>
+    <label>移除标签 <span style="font-weight:400;color:#888">（回车添加要移除的标签）</span>
+      <div class="tag-input" id="batchTagRemoveInput">
+        <input type="text" placeholder="输入后回车" onkeydown="handleTagKey(event, 'batchTagRemoveInput')">
+      </div>
+      <input type="hidden" id="batchTagRemoveHidden">
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" onclick="applyBatchTags()">确定应用</button>
+      <button class="btn btn-outline" onclick="closeBatchTagModal()">取消</button>
+    </div>
   </div>
 </div>
 
