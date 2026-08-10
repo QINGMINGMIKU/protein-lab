@@ -719,7 +719,10 @@ def api_weblogo():
     data = request.get_json()
     sequences = data.get("sequences", [])
     color_scheme = data.get("color_scheme", "chemistry")
-    multimer = int(data.get("multimer") or 1)
+    try:
+        multimer = int(data.get("multimer") or 1)
+    except (TypeError, ValueError):
+        multimer = 1
     start = data.get("start")
     end = data.get("end")
 
@@ -743,8 +746,11 @@ def api_weblogo():
     # 位点区间（1-based 闭区间）
     offset = 0
     if start is not None or end is not None:
-        lo = int(start) if start is not None else 1
-        hi = int(end) if end is not None else n_pos
+        try:
+            lo = int(start) if start is not None else 1
+            hi = int(end) if end is not None else n_pos
+        except (TypeError, ValueError):
+            return jsonify({"error": "位点必须是整数"}), 400
         if lo < 1 or hi > n_pos or lo > hi:
             return jsonify({"error": f"位点区间超出范围（1--{n_pos}）"}), 400
         sequences = [s[lo - 1:hi] for s in sequences]
@@ -779,16 +785,16 @@ def api_weblogo():
     ymax = max(float(info_df.max().max()), 4.5)
 
     for i, blk in enumerate(blocks):
-        start = sum(blocks[:i])
-        sub = info_df.iloc[start:start + blk]
+        row_start = sum(blocks[:i])
+        sub = info_df.iloc[row_start:row_start + blk]
         logomaker.Logo(sub, ax=axes[i], color_scheme=color_scheme)
-        axes[i].set_xlim(start - 0.5, start + blk - 0.5)
-        axes[i].set_xticks(range(start, start + blk))
-        axes[i].set_xticklabels([str(offset + x + 1) for x in range(start, start + blk)], fontsize=8)
+        axes[i].set_xlim(row_start - 0.5, row_start + blk - 0.5)
+        axes[i].set_xticks(range(row_start, row_start + blk))
+        axes[i].set_xticklabels([str(offset + x + 1) for x in range(row_start, row_start + blk)], fontsize=8)
         axes[i].set_ylim(0, ymax)
         axes[i].set_ylabel("bits")
         if n_rows > 1:
-            axes[i].set_title(f"位置 {offset + start + 1}--{offset + start + blk}", fontsize=10, color="#555", pad=8)
+            axes[i].set_title(f"位置 {offset + row_start + 1}--{offset + row_start + blk}", fontsize=10, color="#555", pad=8)
 
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")

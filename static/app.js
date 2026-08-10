@@ -1763,6 +1763,7 @@ function enzymeInvertSelect() {
 let weblogoAllProteins = [];
 let weblogoLastImage = null;
 let weblogoLastProteins = [];
+let weblogoLastParams = {};  // 生成参数（区间/多聚体/配色），随实验保存
 
 async function loadWeblogoProteins() {
   if (weblogoAllProteins.length) { renderWeblogoProteinList(); return; }
@@ -1841,6 +1842,7 @@ async function generateWeblogo() {
     const start = parseInt(document.getElementById("weblogoStart").value) || null;
     const end = parseInt(document.getElementById("weblogoEnd").value) || null;
     const multimer = parseInt(document.getElementById("weblogoMultimer").value) || 1;
+    weblogoLastParams = { color_scheme: color, start, end, multimer };
     const r = await API.post("/api/weblogo", { sequences, color_scheme: color, start, end, multimer });
     weblogoLastImage = r.image;
     weblogoLastProteins = selected.map(p => ({ id: p.id, name: p.name }));
@@ -1878,6 +1880,7 @@ async function saveWeblogoExp() {
       calc_params: {
         proteins: weblogoLastProteins,
         image: weblogoLastImage,
+        ...weblogoLastParams,
       },
       calc_result: {},
     });
