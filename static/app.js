@@ -37,6 +37,27 @@ const API = {
   },
 };
 
+// ── 实验自动命名 ─────────────────────────────
+// 系统变量: {date}_{exp_type}_{seq:02d}，seq 为当天同类型实验序号；支持用户自定义覆盖。
+async function getAutoName(expType, date) {
+  try {
+    const q = new URLSearchParams({ exp_type: expType });
+    if (date) q.set("date", date);
+    const r = await API.get(`/api/experiments/next-name?${q.toString()}`);
+    return r.name || "";
+  } catch (_) { return ""; }
+}
+
+// 下载 base64 data URL 图片
+function downloadDataUrl(dataUrl, filename) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 // ── Safe HTML escaping ──────────────────────────────
 function esc(s) {
   return String(s)
@@ -457,7 +478,19 @@ document.addEventListener("click", function (e) {
   if (tab.dataset.tab === "dilution") loadBliImportExps();
   if (tab.dataset.tab === "weblogo") loadWeblogoProteins();
   if (tab.dataset.tab === "enzyme") loadEnzymeProteinList();
+  refreshAutoNamePlaceholders();
 });
+
+// 自动命名占位提示：输入框显示系统默认名（留空即用它）
+async function refreshAutoNamePlaceholders() {
+  const targets = { concExpName: "浓度测定", bliExpName: "BLI" };
+  for (const [id, type] of Object.entries(targets)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const auto = await getAutoName(type);
+    el.placeholder = auto ? `实验名称（默认 ${auto}）` : "实验名称（可选）";
+  }
+}
 
 // ═════════════════════════════════════════════════════
 //  Tab 1: Protein concentration multi-table
@@ -682,7 +715,8 @@ async function saveConcTable() {
   const ids = Object.keys(selectedProteins);
   if (!ids.length) { toast("请先添加蛋白", true); return; }
   const customName = document.getElementById("concExpName").value.trim();
-  const title = customName || ids.map(id => selectedProteins[id].name).join(", ") + " 浓度测定";
+  const title = customName || await getAutoName("浓度测定")
+    || ids.map(id => selectedProteins[id].name).join(", ") + " 浓度测定";
   const oxidized = getCurrentOxidized();
 
   try {
@@ -965,7 +999,8 @@ async function saveBliTable() {
     });
   }
   const customName = document.getElementById("bliExpName").value.trim();
-  const title = customName || Object.values(bliProteins).map(p => p.name).join(", ") + " BLI 稀释";
+  const title = customName || await getAutoName("BLI")
+    || Object.values(bliProteins).map(p => p.name).join(", ") + " BLI 稀释";
 
   try {
     await API.post("/api/experiments/from-calculation", {
@@ -1380,6 +1415,8 @@ function checkPrefill() {
 let enzymeData = null;         // {meta, wells: {A1: {times, od}, ...}}
 let enzymeSelection = new Set();
 let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw}}
+let enzymeLastImage = null;    // 最近一次曲线图 base64（供下载）
+let enzymeLastPlotType = null; // kinetics | michaelis
 
 async function uploadEnzymeFile() {
   const file = document.getElementById("enzymeFile").files[0];
@@ -1626,14 +1663,26 @@ async function enzymePlot(type) {
   }
   try {
     const r = await API.post("/api/enzyme/plot", payload);
+    enzymeLastImage = r.image;
+    enzymeLastPlotType = type;
     document.getElementById("enzymePlotArea").innerHTML =
-      `<img src="${r.image}" style="max-width:100%;border-radius:8px" alt="plot">`;
+      `<img src="${r.image}" style="max-width:100%;border-radius:8px" alt="plot">
+       <div style="margin-top:8px">
+         <button class="btn btn-sm btn-outline" onclick="downloadEnzymePlot()">📥 下载 PNG</button>
+       </div>`;
   } catch (err) { toast(err.message, true); }
+}
+
+function downloadEnzymePlot() {
+  if (!enzymeLastImage) { toast("请先生成曲线图", true); return; }
+  const name = enzymeLastPlotType === "michaelis" ? "MM曲线" : "动力学曲线";
+  downloadDataUrl(enzymeLastImage, `${name}_${new Date().toISOString().slice(0,10)}.png`);
 }
 
 async function enzymeSaveExp() {
   if (!enzymeData) { toast("请先上传数据", true); return; }
-  const title = prompt("实验名称:", enzymeData.meta.sample || "酶活测定");
+  const autoName = await getAutoName("酶活测定");
+  const title = prompt("实验名称:", autoName || enzymeData.meta.sample || "酶活测定");
   if (!title) return;
 
   const proteinIds = new Set();
@@ -1668,6 +1717,41 @@ async function enzymeSaveExp() {
       calc_result: {},
     });
     toast("已保存为实验记录");
+  } catch (err) { toast(err.message, true); }
+}
+
+// 导出作图友好 Excel（长格式 孔位-时间-OD + 动力学汇总）
+async function enzymeExportExcel() {
+  if (!enzymeData) { toast("请先上传数据", true); return; }
+  const wells = {};
+  for (const [id, wd] of Object.entries(enzymeData.wells)) {
+    const info = enzymeWellInfo[id] || {};
+    wells[id] = {
+      name: info.name, ref: info.ref,
+      conc_ng_ml: info.conc_ng_ml, conc_uM: info.conc_uM,
+      fit: info.fit || null,
+      times: wd.times, od: wd.od,
+    };
+  }
+  try {
+    const r = await fetch("/api/enzyme/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ meta: enzymeData.meta, wells }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || `导出失败 (${r.status})`);
+    }
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "enzyme_well_time_od.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    toast("已导出作图 Excel");
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1861,16 +1945,14 @@ async function generateWeblogo() {
 
 function downloadWeblogo() {
   if (!weblogoLastImage) return;
-  const a = document.createElement("a");
-  a.href = weblogoLastImage;
-  a.download = "weblogo.png";
-  a.click();
+  downloadDataUrl(weblogoLastImage, `weblogo_${new Date().toISOString().slice(0,10)}.png`);
 }
 
 async function saveWeblogoExp() {
   if (!weblogoLastProteins.length) return;
   const customName = document.getElementById("concExpName").value.trim();
-  const title = customName || weblogoLastProteins.map(p => p.name).join(", ") + " Weblogo";
+  const title = customName || await getAutoName("Weblogo")
+    || weblogoLastProteins.map(p => p.name).join(", ") + " Weblogo";
   try {
     await API.post("/api/experiments/from-calculation", {
       title, exp_type: "Weblogo",

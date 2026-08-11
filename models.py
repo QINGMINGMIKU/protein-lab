@@ -216,6 +216,18 @@ def exp_list(exp_type: str = "", limit: int = 50) -> list[dict]:
     return results
 
 
+def exp_count_by_type_date(exp_type: str, date: str = "") -> int:
+    """统计某类型实验在指定日期的数量（自动命名序号用）"""
+    conn = get_db()
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    n = conn.execute(
+        "SELECT COUNT(*) AS c FROM experiments WHERE exp_type = ? AND date = ?",
+        (exp_type, date)).fetchone()["c"]
+    conn.close()
+    return n
+
+
 def exp_get(exp_id: int) -> dict | None:
     conn = get_db()
     row = conn.execute("""

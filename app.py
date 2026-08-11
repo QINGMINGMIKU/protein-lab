@@ -6,6 +6,7 @@ import sys
 import os
 import json
 import tempfile
+from datetime import datetime
 import webbrowser
 from io import BytesIO
 from threading import Timer
@@ -361,13 +362,33 @@ def api_exp_get(eid):
     return jsonify(e)
 
 
+def _auto_exp_name(exp_type: str, date: str = "") -> str:
+    """自动命名: {date}_{exp_type}_{seq:02d}，seq 为当天同类型实验序号（作为后缀）"""
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    seq = models.exp_count_by_type_date(exp_type, date) + 1
+    return f"{date}_{exp_type}_{seq:02d}"
+
+
+@app.route("/api/experiments/next-name", methods=["GET"])
+def api_exp_next_name():
+    """获取自动命名（供前端 prompt 默认值 / 输入框占位）"""
+    exp_type = request.args.get("exp_type", "").strip()
+    if not exp_type:
+        return jsonify({"error": "缺少 exp_type"}), 400
+    return jsonify({"name": _auto_exp_name(exp_type, request.args.get("date", ""))})
+
+
 @app.route("/api/experiments", methods=["POST"])
 def api_exp_create():
     data = request.get_json()
     title = data.get("title", "").strip()
     exp_type = data.get("exp_type", "").strip()
-    if not title or not exp_type:
-        return jsonify({"error": "实验标题和类型不能为空"}), 400
+    if not exp_type:
+        return jsonify({"error": "实验类型不能为空"}), 400
+    if not title:
+        # 空标题兜底：自动命名
+        title = _auto_exp_name(exp_type, data.get("date", ""))
 
     protein_ids = data.get("protein_ids", [])
     if isinstance(protein_ids, list):
@@ -390,8 +411,11 @@ def api_exp_from_calc():
     data = request.get_json()
     title = data.get("title", "").strip()
     exp_type = data.get("exp_type", "").strip()
-    if not title or not exp_type:
-        return jsonify({"error": "实验标题和类型不能为空"}), 400
+    if not exp_type:
+        return jsonify({"error": "实验类型不能为空"}), 400
+    if not title:
+        # 空标题兜底：自动命名
+        title = _auto_exp_name(exp_type, data.get("date", ""))
 
     protein_ids = data.get("protein_ids", [])
     if isinstance(protein_ids, list):
@@ -543,6 +567,7 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
             except: p = {}
         return p.get("calc_type", "") if isinstance(p, dict) else ""
     all_enzyme = exps and all(_get_calc_type(e) == "enzyme" for e in exps)
+    enzyme_long_rows = []  # 长格式（孔位-时间-OD），全酶活导出时附加为第二个 Sheet
     if all_enzyme:
         headers = ["实验名称", "日期", "类型", "孔位/命名", "参考类型",
                    "浓度 (ng/mL)", "浓度 (μM)", "ΔOD/min", "R²", "样本", "波长"]
@@ -649,6 +674,21 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
                     ])
                     first = False
                     row += 1
+                # 汇总 Sheet 的原始数据也收进长格式（孔位-时间-OD）
+                for wid, w in sorted(wells.items()):
+                    if not isinstance(w, dict):
+                        continue
+                    times = w.get("times") or []
+                    ods = w.get("od") or []
+                    if not times or not ods:
+                        continue
+                    ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}.get(w.get("ref", ""), "")
+                    for t, od in zip(times, ods):
+                        enzyme_long_rows.append([
+                            e["title"], wid, w.get("name", ""), ref_label,
+                            w.get("conc_ng_ml", ""), w.get("conc_uM", ""),
+                            round(t / 60, 3), round(od, 4) if od is not None else "",
+                        ])
             else:
                 ws.append([e["title"], e.get("date", ""), e["exp_type"],
                           e.get("protein_names", ""), "", "", "", "",
@@ -686,6 +726,19 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
         widths = [30, 12, 10, 20, 12, 10, 10, 10, 12, 12, 14, 14, 12, 12]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+
+    # 酶活导出：附加「孔位-时间-OD」长格式 Sheet（方便 Origin/Prism 等外部作图）
+    if all_enzyme and enzyme_long_rows:
+        ws2 = wb.create_sheet("孔位-时间-OD")
+        headers2 = ["实验名称", "孔位", "名称", "参考类型", "浓度 (ng/mL)", "浓度 (μM)",
+                    "时间 (min)", "OD"]
+        ws2.append(headers2)
+        for c in range(1, len(headers2) + 1):
+            ws2.cell(row=1, column=c).font = Font(bold=True)
+        for r in enzyme_long_rows:
+            ws2.append(r)
+        for i, w in enumerate([30, 8, 16, 10, 14, 12, 12, 12], 1):
+            ws2.column_dimensions[ws2.cell(row=1, column=i).column_letter].width = w
 
     buf = BytesIO()
     wb.save(buf)
@@ -958,6 +1011,60 @@ def api_enzyme_plot():
     return jsonify({"image": f"data:image/png;base64,{base64.b64encode(buf.read()).decode()}"})
 
 
+@app.route("/api/enzyme/export", methods=["POST"])
+def api_enzyme_export():
+    """导出酶活原始数据为作图友好 Excel：
+    Sheet1「孔位-时间-OD」长格式（每孔每个时间点一行），Sheet2「动力学汇总」（每孔拟合一行）。"""
+    body = request.get_json() or {}
+    wells = body.get("wells", {}) or {}
+    wb = Workbook()
+
+    # Sheet 1: 长格式
+    ws = wb.active
+    ws.title = "孔位-时间-OD"
+    headers = ["孔位", "名称", "参考类型", "浓度 (ng/mL)", "浓度 (μM)", "时间 (min)", "OD"]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}
+    for wid, wd in sorted(wells.items()):
+        if not isinstance(wd, dict):
+            continue
+        times = wd.get("times") or []
+        ods = wd.get("od") or []
+        for t, od in zip(times, ods):
+            ws.append([
+                wid, wd.get("name", ""), ref_label.get(wd.get("ref", ""), ""),
+                wd.get("conc_ng_ml", ""), wd.get("conc_uM", ""),
+                round(t / 60, 3), round(od, 4) if od is not None else "",
+            ])
+
+    # Sheet 2: 动力学汇总
+    ws2 = wb.create_sheet("动力学汇总")
+    headers2 = ["孔位", "名称", "参考类型", "浓度 (ng/mL)", "浓度 (μM)",
+                "斜率 (ΔOD/min)", "截距", "R²", "数据点数"]
+    ws2.append(headers2)
+    for c in range(1, len(headers2) + 1):
+        ws2.cell(row=1, column=c).font = Font(bold=True)
+    for wid, wd in sorted(wells.items()):
+        if not isinstance(wd, dict):
+            continue
+        fit = wd.get("fit") or {}
+        ws2.append([
+            wid, wd.get("name", ""), ref_label.get(wd.get("ref", ""), ""),
+            wd.get("conc_ng_ml", ""), wd.get("conc_uM", ""),
+            fit.get("slope", ""), fit.get("intercept", ""), fit.get("r2", ""),
+            len(wd.get("od") or []),
+        ])
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name="enzyme_well_time_od.xlsx")
+
+
 def open_browser(port):
     import time
     time.sleep(0.5)  # 等服务器完全就绪
@@ -972,7 +1079,6 @@ def backup_database():
     backup_dir = os.path.join(os.path.dirname(db_path), "backups")
     os.makedirs(backup_dir, exist_ok=True)
 
-    from datetime import datetime
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(backup_dir, f"protein_lab_{stamp}.db")
     import shutil

@@ -100,8 +100,8 @@ protein_lab/
 - v0.0.1 ✓ 已发布 — 基础蛋白库 / 浓度+BLI / 实验归档 / MCP
 - v0.0.2 ✓ 已发布 (2026-08-09) — Weblogo / 撤销 / ProtParam / 酶活计算 / 启动自动备份
 - v0.0.3 ✓ 已发布 (2026-08-10) — 批量改标签 / 表头排序 / Weblogo 换行+区间+多聚体
-- v0.0.4 实施中 (2026-08-10) — PyInstaller **onedir** 打包（免解压、秒开、误报低）+ GitHub Actions CI 双平台构建（tag 推送出 Win zip + macOS zip 附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db`
-- v0.0.5 — Excel 导出优化
+- v0.0.4 实施中 (2026-08-10) — PyInstaller **onedir** 打包（免解压、秒开、误报低）+ GitHub Actions CI 双平台构建（tag 推送出 Win zip + macOS zip 附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db` + 酶活模块增强（**实验自动命名** `{date}_{type}_{seq:02d}` / 曲线图 PNG 下载 / **作图友好 Excel** 孔位-时间-OD 长格式 + 动力学汇总）
+- v0.0.5 — Excel 导出优化（待定，作图友好导出已随 v0.0.4 落地）
 - v0.0.6 — BLI 原始数据拟合 + 多步稀释管理
 - v0.0.7 — AKTA 峰图整理
 - v0.1.0（暂缓）— 连续实验管理（浓度→稀释→BLI/酶活串联工作流）
