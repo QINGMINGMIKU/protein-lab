@@ -2,6 +2,8 @@ name: build
 
 # tag 推送时在 Windows + macOS 两个 runner 上构建 onedir 二进制，压缩为 zip 附加到 GitHub Release。
 # onedir（非 onefile）：免解压、启动快、杀毒误报低；分发形态是目录 zip。
+permissions:
+  contents: write   # 创建 Release + 上传资产需要（否则 softprops/action-gh-release 报 Resource not accessible）
 on:
   push:
     tags: ['v*']
