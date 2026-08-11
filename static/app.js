@@ -39,6 +39,13 @@ const API = {
 
 // ── 实验自动命名 ─────────────────────────────
 // 系统变量: {date}_{exp_type}_{seq:02d}，seq 为当天同类型实验序号；支持用户自定义覆盖。
+// 本地日期 YYYY-MM-DD（toISOString 是 UTC，UTC+8 凌晨 8 点前会记成"昨天"）
+function todayLocal() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
+}
+
 async function getAutoName(expType, date) {
   try {
     const q = new URLSearchParams({ exp_type: expType });
@@ -476,14 +483,14 @@ document.addEventListener("click", function (e) {
   document.getElementById("tab-" + tab.dataset.tab).classList.remove("hidden");
   if (tab.dataset.tab === "copy") loadCopyExpList();
   if (tab.dataset.tab === "dilution") loadBliImportExps();
-  if (tab.dataset.tab === "weblogo") loadWeblogoProteins();
+  if (tab.dataset.tab === "weblogo") { loadWeblogoProteins(); restoreWeblogo(); }
   if (tab.dataset.tab === "enzyme") loadEnzymeProteinList();
   refreshAutoNamePlaceholders();
 });
 
 // 自动命名占位提示：输入框显示系统默认名（留空即用它）
 async function refreshAutoNamePlaceholders() {
-  const targets = { concExpName: "浓度测定", bliExpName: "BLI" };
+  const targets = { concExpName: "浓度测定", bliExpName: "BLI", weblogoExpName: "Weblogo" };
   for (const [id, type] of Object.entries(targets)) {
     const el = document.getElementById(id);
     if (!el) continue;
@@ -724,7 +731,7 @@ async function saveConcTable() {
       title: title,
       exp_type: "浓度测定",
       protein_ids: ids.map(Number),
-      date: new Date().toISOString().slice(0, 10),
+      date: todayLocal(),
       calc_type: "concentration",
       calc_params: {
         oxidized,
@@ -1007,7 +1014,7 @@ async function saveBliTable() {
       title: title,
       exp_type: "BLI",
       protein_ids: ids.map(Number),
-      date: new Date().toISOString().slice(0, 10),
+      date: todayLocal(),
       calc_type: "dilution",
       calc_params: { proteins },
       calc_result: dilutionResults,
@@ -1281,7 +1288,7 @@ function showExpAddModal(prefill = null) {
   if (prefill) {
     document.getElementById("expTitle").value = prefill.title || "";
     document.getElementById("expType").value = prefill.exp_type || "";
-    document.getElementById("expDate").value = prefill.date || new Date().toISOString().slice(0, 10);
+    document.getElementById("expDate").value = prefill.date || todayLocal();
     document.getElementById("expParams").value = prefill.params || "";
     document.getElementById("expResults").value = prefill.results || "";
     document.getElementById("expNotes").value = prefill.notes || "";
@@ -1708,7 +1715,7 @@ async function enzymeSaveExp() {
     await API.post("/api/experiments/from-calculation", {
       title, exp_type: "酶活测定",
       protein_ids: Array.from(proteinIds),
-      date: new Date().toISOString().slice(0, 10),
+      date: todayLocal(),
       calc_type: "enzyme",
       calc_params: {
         meta: enzymeData.meta,
@@ -1909,6 +1916,24 @@ function toggleAllWeblogoProteins(el) {
   document.querySelectorAll(".weblogo-protein-check").forEach(cb => cb.checked = el.checked);
 }
 
+// 渲染 weblogo 结果区（生成 / 恢复共用）
+function showWeblogoResult(r, count) {
+  document.getElementById("weblogoImage").src = r.image;
+  const notes = [];
+  const p = weblogoLastParams || {};
+  if (p.multimer > 1) notes.push(`${p.multimer} 聚体裁剪`);
+  if (p.start || p.end) notes.push(`位点 ${r.range ? r.range[0] + "–" + r.range[1] : ""}`);
+  document.getElementById("weblogoInfo").textContent =
+    `${count} 条序列, ${r.positions} 个位置` + (notes.length ? " (" + notes.join(", ") + ")" : "");
+  document.getElementById("weblogoResult").classList.remove("hidden");
+  document.getElementById("weblogoSaveBtn").style.display = "";
+  document.getElementById("weblogoExpName").style.display = "";
+  getAutoName("Weblogo").then(auto => {
+    document.getElementById("weblogoExpName").placeholder =
+      auto ? `实验名称（默认 ${auto}）` : "实验名称（可选）";
+  });
+}
+
 async function generateWeblogo() {
   const checked = document.querySelectorAll(".weblogo-protein-check:checked");
   if (checked.length < 2) { toast("至少选择 2 个蛋白", true); return; }
@@ -1923,26 +1948,47 @@ async function generateWeblogo() {
     toast("所选蛋白序列长度不一致，无法对齐", true); return;
   }
 
+  const color = document.getElementById("weblogoColor").value;
+  const start = parseInt(document.getElementById("weblogoStart").value) || null;
+  const end = parseInt(document.getElementById("weblogoEnd").value) || null;
+  const multimer = parseInt(document.getElementById("weblogoMultimer").value) || 1;
+  weblogoLastParams = { color_scheme: color, start, end, multimer };
+  weblogoLastProteins = selected.map(p => ({ id: p.id, name: p.name }));
+
+  // 记住请求（localStorage）：切页后回来自动恢复，命中服务端缓存秒回
+  localStorage.setItem("weblogoLastRequest", JSON.stringify({
+    sequences, color_scheme: color, start, end, multimer, proteins: weblogoLastProteins,
+  }));
+
+  const genBtn = document.getElementById("weblogoGenBtn");
+  const origText = genBtn.textContent;
+  genBtn.disabled = true;
+  genBtn.textContent = "⏳ 生成中…";
   try {
-    const color = document.getElementById("weblogoColor").value;
-    const start = parseInt(document.getElementById("weblogoStart").value) || null;
-    const end = parseInt(document.getElementById("weblogoEnd").value) || null;
-    const multimer = parseInt(document.getElementById("weblogoMultimer").value) || 1;
-    weblogoLastParams = { color_scheme: color, start, end, multimer };
     const r = await API.post("/api/weblogo", { sequences, color_scheme: color, start, end, multimer });
     weblogoLastImage = r.image;
-    weblogoLastProteins = selected.map(p => ({ id: p.id, name: p.name }));
-
-    document.getElementById("weblogoImage").src = r.image;
-    const notes = [];
-    if (multimer > 1) notes.push(`${multimer} 聚体裁剪`);
-    if (start || end) notes.push(`位点 ${r.range ? r.range[0] + "–" + r.range[1] : ""}`);
-    document.getElementById("weblogoInfo").textContent =
-      `${selected.length} 条序列, ${r.positions} 个位置` + (notes.length ? " (" + notes.join(", ") + ")" : "");
-    document.getElementById("weblogoResult").classList.remove("hidden");
-    document.getElementById("weblogoSaveBtn").style.display = "";
+    showWeblogoResult(r, selected.length);
     toast("Weblogo 已生成");
   } catch (err) { toast(err.message, true); }
+  finally { genBtn.disabled = false; genBtn.textContent = origText; }
+}
+
+// 切页回来自动恢复上次 weblogo 结果（服务端已缓存，通常秒回，不被中断丢失）
+async function restoreWeblogo() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem("weblogoLastRequest") || "null"); } catch (_) { return; }
+  if (!saved || !saved.sequences || saved.sequences.length < 2) return;
+  weblogoLastParams = { color_scheme: saved.color_scheme, start: saved.start, end: saved.end, multimer: saved.multimer };
+  weblogoLastProteins = saved.proteins || [];
+  try {
+    const r = await API.post("/api/weblogo", {
+      sequences: saved.sequences, color_scheme: saved.color_scheme,
+      start: saved.start, end: saved.end, multimer: saved.multimer,
+    });
+    weblogoLastImage = r.image;
+    showWeblogoResult(r, weblogoLastProteins.length || saved.sequences.length);
+    toast("已恢复上次的 Weblogo 结果");
+  } catch (_) { /* 首次生成被中断/渲染失败：忽略，用户重新生成即可 */ }
 }
 
 async function downloadWeblogo() {
@@ -1953,14 +1999,14 @@ async function downloadWeblogo() {
 
 async function saveWeblogoExp() {
   if (!weblogoLastProteins.length) return;
-  const customName = document.getElementById("concExpName").value.trim();
+  const customName = document.getElementById("weblogoExpName").value.trim();
   const title = customName || await getAutoName("Weblogo")
     || weblogoLastProteins.map(p => p.name).join(", ") + " Weblogo";
   try {
     await API.post("/api/experiments/from-calculation", {
       title, exp_type: "Weblogo",
       protein_ids: weblogoLastProteins.map(p => p.id),
-      date: new Date().toISOString().slice(0, 10),
+      date: todayLocal(),
       calc_type: "weblogo",
       calc_params: {
         proteins: weblogoLastProteins,

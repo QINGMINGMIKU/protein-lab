@@ -218,16 +218,27 @@ def exp_list(exp_type: str = "", limit: int = 50) -> list[dict]:
     return results
 
 
-def exp_count_by_type_date(exp_type: str, date: str = "") -> int:
-    """统计某类型实验在指定日期的数量（自动命名序号用）"""
+def exp_next_seq(exp_type: str, date: str = "") -> int:
+    """自动命名序号：当天同类型已有标题里 `{date}_{exp_type}_{NN}` 的最大后缀 + 1。
+
+    用 MAX 后缀而非 COUNT，避免删除中间记录（如撤销 _02）后下一个自动名与现存标题撞名。
+    """
     conn = get_db()
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
-    n = conn.execute(
-        "SELECT COUNT(*) AS c FROM experiments WHERE exp_type = ? AND date = ?",
-        (exp_type, date)).fetchone()["c"]
+    rows = conn.execute(
+        "SELECT title FROM experiments WHERE exp_type = ? AND date = ?",
+        (exp_type, date)).fetchall()
     conn.close()
-    return n
+    prefix = f"{date}_{exp_type}_"
+    max_seq = 0
+    for r in rows:
+        t = r["title"] or ""
+        if t.startswith(prefix):
+            suf = t[len(prefix):]
+            if suf.isdigit():
+                max_seq = max(max_seq, int(suf))
+    return max_seq + 1
 
 
 def exp_get(exp_id: int) -> dict | None:

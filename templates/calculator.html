@@ -151,7 +151,8 @@
           <input type="number" id="weblogoMultimer" min="1" value="1" style="width:70px;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-top:4px">
         </label>
       </div>
-      <button class="btn btn-primary" onclick="generateWeblogo()" style="width:100%;margin-top:10px">生成 Logo</button>
+      <button class="btn btn-primary" onclick="generateWeblogo()" id="weblogoGenBtn" style="width:100%;margin-top:10px">生成 Logo</button>
+      <input type="text" id="weblogoExpName" placeholder="实验名称（可选）" style="display:none;width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-top:6px">
       <button class="btn btn-outline" onclick="saveWeblogoExp()" id="weblogoSaveBtn" style="width:100%;margin-top:6px;display:none">💾 保存为实验</button>
     </div>
     <!-- 右侧：结果 -->

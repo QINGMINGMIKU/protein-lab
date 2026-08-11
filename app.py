@@ -5,11 +5,12 @@ Flask 主应用
 import sys
 import os
 import json
+import hashlib
 import tempfile
 from datetime import datetime
 import webbrowser
 from io import BytesIO
-from threading import Timer
+from threading import Timer, Event, Lock
 from flask import Flask, request, jsonify, render_template, send_file
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -59,6 +60,16 @@ def page_calculator():
     return render_template("calculator.html")
 
 
+def _json_unescape(val):
+    """防御性解包：历史数据可能把 JSON 字符串再编码一层（双重编码），须循环解到非字符串为止"""
+    while isinstance(val, str):
+        try:
+            val = json.loads(val)
+        except Exception:
+            break
+    return val
+
+
 @app.route("/experiments")
 def page_experiments():
     return render_template("experiments.html")
@@ -71,13 +82,8 @@ def page_experiment_detail(eid):
         return "实验不存在", 404
     # 解析 JSON 字符串字段供模板使用（处理历史双编码问题）
     for field in ("params", "results"):
-        val = e.get(field)
-        while isinstance(val, str):
-            try: val = json.loads(val)
-            except: break
-        if not isinstance(val, dict):
-            val = {}
-        e[field] = val
+        val = _json_unescape(e.get(field))
+        e[field] = val if isinstance(val, dict) else {}
     return render_template("experiment_detail.html", exp=e)
 
 
@@ -363,10 +369,10 @@ def api_exp_get(eid):
 
 
 def _auto_exp_name(exp_type: str, date: str = "") -> str:
-    """自动命名: {date}_{exp_type}_{seq:02d}，seq 为当天同类型实验序号（作为后缀）"""
+    """自动命名: {date}_{exp_type}_{seq:02d}，seq 为当天同类型已有标题的最大后缀 + 1"""
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
-    seq = models.exp_count_by_type_date(exp_type, date) + 1
+    seq = models.exp_next_seq(exp_type, date)
     return f"{date}_{exp_type}_{seq:02d}"
 
 
@@ -553,179 +559,187 @@ def api_exp_export():
     return _export_excel(exps)
 
 
+def _enzyme_long_rows(wells) -> list[list]:
+    """把每孔时间序列压成长格式行 [孔位, 名称, 参考类型, 浓度(ng/mL), 浓度(μM), 时间(min), OD]，
+    供「孔位-时间-OD」作图 Sheet 使用（时间秒转分钟，OD 保留 4 位）。"""
+    rows = []
+    if not isinstance(wells, dict):
+        return rows
+    ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}
+    for wid, w in sorted(wells.items()):
+        if not isinstance(w, dict):
+            continue
+        times = w.get("times") or []
+        ods = w.get("od") or []
+        if not times or not ods:
+            continue
+        for t, od in zip(times, ods):
+            rows.append([
+                wid, w.get("name", ""), ref_label.get(w.get("ref", ""), ""),
+                w.get("conc_ng_ml", ""), w.get("conc_uM", ""),
+                round(t / 60, 3), round(od, 4) if od is not None else "",
+            ])
+    return rows
+
+
 def _export_excel(exps, download_name="实验记录.xlsx"):
-    """共享导出逻辑 — exps 是已查询的实验列表"""
+    """共享导出逻辑 — exps 是已查询的实验列表。
+    每个实验一个区块：实验名称/日期/类型 各占一行（不再作为表头列），下面接该类型的数据表头 + 数据行。"""
     wb = Workbook()
     ws = wb.active
     ws.title = "实验记录"
 
-    # 根据实验类型选择表头
+    # 根据实验类型选择数据表头（实验名称/日期/类型 单独成行，不进表头）
     def _get_calc_type(e):
-        p = e.get("params", {})
-        if isinstance(p, str):
-            try: p = json.loads(p)
-            except: p = {}
+        p = _json_unescape(e.get("params", {}))
         return p.get("calc_type", "") if isinstance(p, dict) else ""
     all_enzyme = exps and all(_get_calc_type(e) == "enzyme" for e in exps)
     enzyme_long_rows = []  # 长格式（孔位-时间-OD），全酶活导出时附加为第二个 Sheet
-    if all_enzyme:
-        headers = ["实验名称", "日期", "类型", "孔位/命名", "参考类型",
-                   "浓度 (ng/mL)", "浓度 (μM)", "ΔOD/min", "R²", "样本", "波长"]
-    else:
-        headers = ["实验名称", "日期", "类型", "蛋白", "MW (Da)", "ε",
-                   "Abs 0.1%", "A280", "浓度 (μM)", "浓度 (mg/mL)",
-                   "目标浓度 (μM)", "目标体积 (μL)", "取母液 (μL)", "加缓冲液 (μL)"]
-    ws.append(headers)
-    for col in range(1, len(headers) + 1):
-        ws.cell(row=1, column=col).font = Font(bold=True)
 
-    row = 2
+    CONC_HEADERS = ["蛋白", "MW (Da)", "ε", "Abs 0.1%", "A280", "浓度 (μM)", "浓度 (mg/mL)",
+                    "目标浓度 (μM)", "目标体积 (μL)", "取母液 (μL)", "加缓冲液 (μL)"]
+    DIL_HEADERS = ["蛋白", "母液 (μM)", "稀释倍数", "每孔体积 (μL)", "步骤",
+                   "浓度 (μM)", "总体积 (μL)", "取上步 (μL)", "加缓冲液 (μL)"]
+    ENZ_HEADERS = ["孔位/命名", "参考类型", "浓度 (ng/mL)", "浓度 (μM)",
+                   "ΔOD/min", "R²", "样本", "波长"]
+
+    def _write_block(headers, rows):
+        """写一块数据：表头行（加粗）+ 数据行。"""
+        if not rows:
+            return
+        ws.append(headers)
+        for c in range(1, len(headers) + 1):
+            ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
+        for r in rows:
+            ws.append(r)
+
+    first_exp = True
     for e in exps:
-        params = e.get("params", "{}")
-        results = e.get("results", "{}")
-        if isinstance(params, str):
-            params = json.loads(params)
-        if isinstance(results, str):
-            results = json.loads(results)
-
+        params = _json_unescape(e.get("params", "{}"))
+        results = _json_unescape(e.get("results", "{}"))
         calc_type = params.get("calc_type", "")
         proteins = params.get("proteins", [])
 
+        # 实验信息：每项独立一行（块与块之间空一行分隔）
+        if not first_exp:
+            ws.append([])
+        first_exp = False
+        meta = [("实验名称", e.get("title", "")), ("日期", e.get("date", "")),
+                ("类型", e.get("exp_type", ""))]
+        if e.get("notes"):
+            meta.append(("备注", e["notes"]))
+        for label, val in meta:
+            ws.append([label, val])
+            ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+
         if calc_type == "concentration" and proteins:
+            rows = []
             for i, prot in enumerate(proteins):
-                if isinstance(prot, dict):
-                    mw_val = prot.get("mw", "")
-                    eps_val = prot.get("epsilon", "")
-                    abs_val = prot.get("abs_0_1pct", "")
-                    # 新格式：全在 params.proteins 里；旧格式：浓度在 results 数组里
-                    conc_uM = prot.get("conc_uM", "")
-                    conc_mg = prot.get("conc_mg_mL", "")
-                    if (not conc_uM) and isinstance(results, list) and i < len(results):
-                        r = results[i]
-                        if isinstance(r, dict):
-                            conc_uM = r.get("conc_uM", conc_uM)
-                            conc_mg = r.get("conc_mg_mL", conc_mg)
-                    ws.append([
-                        e["title"] if i == 0 else "", e.get("date", "") if i == 0 else "",
-                        e["exp_type"] if i == 0 else "", prot.get("name", ""),
-                        f"{mw_val:.1f}" if isinstance(mw_val, (int, float)) and mw_val else mw_val,
-                        f"{eps_val:.0f}" if isinstance(eps_val, (int, float)) and eps_val else eps_val,
-                        f"{abs_val:.4f}" if isinstance(abs_val, (int, float)) and abs_val else abs_val,
-                        prot.get("a280", ""), conc_uM, conc_mg,
-                        prot.get("target_conc", ""), prot.get("target_vol", ""),
-                        prot.get("take_vol", ""), prot.get("buffer_vol", ""),
-                    ])
-                row += 1
+                if not isinstance(prot, dict):
+                    continue
+                mw_val = prot.get("mw", "")
+                eps_val = prot.get("epsilon", "")
+                abs_val = prot.get("abs_0_1pct", "")
+                # 新格式：全在 params.proteins 里；旧格式：浓度在 results 数组里
+                conc_uM = prot.get("conc_uM", "")
+                conc_mg = prot.get("conc_mg_mL", "")
+                if (not conc_uM) and isinstance(results, list) and i < len(results):
+                    r = results[i]
+                    if isinstance(r, dict):
+                        conc_uM = r.get("conc_uM", conc_uM)
+                        conc_mg = r.get("conc_mg_mL", conc_mg)
+                rows.append([
+                    prot.get("name", ""),
+                    f"{mw_val:.1f}" if isinstance(mw_val, (int, float)) and mw_val else mw_val,
+                    f"{eps_val:.0f}" if isinstance(eps_val, (int, float)) and eps_val else eps_val,
+                    f"{abs_val:.4f}" if isinstance(abs_val, (int, float)) and abs_val else abs_val,
+                    prot.get("a280", ""), conc_uM, conc_mg,
+                    prot.get("target_conc", ""), prot.get("target_vol", ""),
+                    prot.get("take_vol", ""), prot.get("buffer_vol", ""),
+                ])
+            _write_block(CONC_HEADERS, rows)
 
         elif calc_type == "dilution":
-            # BLI 稀释实验：每蛋白的每步一行
+            # BLI 稀释实验：每蛋白每步一行
             dil_proteins = params.get("proteins", [])
-            if dil_proteins:
-                first = True
-                for prot in dil_proteins:
-                    if not isinstance(prot, dict):
+            rows = []
+            for prot in dil_proteins:
+                if not isinstance(prot, dict):
+                    continue
+                pid = str(prot.get("id", ""))
+                prot_result = results.get(pid, {}) if isinstance(results, dict) else {}
+                prot_steps = prot_result.get("steps", []) if isinstance(prot_result, dict) else []
+                if not prot_steps:
+                    # 旧格式兼容：results.steps 直接是列表
+                    prot_steps = results.get("steps", results) if isinstance(results, dict) else (results if isinstance(results, list) else [])
+                for st in prot_steps:
+                    if not isinstance(st, dict):
                         continue
-                    pid = str(prot.get("id", ""))
-                    prot_result = results.get(pid, {}) if isinstance(results, dict) else {}
-                    prot_steps = prot_result.get("steps", []) if isinstance(prot_result, dict) else []
-                    if not prot_steps:
-                        # 旧格式兼容：results.steps 直接是列表
-                        prot_steps = results.get("steps", results) if isinstance(results, dict) else (results if isinstance(results, list) else [])
-                    prot_name = prot.get("name", "")
-                    for i, st in enumerate(prot_steps):
-                        if isinstance(st, dict):
-                            ws.append([
-                                e["title"] if first and i == 0 else "",
-                                e.get("date", "") if first and i == 0 else "",
-                                e["exp_type"] if first and i == 0 else "",
-                                prot_name,
-                                "", "", "", "",
-                                st.get("conc_uM", ""),
-                                f"stock={prot.get('stock_uM','')}",
-                                f"factor={prot.get('factor','')}",
-                                f"vol={prot.get('vol','')}",
-                                st.get("stock_vol_uL", ""),
-                                st.get("buffer_vol_uL", ""),
-                            ])
-                        row += 1
+                    rows.append([
+                        prot.get("name", ""), prot.get("stock_uM", ""), prot.get("factor", ""),
+                        prot.get("vol", ""), st.get("step", ""), st.get("conc_uM", ""),
+                        st.get("total_vol_uL", ""), st.get("stock_vol_uL", ""),
+                        st.get("buffer_vol_uL", ""),
+                    ])
+            if rows:
+                _write_block(DIL_HEADERS, rows)
             else:
-                ws.append([e["title"], e.get("date", ""), e["exp_type"],
-                          e.get("protein_names", ""), "", "", "", "", "", "", "", "", "", ""])
-                row += 1
+                ws.append(["关联蛋白", e.get("protein_names", "")])
 
         elif calc_type == "enzyme":
             # 酶活实验：每孔一行
             wells = params.get("wells") or params.get("well_info") or {}
             emeta = params.get("meta", {})
             if wells:
-                first = True
+                rows = []
                 for wid, w in sorted(wells.items()):
                     if not isinstance(w, dict):
                         continue
                     fit = w.get("fit") or {}
                     ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}.get(w.get("ref", ""), "")
-                    ws.append([
-                        e["title"] if first else "", e.get("date", "") if first else "",
-                        e["exp_type"] if first else "", f"{wid} {w.get('name', '')}",
-                        ref_label,
+                    rows.append([
+                        f"{wid} {w.get('name', '')}", ref_label,
                         w.get("conc_ng_ml", ""), w.get("conc_uM", ""),
                         fit.get("slope", ""), fit.get("r2", ""),
                         emeta.get("sample", ""), emeta.get("wavelength", ""),
                     ])
-                    first = False
-                    row += 1
+                _write_block(ENZ_HEADERS, rows)
                 # 汇总 Sheet 的原始数据也收进长格式（孔位-时间-OD）
-                for wid, w in sorted(wells.items()):
-                    if not isinstance(w, dict):
-                        continue
-                    times = w.get("times") or []
-                    ods = w.get("od") or []
-                    if not times or not ods:
-                        continue
-                    ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}.get(w.get("ref", ""), "")
-                    for t, od in zip(times, ods):
-                        enzyme_long_rows.append([
-                            e["title"], wid, w.get("name", ""), ref_label,
-                            w.get("conc_ng_ml", ""), w.get("conc_uM", ""),
-                            round(t / 60, 3), round(od, 4) if od is not None else "",
-                        ])
+                for r in _enzyme_long_rows(wells):
+                    enzyme_long_rows.append([e["title"]] + r)
             else:
-                ws.append([e["title"], e.get("date", ""), e["exp_type"],
-                          e.get("protein_names", ""), "", "", "", "",
-                          "", "", "", ""])
-                row += 1
+                ws.append(["关联蛋白", e.get("protein_names", "")])
 
         elif proteins and not calc_type:
             # 旧格式：proteins 存在但没标记 calc_type，走旧逻辑
+            rows = []
             for i, prot in enumerate(proteins):
-                if isinstance(prot, dict):
-                    name = prot.get("name", "")
-                    a280 = prot.get("a280", "")
-                    conc_uM = ""
-                    conc_mg = ""
-                    if isinstance(results, list) and i < len(results):
-                        r = results[i]
-                        conc_uM = r.get("conc_uM", "")
-                        conc_mg = r.get("conc_mg_mL", "")
-                    ws.append([
-                        e["title"] if i == 0 else "", e.get("date", "") if i == 0 else "",
-                        e["exp_type"] if i == 0 else "", name, "", "", "", a280,
-                        conc_uM, conc_mg, "", "", "", ""
-                    ])
-                row += 1
-        else:
-            ws.append([
-                e["title"], e.get("date", ""), e["exp_type"],
-                e.get("protein_names", ""), "", "", "", "", "", "", "", "", "", ""
-            ])
-            row += 1
+                if not isinstance(prot, dict):
+                    continue
+                name = prot.get("name", "")
+                a280 = prot.get("a280", "")
+                conc_uM = ""
+                conc_mg = ""
+                if isinstance(results, list) and i < len(results):
+                    r = results[i]
+                    conc_uM = r.get("conc_uM", "")
+                    conc_mg = r.get("conc_mg_mL", "")
+                rows.append([name, "", "", "", a280, conc_uM, conc_mg, "", "", "", ""])
+            _write_block(CONC_HEADERS, rows)
 
-    if all_enzyme:
-        widths = [30, 12, 10, 20, 10, 14, 12, 12, 10, 22, 10]
-    else:
-        widths = [30, 12, 10, 20, 12, 10, 10, 10, 12, 12, 14, 14, 12, 12]
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+        else:
+            ws.append(["关联蛋白", e.get("protein_names", "")])
+
+    # 自适应列宽：按内容最大宽度设置（CJK 按 2 个宽度计，上限 40）
+    for col in range(1, ws.max_column + 1):
+        max_len = 0
+        for cell in ws[col]:
+            v = cell.value
+            if v is None:
+                continue
+            n = sum(2 if ord(ch) > 127 else 1 for ch in str(v))
+            max_len = max(max_len, n)
+        ws.column_dimensions[cell.column_letter].width = min(max_len + 2, 40)
 
     # 酶活导出：附加「孔位-时间-OD」长格式 Sheet（方便 Origin/Prism 等外部作图）
     if all_enzyme and enzyme_long_rows:
@@ -755,9 +769,14 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
 #  Weblogo API
 # ═══════════════════════════════════════════════════════════
 
-@app.route("/api/weblogo", methods=["POST"])
-def api_weblogo():
-    """用 logomaker 生成序列标识图，返回 base64 PNG"""
+# weblogo 结果缓存：同一请求（相同序列+选项）并发共享一次渲染；切页回来命中缓存秒回
+_weblogo_lock = Lock()
+_weblogo_cache = {}     # hash -> {"image": ..., "positions": ..., "range": ...}
+_weblogo_inflight = {}  # hash -> Event
+
+
+def _render_weblogo(sequences, color_scheme, n_pos, offset):
+    """用 logomaker 渲染信息 logo，返回 base64 PNG data URL + 位置信息"""
     import base64
     import pandas as pd
     import logomaker
@@ -768,47 +787,6 @@ def api_weblogo():
     # 中文字体（图内块标题），内部已 use('Agg') + 注册字体
     from fonts import setup_matplotlib_cjk
     setup_matplotlib_cjk()
-
-    data = request.get_json()
-    sequences = data.get("sequences", [])
-    color_scheme = data.get("color_scheme", "chemistry")
-    try:
-        multimer = int(data.get("multimer") or 1)
-    except (TypeError, ValueError):
-        multimer = 1
-    start = data.get("start")
-    end = data.get("end")
-
-    if not sequences or len(sequences) < 2:
-        return jsonify({"error": "至少需要 2 条对齐序列"}), 400
-    if multimer < 1:
-        return jsonify({"error": "多聚体数需 ≥ 1"}), 400
-
-    n_pos = len(sequences[0])
-    for s in sequences:
-        if len(s) != n_pos:
-            return jsonify({"error": "所有序列必须等长（已对齐）"}), 400
-
-    # 多聚体模式：序列为 N 个相同亚基串联，裁剪为单亚基
-    if multimer > 1:
-        if n_pos % multimer != 0:
-            return jsonify({"error": f"序列长度 {n_pos} 不能被多聚体数 {multimer} 整除"}), 400
-        n_pos //= multimer
-        sequences = [s[:n_pos] for s in sequences]
-
-    # 位点区间（1-based 闭区间）
-    offset = 0
-    if start is not None or end is not None:
-        try:
-            lo = int(start) if start is not None else 1
-            hi = int(end) if end is not None else n_pos
-        except (TypeError, ValueError):
-            return jsonify({"error": "位点必须是整数"}), 400
-        if lo < 1 or hi > n_pos or lo > hi:
-            return jsonify({"error": f"位点区间超出范围（1--{n_pos}）"}), 400
-        sequences = [s[lo - 1:hi] for s in sequences]
-        n_pos = hi - lo + 1
-        offset = lo - 1
 
     # 构建频率矩阵
     chars = sorted(set("".join(sequences)))
@@ -854,12 +832,90 @@ def api_weblogo():
     plt.close(fig)
     buf.seek(0)
     img_b64 = base64.b64encode(buf.read()).decode()
-
-    return jsonify({
+    return {
         "image": f"data:image/png;base64,{img_b64}",
         "positions": n_pos,
         "range": [offset + 1, offset + n_pos],
-    })
+    }
+
+
+@app.route("/api/weblogo", methods=["POST"])
+def api_weblogo():
+    """生成序列标识图。结果按请求参数缓存：同一请求并发共享一次渲染，切页回来直接命中缓存秒回。"""
+    data = request.get_json()
+    sequences = data.get("sequences", [])
+    color_scheme = data.get("color_scheme", "chemistry")
+    try:
+        multimer = int(data.get("multimer") or 1)
+    except (TypeError, ValueError):
+        multimer = 1
+    start = data.get("start")
+    end = data.get("end")
+
+    if not sequences or len(sequences) < 2:
+        return jsonify({"error": "至少需要 2 条对齐序列"}), 400
+    if multimer < 1:
+        return jsonify({"error": "多聚体数需 ≥ 1"}), 400
+
+    n_pos = len(sequences[0])
+    for s in sequences:
+        if len(s) != n_pos:
+            return jsonify({"error": "所有序列必须等长（已对齐）"}), 400
+
+    # 多聚体模式：序列为 N 个相同亚基串联，裁剪为单亚基
+    if multimer > 1:
+        if n_pos % multimer != 0:
+            return jsonify({"error": f"序列长度 {n_pos} 不能被多聚体数 {multimer} 整除"}), 400
+        n_pos //= multimer
+        sequences = [s[:n_pos] for s in sequences]
+
+    # 位点区间（1-based 闭区间）
+    offset = 0
+    if start is not None or end is not None:
+        try:
+            lo = int(start) if start is not None else 1
+            hi = int(end) if end is not None else n_pos
+        except (TypeError, ValueError):
+            return jsonify({"error": "位点必须是整数"}), 400
+        if lo < 1 or hi > n_pos or lo > hi:
+            return jsonify({"error": f"位点区间超出范围（1--{n_pos}）"}), 400
+        sequences = [s[lo - 1:hi] for s in sequences]
+        n_pos = hi - lo + 1
+        offset = lo - 1
+
+    key = hashlib.md5(json.dumps(
+        {"seq": sequences, "cs": color_scheme, "mm": multimer, "s": start, "e": end},
+        sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+    with _weblogo_lock:
+        if key in _weblogo_cache:
+            return jsonify(_weblogo_cache[key])
+        ev = _weblogo_inflight.get(key)
+        if ev is None:
+            ev = _weblogo_inflight[key] = Event()
+            owned = True
+        else:
+            owned = False
+    if not owned:
+        # 同一请求正在别的线程渲染：等它完成直接取缓存（去重，避免重复计算）
+        ev.wait()
+        with _weblogo_lock:
+            if key in _weblogo_cache:
+                return jsonify(_weblogo_cache[key])
+
+    try:
+        result = _render_weblogo(sequences, color_scheme, n_pos, offset)
+        with _weblogo_lock:
+            if len(_weblogo_cache) >= 20:  # 只留最近 20 个结果，防无限增长
+                _weblogo_cache.pop(next(iter(_weblogo_cache)))
+            _weblogo_cache[key] = result
+    finally:
+        # 无论成功失败都释放 in-flight，避免后续同请求永久等待
+        with _weblogo_lock:
+            if key in _weblogo_inflight:
+                _weblogo_inflight[key].set()
+                del _weblogo_inflight[key]
+    return jsonify(result)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1027,17 +1083,8 @@ def api_enzyme_export():
     for c in range(1, len(headers) + 1):
         ws.cell(row=1, column=c).font = Font(bold=True)
     ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}
-    for wid, wd in sorted(wells.items()):
-        if not isinstance(wd, dict):
-            continue
-        times = wd.get("times") or []
-        ods = wd.get("od") or []
-        for t, od in zip(times, ods):
-            ws.append([
-                wid, wd.get("name", ""), ref_label.get(wd.get("ref", ""), ""),
-                wd.get("conc_ng_ml", ""), wd.get("conc_uM", ""),
-                round(t / 60, 3), round(od, 4) if od is not None else "",
-            ])
+    for row in _enzyme_long_rows(wells):
+        ws.append(row)
 
     # Sheet 2: 动力学汇总
     ws2 = wb.create_sheet("动力学汇总")

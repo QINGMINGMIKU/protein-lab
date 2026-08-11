@@ -148,7 +148,9 @@
 <!-- ═══════════════════════════════════════════════ -->
 <!--  其他实验：显示原始 JSON                         -->
 <!-- ═══════════════════════════════════════════════ -->
-{% if not calc_type or not proteins %}
+{# 兜底：仅当类型无法识别（或浓度/BLI 缺蛋白数据无法渲染表格）时才显示原始 JSON；酶活/Weblogo 用 wells/image 渲染，不在此列 #}
+{% set known = calc_type in ["concentration", "dilution", "enzyme", "weblogo"] %}
+{% if not known or (calc_type in ["concentration", "dilution"] and not proteins) %}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
   <div class="calc-card">
     <h2>实验参数</h2>

@@ -105,8 +105,9 @@ label textarea { resize: vertical; }
 
 /* ── Detail Panel ──────────────────────────────────── */
 #detailPanel { margin-top: 16px; }
-#detailPanel .info-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 14px; }
-#detailPanel .info-grid dt { color: #666; }
+/* 蛋白详情弹窗 + 实验详情页信息卡共用的 键值两列网格（实验详情此前未套上样式，plaintext 平铺） */
+.info-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 14px; }
+.info-grid dt { color: #666; }
 #detailPanel .sequence-full { font-family: "SF Mono", "Consolas", monospace; font-size: 12px; word-break: break-all; background: #f8f9fb; padding: 10px; border-radius: 6px; margin-top: 12px; max-height: 120px; overflow-y: auto; }
 
 /* ── Tab navigation ───────────────────────────────── */
