@@ -1720,9 +1720,10 @@ async function enzymeSaveExp() {
   } catch (err) { toast(err.message, true); }
 }
 
-// 导出作图友好 Excel（长格式 孔位-时间-OD + 动力学汇总）
+// 导出作图友好 Excel（长格式 孔位-时间-OD + 动力学汇总），文件名用自动命名
 async function enzymeExportExcel() {
   if (!enzymeData) { toast("请先上传数据", true); return; }
+  const autoName = await getAutoName("酶活测定") || "酶活测定";
   const wells = {};
   for (const [id, wd] of Object.entries(enzymeData.wells)) {
     const info = enzymeWellInfo[id] || {};
@@ -1746,7 +1747,7 @@ async function enzymeExportExcel() {
     const blob = await r.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "enzyme_well_time_od.xlsx";
+    a.download = `${autoName}.xlsx`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
