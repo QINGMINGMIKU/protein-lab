@@ -1673,10 +1673,11 @@ async function enzymePlot(type) {
   } catch (err) { toast(err.message, true); }
 }
 
-function downloadEnzymePlot() {
+async function downloadEnzymePlot() {
   if (!enzymeLastImage) { toast("请先生成曲线图", true); return; }
+  const auto = await getAutoName("酶活测定") || "酶活测定";
   const name = enzymeLastPlotType === "michaelis" ? "MM曲线" : "动力学曲线";
-  downloadDataUrl(enzymeLastImage, `${name}_${new Date().toISOString().slice(0,10)}.png`);
+  downloadDataUrl(enzymeLastImage, `${auto}_${name}.png`);
 }
 
 async function enzymeSaveExp() {
@@ -1944,9 +1945,10 @@ async function generateWeblogo() {
   } catch (err) { toast(err.message, true); }
 }
 
-function downloadWeblogo() {
+async function downloadWeblogo() {
   if (!weblogoLastImage) return;
-  downloadDataUrl(weblogoLastImage, `weblogo_${new Date().toISOString().slice(0,10)}.png`);
+  const auto = await getAutoName("Weblogo") || "Weblogo";
+  downloadDataUrl(weblogoLastImage, `${auto}.png`);
 }
 
 async function saveWeblogoExp() {

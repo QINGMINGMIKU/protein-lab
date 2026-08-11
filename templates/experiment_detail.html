@@ -136,6 +136,9 @@
   {% if img %}
   <p style="color:#888;font-size:13px;margin-bottom:12px">{{ proteins|length }} 条序列</p>
   <img src="{{ img }}" style="max-width:100%;border-radius:8px" alt="Weblogo">
+  <div style="margin-top:8px">
+    <button class="btn btn-sm btn-outline" onclick="downloadDetailImage()">📥 下载 PNG</button>
+  </div>
   {% else %}
   <p style="color:#888">无图像数据</p>
   {% endif %}
@@ -161,6 +164,19 @@
 <a href="/experiments" style="display:inline-block;margin-top:8px;color:#888;font-size:14px">← 返回实验列表</a>
 
 <script>
+// 下载详情页图片，文件名用实验标题（已保存时通常即自动命名）
+function downloadDetailImage() {
+  const img = document.querySelector("img[alt='Weblogo']");
+  if (!img) return;
+  const title = (document.querySelector("h1")?.textContent || "").trim() || "weblogo";
+  const a = document.createElement("a");
+  a.href = img.src;
+  a.download = `${title}.png`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 async function editExpTitle(id) {
   const newTitle = prompt("新标题:", document.querySelector("h1").textContent);
   if (!newTitle || !newTitle.trim()) return;
