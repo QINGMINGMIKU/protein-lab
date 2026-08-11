@@ -79,10 +79,12 @@ def protein_list(search: str = "", tag_filter: str = "") -> list[dict]:
         params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
     if tag_filter:
         # tag_filter 逗号分隔，要求同时匹配多个标签（交集）
+        # 标签字段以 "tag1, tag2"（逗号+空格）存储：先把 ", " 折叠为 ","
+        # 再匹配，才能精确命中非首位的标签（如 "5.5A"）；多词标签内部空格不受影响
         for t in tag_filter.split(","):
             t = t.strip()
             if t:
-                clauses.append("(',' || tag || ',' LIKE ?)")
+                clauses.append("(',' || REPLACE(',' || tag, ', ', ',') || ',' LIKE ?)")
                 params.append(f"%,{t},%")
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     rows = conn.execute(
