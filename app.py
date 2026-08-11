@@ -958,10 +958,10 @@ def api_enzyme_plot():
     return jsonify({"image": f"data:image/png;base64,{base64.b64encode(buf.read()).decode()}"})
 
 
-def open_browser():
+def open_browser(port):
     import time
-    time.sleep(0.5)  # 等 Flask 完全就绪
-    webbrowser.open("http://127.0.0.1:5000")
+    time.sleep(0.5)  # 等服务器完全就绪
+    webbrowser.open(f"http://127.0.0.1:{port}")
 
 
 def backup_database():
@@ -1011,17 +1011,45 @@ if __name__ == "__main__":
             shutil.copy2(src, models.DB_PATH)
             print(f"  已导入数据库 -> {models.DB_PATH}")
 
+    # 端口：默认 5000，被占用自动顺延找空闲端口；--port <n> 显式指定（占用则报错提示）。
+    import socket
+    if "--port" in sys.argv:
+        try:
+            port = int(sys.argv[sys.argv.index("--port") + 1])
+        except (IndexError, ValueError):
+            print("  --port 需要数字端口，例如 --port 8080")
+            sys.exit(1)
+        with socket.socket() as s:
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                print(f"  端口 {port} 已被占用，请用 --port 指定其他端口")
+                sys.exit(1)
+    else:
+        port = None
+        for p in range(5000, 5050):
+            with socket.socket() as s:
+                try:
+                    s.bind(("127.0.0.1", p))
+                    port = p
+                    break
+                except OSError:
+                    continue
+        if port is None:
+            print("  找不到可用端口（5000-5049 均被占用）")
+            sys.exit(1)
+
     print("========================================")
     print("  Protein Lab")
-    print("  服务地址    http://127.0.0.1:5000")
+    print(f"  服务地址    http://127.0.0.1:{port}")
     print("  浏览器即将自动打开")
     print("  关闭此窗口即停止服务")
     print("========================================")
     backup_database()
-    Timer(0.5, open_browser).start()
+    Timer(0.5, open_browser, args=(port,)).start()
     # waitress 生产 WSGI 服务器（纯 Python，跨平台）：无开发服务器警告、不刷请求日志。
     # 静默 waitress 自身的启动/请求日志，只保留我们自己打印的 banner。
     import logging
     logging.getLogger("waitress").setLevel(logging.CRITICAL)
     from waitress import serve
-    serve(app, host="127.0.0.1", port=5000)
+    serve(app, host="127.0.0.1", port=port)

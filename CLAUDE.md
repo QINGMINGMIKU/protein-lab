@@ -58,6 +58,7 @@ protein_lab/
 - **路径与打包（v0.0.4）**：`paths.py` 统一路径解析——`app_base_dir()` 决定 DB/backups 位置（frozen→EXE 同目录，dev→源码目录），`resource_path()` 读 templates/static/fonts（frozen→`_MEIPASS`）。`models.DB_PATH` 与 Flask `template_folder`/`static_folder` 都走它。中文字体改走 `fonts.py`（打包 Noto Sans SC，OFL 协议，仓库 `fonts/` 内），不再依赖上级工作区。
 - **CLI 入口**：同一二进制支持 `--mcp`（stdio MCP，须在 print 前短路避免污染 stdout）与 `--import-db <旧库>`（空库时一次复制迁移）。
 - **Web 服务器（v0.0.4）**：main 块用 **waitress**（生产 WSGI，纯 Python 跨平台）`serve()` 替代 Flask 开发服务器——启动无 "development server" 警告、请求日志被 CRITICAL 级别压制，控制台只显示产品 banner。waitress 是 main 块惰性 import，已列入 spec `hiddenimports`。
+- **端口（v0.0.4）**：默认 5000，被占用自动顺延找空闲（5000-5049）；`--port <n>` 显式指定（占用则报错退出）。banner / `open_browser` / `serve()` 都用解析出的实际端口。
 - **打包配置**：`protein_lab.spec`（**onedir**，console=True，`exclude_binaries` + `COLLECT`）+ `.github/workflows/build.yml`（tag 推送时 Windows/macOS 双平台构建 onedir 目录、zip 后附到 Release）。onedir（非 onefile）免启动解压、杀毒误报低——体积换体验的取舍。注意 `mcp_server`、`fonts`、`paths`、`pandas`、`logomaker`、`matplotlib` 是惰性 import，需在 spec `hiddenimports` 显式声明。
 
 ## 数据安全（最高优先级）

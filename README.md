@@ -27,6 +27,10 @@
 - 从 GitHub Release 下载 `protein-lab-windows.zip` 或 `protein-lab-macos.zip`，解压后进入 `protein_lab/` 目录，双击 `protein_lab.exe`（Windows）/ 运行 `protein_lab`（macOS）即可。放在**可写目录**（如桌面/下载，不要放 `C:\Program Files`）。
 - 打包采用 **onedir 目录形态**（非单文件）：**免启动解压、秒开、杀毒误报低**。
 - 后端用生产 WSGI 服务器（waitress）：**启动无"开发服务器"警告、不刷访问日志**，控制台只显示产品 banner。
+- 默认端口 **5000**，被占用时自动顺延（5001、5002…）不冲突；需固定端口用 `--port`：
+  ```bash
+  protein_lab.exe --port 8080
+  ```
 - 数据库 `protein_lab.db` 与 `backups/` 自动创建在**程序同目录**。首次运行是空库，想带现有数据，用 `--import-db`：
   ```bash
   protein_lab.exe --import-db <旧 protein_lab.db 路径>
