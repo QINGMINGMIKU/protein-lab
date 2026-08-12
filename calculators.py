@@ -51,15 +51,53 @@ def calc_conc(a280: float, ext_coeff: float, mw: float,
     if a280 < 0:
         raise ValueError(f"A280 不能为负数，当前值: {a280}")
     molar_M = a280 / (ext_coeff * path_length)
+    molar_conc_uM = molar_M * 1e6
+    mass_conc_ng_uL = molar_conc_uM * mw / 1000  # 1 µM × MW/1000 = ng/µL
     return {
         "a280": a280,
         "path_length_cm": path_length,
         "epsilon": ext_coeff,
         "mw": mw,
-        "molar_conc_uM": round(molar_M * 1e6, 2),
-        "mass_conc_mg_mL": round(molar_M * mw, 4),
-        "mass_conc_ug_mL": round(molar_M * mw * 1000, 2),
+        "molar_conc_uM": round(molar_conc_uM, 2),
+        "molar_conc_nM": round(molar_conc_uM * 1e3, 2),
+        "molar_conc_M": round(molar_conc_uM / 1e6, 10),
+        "mass_conc_mg_mL": round(mass_conc_ng_uL / 1000, 4),
+        "mass_conc_ug_mL": round(mass_conc_ng_uL, 2),
+        "mass_conc_ng_uL": round(mass_conc_ng_uL, 2),
     }
+
+
+# ═══════════════════════════════════════════════════════════
+#  浓度单位换算 kernel（隐藏能力：6 单位互转）
+# ═══════════════════════════════════════════════════════════
+# canonical 基准：molar→µM，mass→ng/µL。跨 kind（摩尔↔质量）必须提供 mw (Da)：
+#   molar→mass: base × mw / 1000；mass→molar: base × 1000 / mw
+# 前端 static/app.js 有逐行镜像 convertConc()，改动时两边同步。
+
+CONC_UNITS = {
+    "M":     {"kind": "molar", "factor": 1e6},    # → µM
+    "uM":    {"kind": "molar", "factor": 1},
+    "nM":    {"kind": "molar", "factor": 1e-3},
+    "mg/mL": {"kind": "mass",  "factor": 1000},   # → ng/µL
+    "ug/mL": {"kind": "mass",  "factor": 1},
+    "ng/uL": {"kind": "mass",  "factor": 1},
+}
+
+
+def convert_concentration(value: float, from_unit: str, to_unit: str,
+                          mw: float = None) -> float:
+    """6 种浓度单位互转。同 kind 直接比例换算；跨 kind（摩尔↔质量）需 mw (Da)。"""
+    if from_unit not in CONC_UNITS:
+        raise ValueError(f"未知单位: {from_unit}")
+    if to_unit not in CONC_UNITS:
+        raise ValueError(f"未知单位: {to_unit}")
+    f, t = CONC_UNITS[from_unit], CONC_UNITS[to_unit]
+    base = value * f["factor"]  # canonical 基准（µM 或 ng/µL）
+    if f["kind"] != t["kind"]:
+        if not mw or mw <= 0:
+            raise ValueError("跨摩尔/质量换算需要分子量 mw (Da)")
+        base = base * mw / 1000 if f["kind"] == "molar" else base * 1000 / mw
+    return base / t["factor"]
 
 
 @dataclass

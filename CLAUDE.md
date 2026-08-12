@@ -51,6 +51,7 @@ protein_lab/
 
 - **分层**：`app.py` 是单体 Flask（页面路由渲染 Jinja2 + `/api/*` JSON 接口 + 内存 undo 栈）；纯计算在 `calculators.py`（无 Flask 依赖，可独立复用）；SQL 全在 `models.py`；`mcp_server.py` 直接 `import models` + `calculators`，**与 Web 共用同一个 `protein_lab.db`**。
 - **`models.init_db()` 在 import 时执行**（models.py 末尾）——只要 `import models` 就触碰真实库。测试规范里的 reload 顺序就是为绕过这个副作用而设计。
+- **浓度单位 kernel（v0.0.5）**：`calculators.CONC_UNITS` + `convert_concentration(value, from, to, mw)`（canonical 基准 molar→µM、mass→ng/µL，跨 kind 需 mw：`µM × MW/1000 = ng/µL`）——**前端 `static/app.js` 有逐行镜像 `convertConc`/`formatConc`**，改动必须两边同步。计算器工具里浓度只做**显示层换算**（下拉框切单位），存档/详情页/导出仍固定 µM/mg/mL；`calc_conc()` 返回 6 单位。
 - **实验 `params`/`results` 可能是双重编码的 JSON 字符串**（历史数据遗留）——读这两个字段要 `while isinstance(val, str): json.loads` 防御性解包（见 `page_experiment_detail`、`_export_excel`）。
 - **undo 栈是内存态**（app.py `_undo_stack`，上限 20 条），重启即失。
 - **字体解析（v0.0.4）**：weblogo 与酶活绘图走 `fonts.py` 候选链——打包 Noto Sans SC（`resource_path("fonts/NotoSansSC-Regular.otf")`）→ 旧 dev 回退 `../fonts/simhei.ttf` → Windows 系统字体 → macOS 系统字体，返回第一个存在者。已不依赖上级工作区。
@@ -101,7 +102,7 @@ protein_lab/
 - v0.0.2 ✓ 已发布 (2026-08-09) — Weblogo / 撤销 / ProtParam / 酶活计算 / 启动自动备份
 - v0.0.3 ✓ 已发布 (2026-08-10) — 批量改标签 / 表头排序 / Weblogo 换行+区间+多聚体
 - v0.0.4 ✓ 已发布 (2026-08-11) — PyInstaller **onedir** 打包（免解压、秒开、误报低）+ GitHub Actions CI 双平台构建（tag 推送出 Win zip + macOS zip 附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db` + 酶活模块增强（**实验自动命名** `{date}_{type}_{seq:02d}` / 曲线图 PNG 下载 / **作图友好 Excel** 孔位-时间-OD 长格式 + 动力学汇总）+ 发布前打磨（Weblogo 服务端缓存+切页自动恢复 / Excel 导出**实验信息独占行**布局 / 详情页兜底修复 / 信息卡表格排版）
-- v0.0.5 — Excel 导出优化（**信息独占行布局 + BLI 母液/稀释列** 已随 v0.0.4 落地，无剩余待办）
+- v0.0.5 — **浓度单位管理**（隐藏换算 kernel + 浓度计算处单位切换）：`calculators.CONC_UNITS` + `convert_concentration`（6 单位 M/uM/nM/mg/mL/ug/mL/ng/uL 互转，跨摩尔/质量需 mw，前端 JS 逐行镜像 `convertConc`/`formatConc`）；蛋白浓度 + BLI 浓度梯度 tab 各加**浓度单位下拉框**（仅显示层换算，存档仍 µM/mg/mL，默认 uM 与现状一致）；MCP 新增 `convert_concentration` 工具。后续可做：存档/详情页单位显示、enzyme 输入扩 6 单位
 - v0.0.6 — BLI 原始数据拟合 + 多步稀释管理
 - v0.0.7 — AKTA 峰图整理
 - v0.1.0（暂缓）— 连续实验管理（浓度→稀释→BLI/酶活串联工作流）

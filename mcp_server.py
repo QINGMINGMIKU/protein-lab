@@ -17,7 +17,7 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import models
-from calculators import calc_ext_coeff, calc_conc, calc_dilution_series
+from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert_concentration
 
 # ── MCP JSON-RPC dispatcher ────────────────────────────────
 
@@ -78,6 +78,20 @@ TOOLS = [
                 "path_length_cm": {"type": "number", "description": "光程 (cm)，默认 1.0"}
             },
             "required": ["a280"]
+        }
+    },
+    {
+        "name": "convert_concentration",
+        "description": "6 种浓度单位互转（M、uM、nM、mg/mL、ug/mL、ng/uL）。跨摩尔/质量换算需提供 mw (Da)，如 1 µM × MW/1000 = ng/uL。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "number", "description": "浓度数值"},
+                "from_unit": {"type": "string", "description": "源单位: M / uM / nM / mg/mL / ug/mL / ng/uL"},
+                "to_unit": {"type": "string", "description": "目标单位: M / uM / nM / mg/mL / ug/mL / ng/uL"},
+                "mw": {"type": "number", "description": "分子量 (Da)，跨摩尔↔质量换算时必填"}
+            },
+            "required": ["value", "from_unit", "to_unit"]
         }
     },
     {
@@ -186,6 +200,16 @@ def handle_tools_call(id_, params):
 
             result = calc_conc(a280, epsilon, mw, path)
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "convert_concentration":
+            value = float(args["value"])
+            from_unit = args["from_unit"]
+            to_unit = args["to_unit"]
+            mw = args.get("mw")
+            result = convert_concentration(value, from_unit, to_unit, mw)
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps({
+                "value": result, "from_unit": from_unit, "to_unit": to_unit,
+                "mw": mw}, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "calculate_dilution":
             stock = float(args["stock_conc_uM"])

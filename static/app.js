@@ -37,6 +37,44 @@ const API = {
   },
 };
 
+// ═════════════════════════════════════════════════════
+//  浓度单位换算 kernel（隐藏能力：6 单位互转）
+//  与 calculators.py 的 CONC_UNITS / convert_concentration 逐行镜像，改动时两边同步。
+//  canonical 基准：molar→µM，mass→ng/µL；跨 kind（摩尔↔质量）需 mw (Da)。
+// ═════════════════════════════════════════════════════
+const CONC_UNITS = {
+  M:     { kind: "molar", factor: 1e6 },
+  uM:    { kind: "molar", factor: 1 },
+  nM:    { kind: "molar", factor: 1e-3 },
+  "mg/mL": { kind: "mass", factor: 1000 },
+  "ug/mL": { kind: "mass", factor: 1 },
+  "ng/uL": { kind: "mass", factor: 1 },
+};
+
+function convertConc(value, from, to, mw) {
+  const f = CONC_UNITS[from], t = CONC_UNITS[to];
+  if (!f || !t) throw new Error(`未知单位: ${from} / ${to}`);
+  let base = value * f.factor;
+  if (f.kind !== t.kind) {
+    if (!mw || mw <= 0) throw new Error("跨摩尔/质量换算需要分子量 mw (Da)");
+    base = f.kind === "molar" ? base * mw / 1000 : base * 1000 / mw;
+  }
+  return base / t.factor;
+}
+
+// 展示格式化：极小/极大值走科学计数，其余 toPrecision(4) 去尾零
+function formatConc(value, unit) {
+  if (value == null || !isFinite(value)) return "-";
+  const abs = Math.abs(value);
+  if (abs !== 0 && (abs < 0.01 || abs >= 1e5)) return value.toExponential(2);
+  return (+value.toPrecision(4)).toString();
+}
+
+// 某单位的互补 kind 默认单位（主列展示所选单位，副列展示另一个 kind）
+function complementaryUnit(unit) {
+  return CONC_UNITS[unit]?.kind === "molar" ? "mg/mL" : "uM";
+}
+
 // ── 实验自动命名 ─────────────────────────────
 // 系统变量: {date}_{exp_type}_{seq:02d}，seq 为当天同类型实验序号；支持用户自定义覆盖。
 // 本地日期 YYYY-MM-DD（toISOString 是 UTC，UTC+8 凌晨 8 点前会记成"昨天"）
@@ -504,6 +542,8 @@ async function refreshAutoNamePlaceholders() {
 // ═════════════════════════════════════════════════════
 
 let selectedProteins = {};  // { id: { name, mw, ext_ox, abs_0_1pct, ... } }
+let concUnit = localStorage.getItem("concUnit") || "uM";  // 浓度结果显示单位（6 单位之一）
+let dilUnit = localStorage.getItem("dilUnit") || "uM";    // BLI 稀释步骤浓度显示单位
 let allProteins = [];
 let copyCache = null;       // cached experiment data for copy tab
 let calcTagFilter = [];     // 计算工具标签筛选
@@ -655,6 +695,27 @@ function renderTable() {
   }).join("");
 }
 
+// 更新浓度表两列结果表头：主列 = 所选单位，副列 = 互补 kind 默认单位
+function updateConcHeaders() {
+  const ths = document.querySelectorAll("#concTable thead th");
+  if (ths.length < 9) return;
+  ths[6].textContent = `浓度 (${concUnit})`;
+  ths[7].textContent = `浓度 (${complementaryUnit(concUnit)})`;
+}
+
+// 浓度单位切换下拉框：更新全局单位 → 重算已有行
+function changeConcUnit() {
+  const sel = document.getElementById("concUnitSel");
+  concUnit = sel ? sel.value : "uM";
+  localStorage.setItem("concUnit", concUnit);
+  updateConcHeaders();
+  const rows = document.querySelectorAll("#concTable tbody tr[data-protein-id]");
+  rows.forEach(row => {
+    const a = parseFloat(row.querySelector(".a280-input")?.value);
+    if (!isNaN(a) && a >= 0) calcOneRow(row);
+  });
+}
+
 // ── 单行本地计算（Beer-Lambert + 稀释规划），不调 API ──
 function calcOneRow(row) {
   const id = row.dataset.proteinId;
@@ -681,8 +742,10 @@ function calcOneRow(row) {
   p._conc_uM = conc_uM;
   p._conc_mg = conc_mg;
 
-  row.querySelector(".conc-uM").textContent = conc_uM;
-  row.querySelector(".conc-mg").textContent = conc_mg;
+  // 结果按所选单位显示：主列 = concUnit，副列 = 互补 kind 的默认单位（µM↔mg/mL）
+  const secondaryUnit = complementaryUnit(concUnit);
+  row.querySelector(".conc-uM").textContent = formatConc(convertConc(conc_uM, "uM", concUnit, p.mw), concUnit);
+  row.querySelector(".conc-mg").textContent = formatConc(convertConc(conc_uM, "uM", secondaryUnit, p.mw), secondaryUnit);
 
   // 目标浓度稀释
   const targetConc = parseFloat(row.querySelector(".target-conc").value);
@@ -801,6 +864,7 @@ async function importBliFromExp() {
 
       bliProteins[pid] = {
         name: prot.name || "",
+        mw: prot.mw,
         stock_uM: conc_uM,
         start_uM: Math.min(conc_uM, 10),
         factor: 2,
@@ -849,7 +913,7 @@ function addBliProtein(id) {
   if (bliProteins[id]) return;
   const p = allProteins.find(x => x.id === id);
   if (!p) return;
-  bliProteins[id] = { name: p.name, stock_uM: 50, start_uM: 10, factor: 2, steps: 8, vol: 200, dead: 5 };
+  bliProteins[id] = { name: p.name, mw: p.mw, stock_uM: 50, start_uM: 10, factor: 2, steps: 8, vol: 200, dead: 5 };
   document.getElementById("bliProteinSearch").value = "";
   document.getElementById("bliSearchResults").classList.add("hidden");
   renderBliTable();
@@ -942,7 +1006,10 @@ async function calcAllBliRows() {
 }
 
 // ── Render BLI results ───────────────────────────────
+let _lastBliResults = null;  // 缓存最近结果，切换单位时直接重渲染（不再调 API）
+
 function renderBliResults(results) {
+  _lastBliResults = results;
   const container = document.getElementById("bliResults");
   const ids = Object.keys(results);
   if (!ids.length) { container.innerHTML = ""; return; }
@@ -957,17 +1024,31 @@ function renderBliResults(results) {
     }
     const totalStock = r.steps.reduce((s, st) => s + st.stock_vol_uL, 0);
     const totalBuffer = r.steps.reduce((s, st) => s + st.buffer_vol_uL, 0);
+    // 步骤浓度列按所选单位显示（保存仍为 µM）；缺 mw 无法跨 kind 时回退 µM 原文
+    const mw = bliProteins[id]?.mw;
+    const fmtConc = (uM) => {
+      try { return formatConc(convertConc(uM, "uM", dilUnit, mw), dilUnit); }
+      catch { return uM; }
+    };
     html += `
       <div class="result-box" style="margin-bottom:14px">
         <strong>${esc(p.name)}</strong> (母液 ${r.stock_conc_uM} μM, ${r.dilution_factor}× 稀释, ${r.n_steps} 步)
-        <table style="margin-top:6px"><thead><tr><th>#</th><th>浓度 (μM)</th><th>总体积 (μL)</th><th>取上步 (μL)</th><th>缓冲液 (μL)</th></tr></thead>
+        <table style="margin-top:6px"><thead><tr><th>#</th><th>浓度 (${dilUnit})</th><th>总体积 (μL)</th><th>取上步 (μL)</th><th>缓冲液 (μL)</th></tr></thead>
         <tbody>${r.steps.map(s => `
-          <tr><td>${s.step}</td><td>${s.conc_uM}</td><td>${s.total_vol_uL}</td><td>${s.stock_vol_uL}</td><td>${s.buffer_vol_uL}</td></tr>
+          <tr><td>${s.step}</td><td>${fmtConc(s.conc_uM)}</td><td>${s.total_vol_uL}</td><td>${s.stock_vol_uL}</td><td>${s.buffer_vol_uL}</td></tr>
         `).join("")}</tbody></table>
         <p style="margin-top:6px;font-size:13px;color:#666">第一步总需求 ≈ ${r.steps[0].total_vol_uL} μL（含递推稀释裕量）</p>
       </div>`;
   }
   container.innerHTML = html;
+}
+
+// BLI 稀释单位切换：更新全局单位 → 用缓存结果重渲染
+function changeDilUnit() {
+  const sel = document.getElementById("dilUnitSel");
+  dilUnit = sel ? sel.value : "uM";
+  localStorage.setItem("dilUnit", dilUnit);
+  if (_lastBliResults) renderBliResults(_lastBliResults);
 }
 
 // ── Save BLI table as experiment ─────────────────────
@@ -1214,6 +1295,7 @@ async function applyCopyAndSwitch() {
       if (!bliProteins[pid]) {
         bliProteins[pid] = {
           name: p.name,
+          mw: p.mw || selectedProteins[pid]?.mw,
           stock_uM: p.stock_uM || 50,
           start_uM: p.start_uM || 10,
           factor: p.factor || 2,
@@ -2200,8 +2282,16 @@ function init() {
   if (document.querySelector("#concTable") || document.querySelector("#proteinSearch")) {
     loadProteinSelects();
     restoreCalcState();
+    // 浓度单位下拉框（持久化到 localStorage）
+    const unitSel = document.getElementById("concUnitSel");
+    if (unitSel) unitSel.value = concUnit;
+    updateConcHeaders();
     // 保存状态：离开页面前
     window.addEventListener("beforeunload", saveCalcState);
+  }
+  if (document.querySelector("#bliTable") || document.querySelector("#bliProteinSearch")) {
+    const dilSel = document.getElementById("dilUnitSel");
+    if (dilSel) dilSel.value = dilUnit;
   }
 }
 init();

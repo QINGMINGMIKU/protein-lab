@@ -31,6 +31,16 @@
         </select>
         <span class="cys-hint" title="氧化态: 含二硫键的分泌蛋白/膜蛋白/氧化环境&#10;还原态: 胞内蛋白/含DTT或TCEP的缓冲液">?</span>
       </div>
+      <div class="cys-inline">浓度单位:
+        <select id="concUnitSel" onchange="changeConcUnit()">
+          <option value="M">M</option>
+          <option value="uM" selected>uM</option>
+          <option value="nM">nM</option>
+          <option value="mg/mL">mg/mL</option>
+          <option value="ug/mL">ug/mL</option>
+          <option value="ng/uL">ng/uL</option>
+        </select>
+      </div>
     </div>
     <div id="selectedChips" class="chip-row"></div>
   </div>
@@ -78,6 +88,16 @@
     </select>
     <button class="btn btn-outline" id="bliImportBtn" onclick="importBliFromExp()" disabled>📋 导入</button>
     <span style="color:#888;font-size:13px;margin-left:8px">或搜索添加：</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#555;font-size:13px">浓度单位
+      <select id="dilUnitSel" onchange="changeDilUnit()" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+        <option value="M">M</option>
+        <option value="uM" selected>uM</option>
+        <option value="nM">nM</option>
+        <option value="mg/mL">mg/mL</option>
+        <option value="ug/mL">ug/mL</option>
+        <option value="ng/uL">ng/uL</option>
+      </select>
+    </span>
   </div>
   <div class="protein-picker" style="margin-bottom:12px">
     <div class="picker-header">
