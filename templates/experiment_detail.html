@@ -10,17 +10,45 @@
   <h1>{{ exp.title }}</h1>
   <div style="display:flex;gap:8px">
     <a class="btn btn-outline" href="/api/experiments/{{ exp.id }}/export">📥 导出 Excel</a>
-    <button class="btn btn-outline" onclick="editExpTitle({{ exp.id }})">✏️ 编辑</button>
+    <button class="btn btn-outline" onclick="editExpDetail({{ exp.id }})">✏️ 编辑</button>
     <button class="btn btn-sm btn-danger" onclick="deleteExpDetail({{ exp.id }})">🗑 删除</button>
   </div>
 </div>
 
 <div class="panel" style="margin-bottom:20px">
   <div class="info-grid">
-    <dt>类型</dt><dd><span class="badge">{{ exp.exp_type }}</span></dd>
-    <dt>日期</dt><dd>{{ exp.date or "-" }}</dd>
+    <dt>类型</dt><dd><span class="badge" id="detailExpType">{{ exp.exp_type }}</span></dd>
+    <dt>日期</dt><dd id="detailExpDate">{{ exp.date or "-" }}</dd>
     <dt>关联蛋白</dt><dd>{{ exp.protein_names or "无" }}</dd>
-    <dt>备注</dt><dd>{{ exp.notes or "-" }}</dd>
+    <dt>备注</dt><dd id="detailExpNotes">{{ exp.notes or "-" }}</dd>
+  </div>
+</div>
+
+<!-- 编辑实验弹窗：替换原先依赖 prompt() 的改标题（prompt 在部分环境被拦截会静默失效） -->
+<div id="editModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>编辑实验</h3>
+      <button class="btn btn-sm btn-outline" onclick="closeEditModal()">✕</button>
+    </div>
+    <label>标题 <input type="text" id="editTitle" maxlength="200"></label>
+    <div class="form-row">
+      <label>类型
+        <select id="editType">
+          <option value="BLI">BLI</option>
+          <option value="SDS-PAGE">SDS-PAGE</option>
+          <option value="AKTA">AKTA</option>
+          <option value="浓度测定">浓度测定</option>
+          <option value="其他">其他</option>
+        </select>
+      </label>
+      <label>日期 <input type="date" id="editDate"></label>
+    </div>
+    <label>备注 <textarea id="editNotes" rows="3"></textarea></label>
+    <div class="form-actions">
+      <button class="btn btn-outline" onclick="closeEditModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveEditModal()">保存</button>
+    </div>
   </div>
 </div>
 
@@ -179,12 +207,42 @@ function downloadDetailImage() {
   document.body.removeChild(a);
 }
 
-async function editExpTitle(id) {
-  const newTitle = prompt("新标题:", document.querySelector("h1").textContent);
-  if (!newTitle || !newTitle.trim()) return;
+let _editExpId = null;
+
+// 编辑实验：打开弹窗，预填当前元数据
+async function editExpDetail(id) {
+  _editExpId = id;
   try {
-    await API.put(`/api/experiments/${id}`, { title: newTitle.trim() });
-    document.querySelector("h1").textContent = newTitle.trim();
+    const exp = await API.get(`/api/experiments/${id}`);
+    document.getElementById("editTitle").value = exp.title || "";
+    document.getElementById("editType").value = exp.exp_type || "其他";
+    document.getElementById("editDate").value = exp.date || "";
+    document.getElementById("editNotes").value = exp.notes || "";
+  } catch (err) { toast(err.message, true); return; }
+  document.getElementById("editModal").classList.remove("hidden");
+  document.getElementById("editTitle").focus();
+}
+
+function closeEditModal() {
+  document.getElementById("editModal").classList.add("hidden");
+}
+
+// 保存编辑：PUT title/exp_type/date/notes，就地更新页面展示
+async function saveEditModal() {
+  const title = document.getElementById("editTitle").value.trim();
+  if (!title) { toast("标题不能为空", true); return; }
+  try {
+    const exp = await API.put(`/api/experiments/${_editExpId}`, {
+      title,
+      exp_type: document.getElementById("editType").value,
+      date: document.getElementById("editDate").value,
+      notes: document.getElementById("editNotes").value.trim(),
+    });
+    document.querySelector("h1").textContent = exp.title;
+    document.getElementById("detailExpType").textContent = exp.exp_type;
+    document.getElementById("detailExpDate").textContent = exp.date || "-";
+    document.getElementById("detailExpNotes").textContent = exp.notes || "-";
+    closeEditModal();
     toast("已更新");
   } catch (err) { toast(err.message, true); }
 }
