@@ -103,7 +103,10 @@ protein_lab/
 - v0.0.2 ✓ 已发布 (2026-08-09) — Weblogo / 撤销 / ProtParam / 酶活计算 / 启动自动备份
 - v0.0.3 ✓ 已发布 (2026-08-10) — 批量改标签 / 表头排序 / Weblogo 换行+区间+多聚体
 - v0.0.4 ✓ 已发布 (2026-08-11) — PyInstaller **onedir** 打包（免解压、秒开、误报低）+ GitHub Actions CI 双平台构建（tag 推送出 Win zip + macOS zip 附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db` + 酶活模块增强（**实验自动命名** `{date}_{type}_{seq:02d}` / 曲线图 PNG 下载 / **作图友好 Excel** 孔位-时间-OD 长格式 + 动力学汇总）+ 发布前打磨（Weblogo 服务端缓存+切页自动恢复 / Excel 导出**实验信息独占行**布局 / 详情页兜底修复 / 信息卡表格排版）
-- v0.0.5 — **浓度单位管理**（隐藏换算 kernel + 浓度计算处单位切换）：`calculators.CONC_UNITS` + `convert_concentration`（6 单位 M/uM/nM/mg/mL/ug/mL/ng/uL 互转，跨摩尔/质量需 mw，前端 JS 逐行镜像 `convertConc`/`formatConc`）；蛋白浓度 + BLI 浓度梯度 tab 各加**浓度单位下拉框**（仅显示层换算，存档仍 µM/mg/mL，默认 uM 与现状一致）；MCP 新增 `convert_concentration` 工具。后续可做：存档/详情页单位显示、enzyme 输入扩 6 单位
+- v0.0.5 ✓ 已发布 (2026-08-12) — 浓度单位管理 + 酶活模块增强 + BLI 模块。
+  - **浓度单位管理**：`calculators.CONC_UNITS` 与 `convert_concentration` 实现六单位互转，跨摩尔/质量换算需分子量，前端 JS 逐行镜像。蛋白浓度与 BLI 浓度梯度处增加单位下拉框，仅显示层换算，存档仍固定 µM/mg/mL。MCP 新增 `convert_concentration` 工具。
+  - **酶活模块增强**：时间点筛选 UI；阴性信号级扣除，图内阴性归零；拟合后速率级校正 `slope_corrected`；拟合虚线锚定曲线首点并优先采用扣阴性后斜率；扣除与对齐解耦；纵轴取整；从实验复制重建时间面板；参考列样品兜底。
+  - **BLI 模块**：`bli.py` 统一 ForteBio 解析、传感器图与五方法 KD 拟合内核，`test_bli.py` 为仓库首个回归测试；酶活绘图套用 BLI 样式。
 - v0.0.6 — BLI 原始数据拟合 + 多步稀释管理（**模块地基已铺好**：`bli.py` 统一 ForteBio 解析 + 传感器图 + 五方法 KD 内核 + `test_bli.py` 回归；UI 上传/参数面板/存档待接）
 - v0.0.7 — AKTA 峰图整理
 - v0.1.0（暂缓）— 连续实验管理（浓度→稀释→BLI/酶活串联工作流）
