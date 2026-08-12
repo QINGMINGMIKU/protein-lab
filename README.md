@@ -1,20 +1,36 @@
-# Protein Lab v0.0.4
+# Protein Lab — 本地优先的蛋白研究流程平台
 
-本地蛋白质实验管理系统。Flask 后端 + 纯 SQLite，无需网络、数据完全本地。
+本地运行的蛋白质实验管理系统：从蛋白建库、浓度计算、BLI 梯度、酶活分析到实验归档，一条链管理湿实验里真正会用到的数据。Flask + 纯 SQLite，无需网络，数据完全本地。
+
+> **给实验室自己用的数据管理**——不追求通用，只覆盖你做实验那天真的需要的东西。
+
+![Protein Lab 概览](docs/screenshot.png)
+
+## 它解决什么问题
+
+数据散落在各处是湿实验最常见的隐性成本：浓度算在 Excel、酶活画在临时脚本、结果记在笔记里，下次要用找不回。Protein Lab 把这条链收拢进一个本地应用，每个环节的结果都能一键存档、随时回溯。
+
+| 核心场景 | 你得到 |
+|---|---|
+| **蛋白库存** | 蛋白库 + FASTA 批量导入 + 搜索 / 标签筛选 / 批量改标签；MW、消光系数自动计算（ProtParam，与 Expasy 一致）；表头排序 |
+| **自动化分析** | TECAN Spark xlsx 一键解析 → 96 孔板 → 动力学拟合（ΔOD/min、R²）→ Michaelis-Menten → 阴性扣除 → 作图 Excel（孔位-时间-OD 长格式，Origin/Prism 直接可用） |
+| **实验记录** | 一键归档 + 自动命名（`{日期}_{类型}_{序号}`）+ 详情页 + Excel 导出 + 撤销；从历史实验一键复制回填到工具 |
+| **AI 集成** | MCP 服务器 8 个工具：读蛋白库 / 算浓度 / 稀释规划 / 单位换算 / 存实验，Claude 等 AI 可直接操作你的数据 |
 
 ## 功能
 
 - **蛋白库** — 手动添加 / FASTA 批量导入 / 搜索匹配 / 标签筛选与编辑 / **批量改标签**（选中多条添加/移除标签）/ **点击表头按 MW、消光系数排序**
 - **计算工具**（5 个标签页）：
-  - 蛋白浓度 — Beer-Lambert 计算（Biopython ProtParam 消光系数，与 Expasy 一致）
-  - BLI 浓度梯度 — 递推稀释 + 统一体积 + 整百微升取整
-  - Weblogo — 勾选蛋白生成序列标识图；**长序列自动分块换行**（每块 50 位，编号连续）；可选**位点区间**（起止位置）和**多聚体裁剪**（二聚体填 2 自动裁剪为单亚基）；**生成结果服务端缓存 + 切页自动恢复**（生成中切到其他页面看数据再回来，结果秒回、不丢失）
-  - 酶活计算 — TECAN Spark xlsx 解析 + 96 孔板 UI + 动力学拟合（ΔOD/min、R²）+ Michaelis-Menten 曲线 + 阴性扣除；一键导出作图 Excel（**孔位-时间-OD 长格式** + 动力学汇总两个 Sheet，Origin/Prism 直接可用）
+  - 蛋白浓度 — Beer-Lambert 计算（Biopython ProtParam 消光系数，与 Expasy 一致）；**浓度单位切换**（M/uM/nM/mg/mL/ug/mL/ng/uL）
+  - BLI 浓度梯度 — 递推稀释 + 统一体积 + 整百微升取整；**单位切换**
+  - Weblogo — 勾选蛋白生成序列标识图；**长序列自动分块换行**（每块 50 位，编号连续）；可选**位点区间**和**多聚体裁剪**；**结果服务端缓存 + 切页自动恢复**
+  - 酶活计算 — TECAN Spark xlsx 解析 + 96 孔板 UI + 动力学拟合（ΔOD/min、R²）+ Michaelis-Menten + **阴性扣除**（信号级归零 + 速率级校正）+ **时间点筛选** + 一键导出作图 Excel
   - 从实验复制 — 卡片式浏览历史实验，按类型过滤/搜索，一键加载到对应工具
-- **实验自动命名** — 系统变量 `{日期}_{实验类型}_{序号}`（如 `2026-08-11_酶活测定_01`），同一天同类型自动递增序号；可随时用自定义名称覆盖（留空即用默认名）。**导出也遵循自动命名**：作图 Excel、Weblogo PNG、动力学/MM 曲线 PNG 的文件名都用它（图按 `{名}_{图类型}` 区分）
-- **图片下载** — Weblogo、动力学曲线、MM 曲线图下方一键下载 PNG（自动命名）；实验详情页的 Weblogo 图也可下载
-- **实验归档** — 一键保存 / 单条或多条导出 Excel / 实验详情子页面 / 批量删除 + 撤销
-- **MCP 服务器** — 7 个工具，供 Claude 等 AI 通过 MCP 协议调用
+- **BLI 模块**（v0.0.5）— ForteBio CSV 解析 + 传感器图（Savitzky-Golay 平滑 + 拟合虚线）+ **五方法 KD 拟合内核**（standard / split / joint / steady / mixed，含死曲线过滤与 NS 扣除）
+- **实验自动命名** — `{日期}_{实验类型}_{序号}`，同一天同类型自动递增；导出文件也遵循命名
+- **实验归档** — 一键保存 / Excel 导出 / 详情页 / 批量删除 + 撤销；启动自动备份数据库（保留最近 10 份）
+- **MCP 服务器** — 8 个工具，供 Claude 等 AI 通过 MCP 协议调用
+- **测试** — `test_bli.py` 回归（BLI 解析/绘图/KD 拟合 + 酶活绘图端点）
 
 ## 运行方式
 
@@ -24,7 +40,7 @@
 - 首次运行自动创建 `.venv` 并安装依赖。关闭窗口即停止服务。
 - 启动时自动备份数据库到 `backups/`（保留最近 10 份）。
 
-### 方式二：打包版（v0.0.4，无需 Python）
+### 方式二：打包版（v0.0.5，无需 Python）
 
 - 从 GitHub Release 下载 `protein-lab-windows.zip` 或 `protein-lab-macos.zip`，解压后进入 `protein_lab/` 目录，双击 `protein_lab.exe`（Windows）/ 运行 `protein_lab`（macOS）即可。放在**可写目录**（如桌面/下载，不要放 `C:\Program Files`）。
 - 打包采用 **onedir 目录形态**（非单文件）：**免启动解压、秒开、杀毒误报低**。
@@ -83,6 +99,7 @@ macOS 下 venv 路径为 `.venv/bin/python`。
 protein_lab/
 ├── app.py              Flask 主应用（含 --mcp / --import-db 入口分发）
 ├── calculators.py      计算核心（MW / ε / 浓度 / 稀释 / 酶活拟合）
+├── bli.py              BLI 内核（ForteBio 解析 / 传感器图 / 五方法 KD 拟合）
 ├── models.py           SQLite 数据模型（DB 路径由 paths.app_base_dir() 决定）
 ├── mcp_server.py       MCP stdio 服务器
 ├── paths.py            路径解析（PyInstaller 打包与 dev 双模式）
