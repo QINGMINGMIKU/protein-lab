@@ -1835,6 +1835,17 @@ async function enzymePlot(type) {
       fit: info.fit,
     };
   }
+  // 「扣除阴性」需要全板的阴性/空白孔作为参考，即使当前未选中
+  // （后端减算用全部 wells_data，绘制仍受 show_blank 控制）
+  if (subBlank) {
+    for (const [id, wd] of Object.entries(enzymeData.wells)) {
+      const info = enzymeWellInfo[id] || {};
+      if ((info.ref === "blank" || info.ref === "neg") && !payload.wells[id]) {
+        const { times, od } = enzymeFilteredData(wd);
+        payload.wells[id] = { times, od, ref: info.ref, name: info.name || id, fit: info.fit };
+      }
+    }
+  }
   try {
     const r = await API.post("/api/enzyme/plot", payload);
     enzymeLastImage = r.image;

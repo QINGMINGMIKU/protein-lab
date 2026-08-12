@@ -1005,6 +1005,7 @@ def api_enzyme_plot():
             avg_last = sum(all_last_od) / len(all_last_od) if all_last_od else 0.0
 
             idx = 0  # 实际绘制的孔序号（跳过隐藏的阴性/空白），用于逐孔取 BLI 配色
+            plotted_od = []  # 收集实际绘制曲线/拟合线的纵坐标，用于纵轴取整缩放
             for well_id, wd in wells_data.items():
                 if not wd.get("times") or not wd.get("od"):
                     continue
@@ -1025,6 +1026,7 @@ def api_enzyme_plot():
                 if align_end and od_vals:
                     shift = avg_last - od_vals[-1]
                     od_vals = [v + shift for v in od_vals]
+                plotted_od.extend(od_vals)
 
                 # 逐孔取 BLI 配色；阳性对照加粗突出
                 color = COLORS[idx % len(COLORS)]
@@ -1039,16 +1041,26 @@ def api_enzyme_plot():
                     intercept = fit.get("intercept", od_vals[0]) if fit.get("intercept") is not None else od_vals[0]
                     od_fit = []
                     for t in t_fit:
-                        v = intercept + fit["slope"] / 60 * t
+                        v = intercept + fit["slope"] * t  # slope 已是 ΔOD/min，t 单位分钟
                         if mean_neg is not None:
-                            v -= mean_neg.get(t * 60, 0.0)  # 拟合虚线同步扣背景
+                            v -= mean_neg.get(t * 60, 0.0)  # 拟合虚线同步扣背景（t*60 秒换算回 time_s）
                         od_fit.append(v)
                     if align_start and fit.get("intercept") is not None:
                         # 从已对齐/已扣背景的曲线起点对齐虚线（sub_blank 时不能再用原始 intercept）
                         shift_fit = od_vals[0] - od_fit[0]
                         od_fit = [v + shift_fit for v in od_fit]
                     ax.plot(t_fit, od_fit, "--", linewidth=lw + 0.5, alpha=0.6, color=line[0].get_color())
+                    plotted_od.extend(od_fit)
                 idx += 1
+
+            # 纵轴：数据范围外扩 6% 后按数量级取整到整刻度，避免难看的自动刻度
+            if plotted_od:
+                lo, hi = min(plotted_od), max(plotted_od)
+                span = max(hi - lo, 1e-9)
+                lo -= 0.06 * span
+                hi += 0.06 * span
+                step = 10 ** (int(np.floor(np.log10(span))) - 1)
+                ax.set_ylim(np.floor(lo / step) * step, np.ceil(hi / step) * step)
 
             # 标注：中文/英文自适应
             use_cn = font_path is not None
