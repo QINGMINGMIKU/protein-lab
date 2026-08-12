@@ -1512,6 +1512,9 @@ let enzymeSelection = new Set();
 let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw}}
 let enzymeLastImage = null;    // 最近一次曲线图 base64（供下载）
 let enzymeLastPlotType = null; // kinetics | michaelis
+let enzymeTimePoints = [];     // 时间点列表（秒，来自 meta.temps，全孔共享网格）
+let enzymeTimeActive = new Set(); // 当前激活的时间点（按时间值匹配，兼容个别孔缺测点错位）
+let enzymeRefilterTimer = null;
 
 async function uploadEnzymeFile() {
   const file = document.getElementById("enzymeFile").files[0];
@@ -1525,6 +1528,12 @@ async function uploadEnzymeFile() {
     enzymeData = data;
     enzymeSelection.clear();
     enzymeWellInfo = {};
+    // 时间点筛选：全孔共享 meta.temps 网格，缺省全选
+    enzymeTimePoints = [...new Set(data.meta.temps || Object.values(data.wells)[0]?.times || [])];
+    enzymeTimeActive = new Set(enzymeTimePoints);
+    enzymeLastImage = null;
+    enzymeLastPlotType = null;
+    renderEnzymeTimePanel();
     renderPlate();
     document.getElementById("enzymeMeta").textContent =
       `${data.meta.sample || file.name} | ${data.meta.wavelength || "?"} nm | ${Object.keys(data.wells).length} wells`;
@@ -1559,6 +1568,66 @@ function updatePlateSelection() {
     el.classList.toggle("selected", enzymeSelection.has(id));
   });
   updateWellForm();
+}
+
+// ── 时间点筛选：排除明显异常时间点，对拟合/绘图/存档/导出统一生效 ──
+function renderEnzymeTimePanel() {
+  const panel = document.getElementById("enzymeTimePanel");
+  const box = document.getElementById("enzymeTimeCbs");
+  if (!panel || !box) return;
+  if (!enzymeTimePoints.length) { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+  box.innerHTML = enzymeTimePoints.map((t, i) => {
+    const label = Number.isInteger(t) ? t : +t.toFixed(1);
+    return `<label style="font-size:12px;display:inline-flex;align-items:center;gap:3px;border:1px solid #e3e3e3;border-radius:4px;padding:2px 6px;cursor:pointer">
+      <input type="checkbox" data-tpidx="${i}" ${enzymeTimeActive.has(t) ? "checked" : ""} onchange="enzymeTimeToggle(${i})"> ${label}s</label>`;
+  }).join("");
+  updateEnzymeTimeBadge();
+}
+
+function updateEnzymeTimeBadge() {
+  const el = document.getElementById("enzymeTimeCount");
+  if (!el || !enzymeTimePoints.length) return;
+  const n = enzymeTimePoints.filter(t => enzymeTimeActive.has(t)).length;
+  el.textContent = `已选 ${n}/${enzymeTimePoints.length} 个时间点`;
+  el.style.color = n < 2 ? "#e74c3c" : "#888";  // <2 点无法拟合斜率，标红提醒
+}
+
+function enzymeTimeToggle(i) {
+  if (!enzymeTimePoints.length) return;
+  const t = enzymeTimePoints[i];
+  enzymeTimeActive.has(t) ? enzymeTimeActive.delete(t) : enzymeTimeActive.add(t);
+  const cb = document.querySelector(`#enzymeTimeCbs input[data-tpidx="${i}"]`);
+  if (cb) cb.checked = enzymeTimeActive.has(t);
+  updateEnzymeTimeBadge();
+  clearTimeout(enzymeRefilterTimer);
+  enzymeRefilterTimer = setTimeout(enzymeRefilter, 250);  // 防抖，批量切换只触发一次
+}
+
+function enzymeTimeAll(on) {
+  if (!enzymeTimePoints.length) return;
+  enzymeTimeActive = new Set(on ? enzymeTimePoints : []);
+  renderEnzymeTimePanel();
+  clearTimeout(enzymeRefilterTimer);
+  enzymeRefilterTimer = setTimeout(enzymeRefilter, 250);
+}
+
+// 筛选生效：已有拟合则静默重算，有图则重绘
+async function enzymeRefilter() {
+  if (!enzymeData) return;
+  const hadFit = Object.keys(enzymeWellInfo).some(id => enzymeWellInfo[id].fit);
+  if (hadFit) await enzymeCalcAll(true);
+  if (enzymeLastPlotType) await enzymePlot(enzymeLastPlotType);
+}
+
+// 按激活时间点过滤某孔数据（按时间值匹配，兼容个别孔缺测点导致的索引错位）
+function enzymeFilteredData(wd) {
+  if (!enzymeTimePoints.length) return { times: wd.times, od: wd.od };
+  const times = [], od = [];
+  for (let i = 0; i < wd.times.length; i++) {
+    if (enzymeTimeActive.has(wd.times[i])) { times.push(wd.times[i]); od.push(wd.od[i]); }
+  }
+  return { times, od };
 }
 
 function enzymeClickWell(e, id) {
@@ -1675,17 +1744,18 @@ async function enzymeCalcSelected() {
   await enzymeCalc(Array.from(enzymeSelection));
 }
 
-async function enzymeCalcAll() {
+async function enzymeCalcAll(silent = false) {
   if (!enzymeData) { toast("请先上传数据", true); return; }
-  await enzymeCalc(Object.keys(enzymeData.wells));
+  await enzymeCalc(Object.keys(enzymeData.wells), silent);
 }
 
-async function enzymeCalc(wellIds) {
+async function enzymeCalc(wellIds, silent = false) {
   const payload = { wells: {} };
   for (const id of wellIds) {
     const wd = enzymeData.wells[id];
     if (!wd) continue;
-    payload.wells[id] = { times: wd.times, od: wd.od };
+    const { times, od } = enzymeFilteredData(wd);  // 只算激活的时间点
+    payload.wells[id] = { times, od };
   }
   try {
     const r = await API.post("/api/enzyme/fit", payload);
@@ -1713,7 +1783,7 @@ async function enzymeCalc(wellIds) {
     renderEnzymeTable(wellIds);
     updateWellForm();
     const msg = blankSlopes.length ? `计算完成 (已扣除 ${blankSlopes.length} 个阴性/空白孔均值 ΔOD/min=${blankAvg.toFixed(6)})` : "计算完成";
-    toast(msg);
+    if (!silent) toast(msg);
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1747,8 +1817,9 @@ async function enzymePlot(type) {
     const wd = enzymeData.wells[id];
     if (!wd) continue;
     const info = enzymeWellInfo[id] || {};
+    const { times, od } = enzymeFilteredData(wd);  // 只画激活的时间点
     payload.wells[id] = {
-      times: wd.times, od: wd.od,
+      times, od,
       name: info.name || id,
       conc_ng_ml: info.conc_ng_ml,
       substrate_uM: info.conc_uM,
@@ -1786,6 +1857,7 @@ async function enzymeSaveExp() {
   for (const [id, wd] of Object.entries(enzymeData.wells)) {
     const info = enzymeWellInfo[id] || {};
     if (info.protein_id) proteinIds.add(info.protein_id);
+    const { times, od } = enzymeFilteredData(wd);  // 存档只保留激活的时间点
     wells[id] = {
       name: info.name,
       ref: info.ref,
@@ -1793,9 +1865,9 @@ async function enzymeSaveExp() {
       conc_ng_ml: info.conc_ng_ml,
       conc_uM: info.conc_uM,
       fit: info.fit || null,
-      times: wd.times,
-      od: wd.od,
-      od_range: wd.od.length ? [wd.od[0].toFixed(4), wd.od[wd.od.length - 1].toFixed(4)] : null,
+      times,
+      od,
+      od_range: od.length ? [od[0].toFixed(4), od[od.length - 1].toFixed(4)] : null,
     };
   }
 
@@ -1823,11 +1895,12 @@ async function enzymeExportExcel() {
   const wells = {};
   for (const [id, wd] of Object.entries(enzymeData.wells)) {
     const info = enzymeWellInfo[id] || {};
+    const { times, od } = enzymeFilteredData(wd);  // 导出只包含激活的时间点
     wells[id] = {
       name: info.name, ref: info.ref,
       conc_ng_ml: info.conc_ng_ml, conc_uM: info.conc_uM,
       fit: info.fit || null,
-      times: wd.times, od: wd.od,
+      times, od,
     };
   }
   try {
