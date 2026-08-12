@@ -1916,9 +1916,16 @@ document.addEventListener("click", function (e) {
 });
 
 function enzymeSetRef(refType) {
+  // 参考角色写进命名，不落空：●样品→"样品"、○空白→"空白"、⊖阴性→"阴性"、⊕阳性→"阳性"
+  const roleLabels = { "": "样品", blank: "空白", neg: "阴性", pos: "阳性" };
+  const label = roleLabels[refType || ""];
+  const roleNames = Object.values(roleLabels);
   for (const id of enzymeSelection) {
     if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
     enzymeWellInfo[id].ref = refType;
+    // 空命名或当前是角色名 → 跟随按钮；自定义命名不覆盖
+    const cur = enzymeWellInfo[id].name || "";
+    if (!cur || roleNames.includes(cur)) enzymeWellInfo[id].name = label;
   }
   updateWellForm();
   renderPlate();
