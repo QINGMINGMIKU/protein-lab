@@ -1038,21 +1038,12 @@ def api_enzyme_plot():
                 alpha_val = 1.0 if ref == "pos" else 0.85
                 line = ax.plot(times_min, od_vals, ".-", label=lbl, linewidth=lw,
                                markersize=4, alpha=alpha_val, color=color)
-                # 拟合线同色虚线
+                # 拟合线同色虚线：从曲线首点（od_vals[0]，已含扣减/对齐）出发，斜率沿用拟合值。
+                # 不用原始 intercept——线性拟合对非线性（先陡后平）曲线会在起点外推偏高
                 fit = wd.get("fit")
                 if fit and fit.get("slope") is not None:
                     t_fit = np.linspace(times_min[0], times_min[-1], 100)
-                    intercept = fit.get("intercept", od_vals[0]) if fit.get("intercept") is not None else od_vals[0]
-                    od_fit = []
-                    for t in t_fit:
-                        v = intercept + fit["slope"] * t  # slope 已是 ΔOD/min，t 单位分钟
-                        if mean_neg is not None:
-                            v -= mean_neg.get(t * 60, 0.0)  # 拟合虚线同步扣背景（t*60 秒换算回 time_s）
-                        od_fit.append(v)
-                    if align_start and fit.get("intercept") is not None:
-                        # 从已对齐/已扣背景的曲线起点对齐虚线（sub_blank 时不能再用原始 intercept）
-                        shift_fit = od_vals[0] - od_fit[0]
-                        od_fit = [v + shift_fit for v in od_fit]
+                    od_fit = [od_vals[0] + fit["slope"] * (t - t_fit[0]) for t in t_fit]
                     ax.plot(t_fit, od_fit, "--", linewidth=lw + 0.5, alpha=0.6, color=line[0].get_color())
                     plotted_od.extend(od_fit)
                 idx += 1
