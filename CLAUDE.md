@@ -52,10 +52,11 @@ protein_lab/
 - **分层**：`app.py` 是单体 Flask（页面路由渲染 Jinja2 + `/api/*` JSON 接口 + 内存 undo 栈）；纯计算在 `calculators.py`（无 Flask 依赖，可独立复用）；SQL 全在 `models.py`；`mcp_server.py` 直接 `import models` + `calculators`，**与 Web 共用同一个 `protein_lab.db`**。
 - **`models.init_db()` 在 import 时执行**（models.py 末尾）——只要 `import models` 就触碰真实库。测试规范里的 reload 顺序就是为绕过这个副作用而设计。
 - **浓度单位 kernel（v0.0.5）**：`calculators.CONC_UNITS` + `convert_concentration(value, from, to, mw)`（canonical 基准 molar→µM、mass→ng/µL，跨 kind 需 mw：`µM × MW/1000 = ng/µL`）——**前端 `static/app.js` 有逐行镜像 `convertConc`/`formatConc`**，改动必须两边同步。计算器工具里浓度只做**显示层换算**（下拉框切单位），存档/详情页/导出仍固定 µM/mg/mL；`calc_conc()` 返回 6 单位。
+- **BLI 分析模块 `bli.py`（v0.0.6 地基）**：ForteBio CSV 解析（`parse_fortebio_csv`，元数据顺序==列顺序不可重排）→ `group_by_sample`（组内浓度降序）→ 传感器图 `generate_sensorgram_png`（SG 平滑/拟合虚线叠加/separate 模式，返回 PNG bytes）+ KD 内核 `fit_kd`（1:1 Langmuir **5 方法**：standard/split/joint/steady/mixed，+ 死曲线过滤 + NS 非特异扣除）。**绘图样式常量 `COLORS`/`PLOT_STYLE` 从这里抽出**，酶活 `/api/enzyme/plot` 已复用（函数内惰性 `from bli import ...` 避免模块顶部拖 scipy）。相界缺省走 `_detect_phases` 启发式（平滑后最后局部极大），强一致数据建议显式传 `t_assoc`/`t_dissoc`。回归测试在 `test_bli.py`（合成 fixture + 隔离临时库）。
 - **实验 `params`/`results` 可能是双重编码的 JSON 字符串**（历史数据遗留）——读这两个字段要 `while isinstance(val, str): json.loads` 防御性解包（见 `page_experiment_detail`、`_export_excel`）。
 - **undo 栈是内存态**（app.py `_undo_stack`，上限 20 条），重启即失。
 - **字体解析（v0.0.4）**：weblogo 与酶活绘图走 `fonts.py` 候选链——打包 Noto Sans SC（`resource_path("fonts/NotoSansSC-Regular.otf")`）→ 旧 dev 回退 `../fonts/simhei.ttf` → Windows 系统字体 → macOS 系统字体，返回第一个存在者。已不依赖上级工作区。
-- **当前仓库没有任何测试文件**——`测试规范` 是约定，还没有 `test_*.py` 可跑。
+- **测试文件**：`test_bli.py` 是仓库第一个测试（assert 脚本，`.venv/Scripts/python.exe test_bli.py` 直接跑）——bli.py 解析/绘图/KD 回归 + 酶活绘图端点 + 隔离临时库。新增测试照此模式。
 - **路径与打包（v0.0.4）**：`paths.py` 统一路径解析——`app_base_dir()` 决定 DB/backups 位置（frozen→EXE 同目录，dev→源码目录），`resource_path()` 读 templates/static/fonts（frozen→`_MEIPASS`）。`models.DB_PATH` 与 Flask `template_folder`/`static_folder` 都走它。中文字体改走 `fonts.py`（打包 Noto Sans SC，OFL 协议，仓库 `fonts/` 内），不再依赖上级工作区。
 - **CLI 入口**：同一二进制支持 `--mcp`（stdio MCP，须在 print 前短路避免污染 stdout）与 `--import-db <旧库>`（空库时一次复制迁移）。
 - **Web 服务器（v0.0.4）**：main 块用 **waitress**（生产 WSGI，纯 Python 跨平台）`serve()` 替代 Flask 开发服务器——启动无 "development server" 警告、请求日志被 CRITICAL 级别压制，控制台只显示产品 banner。waitress 是 main 块惰性 import，已列入 spec `hiddenimports`。
@@ -103,7 +104,7 @@ protein_lab/
 - v0.0.3 ✓ 已发布 (2026-08-10) — 批量改标签 / 表头排序 / Weblogo 换行+区间+多聚体
 - v0.0.4 ✓ 已发布 (2026-08-11) — PyInstaller **onedir** 打包（免解压、秒开、误报低）+ GitHub Actions CI 双平台构建（tag 推送出 Win zip + macOS zip 附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db` + 酶活模块增强（**实验自动命名** `{date}_{type}_{seq:02d}` / 曲线图 PNG 下载 / **作图友好 Excel** 孔位-时间-OD 长格式 + 动力学汇总）+ 发布前打磨（Weblogo 服务端缓存+切页自动恢复 / Excel 导出**实验信息独占行**布局 / 详情页兜底修复 / 信息卡表格排版）
 - v0.0.5 — **浓度单位管理**（隐藏换算 kernel + 浓度计算处单位切换）：`calculators.CONC_UNITS` + `convert_concentration`（6 单位 M/uM/nM/mg/mL/ug/mL/ng/uL 互转，跨摩尔/质量需 mw，前端 JS 逐行镜像 `convertConc`/`formatConc`）；蛋白浓度 + BLI 浓度梯度 tab 各加**浓度单位下拉框**（仅显示层换算，存档仍 µM/mg/mL，默认 uM 与现状一致）；MCP 新增 `convert_concentration` 工具。后续可做：存档/详情页单位显示、enzyme 输入扩 6 单位
-- v0.0.6 — BLI 原始数据拟合 + 多步稀释管理
+- v0.0.6 — BLI 原始数据拟合 + 多步稀释管理（**模块地基已铺好**：`bli.py` 统一 ForteBio 解析 + 传感器图 + 五方法 KD 内核 + `test_bli.py` 回归；UI 上传/参数面板/存档待接）
 - v0.0.7 — AKTA 峰图整理
 - v0.1.0（暂缓）— 连续实验管理（浓度→稀释→BLI/酶活串联工作流）
 - v0.2.0（规划）— **蛋白研发工作台**（骨架=蛋白档案，记忆=知识沉淀，血肉=小工具）。**明确不做：PDB/胶图资产库**——企业/客户交付平台向（可追溯、可演示），小作坊实验室自己跑数据自己看，价值低；轻量版=蛋白页列出关联实验（含 SDS-PAGE 类型）即可：

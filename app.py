@@ -971,94 +971,104 @@ def api_enzyme_plot():
     align_start = body.get("align_start", False)
     align_end = body.get("align_end", False)
 
-    fig, ax = plt.subplots(figsize=(8, 4.5))
+    # BLI 绘图风格（配色/字号/脊柱/图例位置）——函数内惰性 import，避免模块顶部拖 scipy
+    from bli import COLORS, PLOT_STYLE
 
-    if plot_type == "kinetics":
-        # 对齐：计算全部孔的起始/终止均值
-        all_first_od = []
-        all_last_od = []
-        if align_start or align_end:
-            for wd in wells_data.values():
-                if wd.get("od") and len(wd["od"]) > 0:
-                    all_first_od.append(wd["od"][0])
-                    all_last_od.append(wd["od"][-1])
-        avg_first = sum(all_first_od) / len(all_first_od) if all_first_od else 0.0
-        avg_last = sum(all_last_od) / len(all_last_od) if all_last_od else 0.0
+    with plt.rc_context(PLOT_STYLE):
+        fig, ax = plt.subplots(figsize=(9, 6))
 
-        has_blank = any(wd.get("ref") in ("blank", "neg") for wd in wells_data.values())
+        if plot_type == "kinetics":
+            # 对齐：计算全部孔的起始/终止均值
+            all_first_od = []
+            all_last_od = []
+            if align_start or align_end:
+                for wd in wells_data.values():
+                    if wd.get("od") and len(wd["od"]) > 0:
+                        all_first_od.append(wd["od"][0])
+                        all_last_od.append(wd["od"][-1])
+            avg_first = sum(all_first_od) / len(all_first_od) if all_first_od else 0.0
+            avg_last = sum(all_last_od) / len(all_last_od) if all_last_od else 0.0
 
-        for well_id, wd in wells_data.items():
-            if not wd.get("times") or not wd.get("od"):
-                continue
-            ref = wd.get("ref", "")
-            # 默认隐藏阴性/空白
-            if ref in ("blank", "neg") and not body.get("show_blank", False):
-                continue
+            has_blank = any(wd.get("ref") in ("blank", "neg") for wd in wells_data.values())
 
-            label = wd.get("name", well_id)
-            conc = wd.get("conc_ng_ml", "")
-            lbl = f"{label}" + (f" ({conc} ng/mL)" if conc else "")
-            times_min = [t / 60 for t in wd["times"]]
-            od_vals = list(wd["od"])
+            idx = 0  # 实际绘制的孔序号（跳过隐藏的阴性/空白），用于逐孔取 BLI 配色
+            for well_id, wd in wells_data.items():
+                if not wd.get("times") or not wd.get("od"):
+                    continue
+                ref = wd.get("ref", "")
+                # 默认隐藏阴性/空白
+                if ref in ("blank", "neg") and not body.get("show_blank", False):
+                    continue
 
-            if align_start and od_vals:
-                shift = avg_first - od_vals[0]
-                od_vals = [v + shift for v in od_vals]
-            if align_end and od_vals:
-                shift = avg_last - od_vals[-1]
-                od_vals = [v + shift for v in od_vals]
+                label = wd.get("name", well_id)
+                conc = wd.get("conc_ng_ml", "")
+                lbl = f"{label}" + (f" ({conc} ng/mL)" if conc else "")
+                times_min = [t / 60 for t in wd["times"]]
+                od_vals = list(wd["od"])
 
-            # 阳性对照：加粗突出
-            lw = 2 if ref == "pos" else 1
-            alpha_val = 1.0 if ref == "pos" else 0.85
-            line = ax.plot(times_min, od_vals, ".-", label=lbl, linewidth=lw, markersize=3, alpha=alpha_val)
-            # 阳性拟合线也更粗
-            fit = wd.get("fit")
-            if fit and fit.get("slope") is not None:
-                t_fit = np.linspace(times_min[0], times_min[-1], 100)
-                intercept = fit.get("intercept", od_vals[0]) if fit.get("intercept") is not None else od_vals[0]
-                od_fit = [intercept + fit["slope"] / 60 * t for t in t_fit]
-                if align_start and fit.get("intercept") is not None:
-                    shift_fit = avg_first - fit["intercept"]
-                    od_fit = [v + shift_fit for v in od_fit]
-                ax.plot(t_fit, od_fit, "--", linewidth=lw + 0.5, alpha=0.6, color=line[0].get_color())
+                if align_start and od_vals:
+                    shift = avg_first - od_vals[0]
+                    od_vals = [v + shift for v in od_vals]
+                if align_end and od_vals:
+                    shift = avg_last - od_vals[-1]
+                    od_vals = [v + shift for v in od_vals]
 
-        # 标注：中文/英文自适应
-        use_cn = font_path is not None
-        notes = []
-        if has_blank:
-            notes.append("已扣除阴性/空白" if use_cn else "blank subtracted")
-        if align_start:
-            notes.append("已对齐起始值" if use_cn else "start aligned")
-        if align_end:
-            notes.append("已对齐终止值" if use_cn else "end aligned")
-        title = "Kinetics"
-        if notes:
-            title += " (" + ", ".join(notes) + ")"
-        ax.set_title(title, fontsize=12, color="#555")
-        ax.set_xlabel("Time (min)")
-        ax.set_ylabel("OD")
-        if wells_data:
-            ax.legend(ncol=3, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.18), frameon=False)
-    elif plot_type == "michaelis":
-        points = []
-        for well_id, wd in wells_data.items():
-            s = wd.get("substrate_uM")
-            v = wd.get("rate")
-            if s is not None and v is not None:
-                points.append((s, v, wd.get("name", well_id)))
-        if points:
-            points.sort()
-            sx = [p[0] for p in points]
-            sy = [p[1] for p in points]
-            ax.scatter(sx, sy, c="#4361ee")
-            for p in points:
-                ax.annotate(p[2], (p[0], p[1]), fontsize=8,
-                           textcoords="offset points", xytext=(0, 8))
+                # 逐孔取 BLI 配色；阳性对照加粗突出
+                color = COLORS[idx % len(COLORS)]
+                lw = 2.5 if ref == "pos" else 1.8
+                alpha_val = 1.0 if ref == "pos" else 0.85
+                line = ax.plot(times_min, od_vals, ".-", label=lbl, linewidth=lw,
+                               markersize=4, alpha=alpha_val, color=color)
+                # 拟合线同色虚线
+                fit = wd.get("fit")
+                if fit and fit.get("slope") is not None:
+                    t_fit = np.linspace(times_min[0], times_min[-1], 100)
+                    intercept = fit.get("intercept", od_vals[0]) if fit.get("intercept") is not None else od_vals[0]
+                    od_fit = [intercept + fit["slope"] / 60 * t for t in t_fit]
+                    if align_start and fit.get("intercept") is not None:
+                        shift_fit = avg_first - fit["intercept"]
+                        od_fit = [v + shift_fit for v in od_fit]
+                    ax.plot(t_fit, od_fit, "--", linewidth=lw + 0.5, alpha=0.6, color=line[0].get_color())
+                idx += 1
+
+            # 标注：中文/英文自适应
+            use_cn = font_path is not None
+            notes = []
+            if has_blank:
+                notes.append("已扣除阴性/空白" if use_cn else "blank subtracted")
+            if align_start:
+                notes.append("已对齐起始值" if use_cn else "start aligned")
+            if align_end:
+                notes.append("已对齐终止值" if use_cn else "end aligned")
+            title = "Kinetics"
+            if notes:
+                title += " (" + ", ".join(notes) + ")"
+            ax.set_title(title, fontweight="bold", loc="center")
+            ax.set_xlabel("Time (min)")
+            ax.set_ylabel("OD")
+            if wells_data:
+                ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left",
+                          frameon=True, fancybox=True, edgecolor="#cccccc")
+        elif plot_type == "michaelis":
+            points = []
+            for well_id, wd in wells_data.items():
+                s = wd.get("substrate_uM")
+                v = wd.get("rate")
+                if s is not None and v is not None:
+                    points.append((s, v, wd.get("name", well_id)))
+            if points:
+                points.sort()
+                sx = [p[0] for p in points]
+                sy = [p[1] for p in points]
+                ax.scatter(sx, sy, c=COLORS[0], s=60, zorder=3)
+                for p in points:
+                    ax.annotate(p[2], (p[0], p[1]), fontsize=10,
+                                textcoords="offset points", xytext=(0, 8))
+            ax.set_title("Michaelis-Menten", fontweight="bold", loc="center")
             ax.set_xlabel("Substrate (μM)")
             ax.set_ylabel("Rate (ΔOD/min)")
-    ax.grid(alpha=0.3)
-    fig.tight_layout()
+        ax.grid(alpha=0.15, linestyle="-")
+        fig.tight_layout()
 
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
