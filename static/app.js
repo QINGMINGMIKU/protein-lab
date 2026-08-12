@@ -1282,6 +1282,12 @@ async function applyCopyAndSwitch() {
         enzymeData.wells[id] = { times: w.times, od: w.od };
       }
     }
+    // 时间点筛选：复制数据重建（与上传路径一致，面板默认全选）
+    enzymeTimePoints = [...new Set(emeta.temps || Object.values(enzymeData.wells)[0]?.times || [])];
+    enzymeTimeActive = new Set(enzymeTimePoints);
+    enzymeLastImage = null;
+    enzymeLastPlotType = null;
+    renderEnzymeTimePanel();
     document.getElementById("enzymeMeta").textContent =
       `${emeta.sample || ""} | ${emeta.wavelength || "?"} nm | ${Object.keys(wells).length} wells (复制)`;
     renderPlate();
