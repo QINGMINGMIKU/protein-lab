@@ -1794,7 +1794,7 @@ function renderEnzymeTable(wellIds) {
   tbody.innerHTML = wellIds.map(id => {
     const info = enzymeWellInfo[id] || {};
     const f = info.fit || {};
-    const refLabel = info.ref === "blank" ? "空白" : info.ref === "neg" ? "阴性" : info.ref === "pos" ? "阳性" : "";
+    const refLabel = info.ref === "blank" ? "空白" : info.ref === "neg" ? "阴性" : info.ref === "pos" ? "阳性" : "样品";
     return `<tr>
       <td>${id}</td><td>${esc(info.name || "")}</td>
       <td>${refLabel}</td>
