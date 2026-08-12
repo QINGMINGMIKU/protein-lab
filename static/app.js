@@ -743,9 +743,14 @@ function calcOneRow(row) {
   p._conc_mg = conc_mg;
 
   // 结果按所选单位显示：主列 = concUnit，副列 = 互补 kind 的默认单位（µM↔mg/mL）
+  // 缺 mw 无法跨 kind 时显示 "-"（同 kind 换算不抛，这里只兜底，不让整行计算中断）
   const secondaryUnit = complementaryUnit(concUnit);
-  row.querySelector(".conc-uM").textContent = formatConc(convertConc(conc_uM, "uM", concUnit, p.mw), concUnit);
-  row.querySelector(".conc-mg").textContent = formatConc(convertConc(conc_uM, "uM", secondaryUnit, p.mw), secondaryUnit);
+  const fmtConc = (uM, unit) => {
+    try { return formatConc(convertConc(uM, "uM", unit, p.mw), unit); }
+    catch { return "-"; }
+  };
+  row.querySelector(".conc-uM").textContent = fmtConc(conc_uM, concUnit);
+  row.querySelector(".conc-mg").textContent = fmtConc(conc_uM, secondaryUnit);
 
   // 目标浓度稀释
   const targetConc = parseFloat(row.querySelector(".target-conc").value);
@@ -1018,17 +1023,18 @@ function renderBliResults(results) {
   for (const id of ids) {
     const r = results[id];
     const p = bliProteins[id];
+    if (!p) continue;  // 蛋白已被移除但缓存里还有结果——跳过，避免下面 p.name 抛错
     if (r.error) {
       html += `<div class="result-box" style="margin-bottom:12px"><strong>${esc(p.name)}</strong>: ${esc(r.error)}</div>`;
       continue;
     }
     const totalStock = r.steps.reduce((s, st) => s + st.stock_vol_uL, 0);
     const totalBuffer = r.steps.reduce((s, st) => s + st.buffer_vol_uL, 0);
-    // 步骤浓度列按所选单位显示（保存仍为 µM）；缺 mw 无法跨 kind 时回退 µM 原文
+    // 步骤浓度列按所选单位显示（保存仍为 µM）；缺 mw 无法跨 kind 时显示 "-"（避免 µM 数值挂在 mg/mL 表头下）
     const mw = bliProteins[id]?.mw;
     const fmtConc = (uM) => {
       try { return formatConc(convertConc(uM, "uM", dilUnit, mw), dilUnit); }
-      catch { return uM; }
+      catch { return "-"; }
     };
     html += `
       <div class="result-box" style="margin-bottom:14px">
@@ -1080,7 +1086,7 @@ async function saveBliTable() {
       return;
     }
     proteins.push({
-      id: Number(id), name: p.name,
+      id: Number(id), name: p.name, mw: p.mw,
       stock_uM: p.stock_uM, start_uM: p.start_uM,
       factor: p.factor, steps: p.steps,
       vol: p.vol, dead: p.dead,
@@ -1295,7 +1301,7 @@ async function applyCopyAndSwitch() {
       if (!bliProteins[pid]) {
         bliProteins[pid] = {
           name: p.name,
-          mw: p.mw || selectedProteins[pid]?.mw,
+          mw: p.mw || selectedProteins[pid]?.mw || allProteins.find(x => String(x.id) === pid)?.mw,
           stock_uM: p.stock_uM || 50,
           start_uM: p.start_uM || 10,
           factor: p.factor || 2,
