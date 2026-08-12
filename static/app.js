@@ -1812,7 +1812,8 @@ async function enzymePlot(type) {
   const alignStart = document.getElementById("enzymeAlignStart")?.checked || false;
   const alignEnd = document.getElementById("enzymeAlignEnd")?.checked || false;
   const showBlank = document.getElementById("enzymeShowBlank")?.checked || false;
-  const payload = { type, align_start: alignStart, align_end: alignEnd, show_blank: showBlank, wells: {} };
+  const subBlank = document.getElementById("enzymeSubBlank")?.checked || false;
+  const payload = { type, align_start: alignStart, align_end: alignEnd, show_blank: showBlank, sub_blank: subBlank, wells: {} };
   for (const id of ids) {
     const wd = enzymeData.wells[id];
     if (!wd) continue;
@@ -1820,6 +1821,7 @@ async function enzymePlot(type) {
     const { times, od } = enzymeFilteredData(wd);  // 只画激活的时间点
     payload.wells[id] = {
       times, od,
+      ref: info.ref,  // 后端据此识别阴性/空白（扣除 + 默认隐藏）
       name: info.name || id,
       conc_ng_ml: info.conc_ng_ml,
       substrate_uM: info.conc_uM,

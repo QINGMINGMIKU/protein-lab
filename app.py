@@ -978,7 +978,22 @@ def api_enzyme_plot():
         fig, ax = plt.subplots(figsize=(9, 6))
 
         if plot_type == "kinetics":
-            # 对齐：计算全部孔的起始/终止均值
+            # 扣除阴性/空白信号（sub_blank）：逐时间点减各阴性孔的均值 OD，阴性自身归零。
+            # 时间值匹配（而非索引），兼容个别孔缺测点错位。
+            has_blank = any(wd.get("ref") in ("blank", "neg") for wd in wells_data.values())
+            mean_neg = None
+            if body.get("sub_blank", False) and has_blank:
+                buckets = {}
+                for wd in wells_data.values():
+                    if wd.get("ref") in ("blank", "neg") and wd.get("times") and wd.get("od"):
+                        for t, o in zip(wd["times"], wd["od"]):
+                            buckets.setdefault(t, []).append(o)
+                mean_neg = {t: sum(v) / len(v) for t, v in buckets.items()}
+                for wd in wells_data.values():
+                    if wd.get("times") and wd.get("od"):
+                        wd["od"] = [o - mean_neg.get(t, 0.0) for t, o in zip(wd["times"], wd["od"])]
+
+            # 对齐：计算全部孔的起始/终止均值（在扣除之后）
             all_first_od = []
             all_last_od = []
             if align_start or align_end:
@@ -988,8 +1003,6 @@ def api_enzyme_plot():
                         all_last_od.append(wd["od"][-1])
             avg_first = sum(all_first_od) / len(all_first_od) if all_first_od else 0.0
             avg_last = sum(all_last_od) / len(all_last_od) if all_last_od else 0.0
-
-            has_blank = any(wd.get("ref") in ("blank", "neg") for wd in wells_data.values())
 
             idx = 0  # 实际绘制的孔序号（跳过隐藏的阴性/空白），用于逐孔取 BLI 配色
             for well_id, wd in wells_data.items():
@@ -1024,9 +1037,15 @@ def api_enzyme_plot():
                 if fit and fit.get("slope") is not None:
                     t_fit = np.linspace(times_min[0], times_min[-1], 100)
                     intercept = fit.get("intercept", od_vals[0]) if fit.get("intercept") is not None else od_vals[0]
-                    od_fit = [intercept + fit["slope"] / 60 * t for t in t_fit]
+                    od_fit = []
+                    for t in t_fit:
+                        v = intercept + fit["slope"] / 60 * t
+                        if mean_neg is not None:
+                            v -= mean_neg.get(t * 60, 0.0)  # 拟合虚线同步扣背景
+                        od_fit.append(v)
                     if align_start and fit.get("intercept") is not None:
-                        shift_fit = avg_first - fit["intercept"]
+                        # 从已对齐/已扣背景的曲线起点对齐虚线（sub_blank 时不能再用原始 intercept）
+                        shift_fit = od_vals[0] - od_fit[0]
                         od_fit = [v + shift_fit for v in od_fit]
                     ax.plot(t_fit, od_fit, "--", linewidth=lw + 0.5, alpha=0.6, color=line[0].get_color())
                 idx += 1
@@ -1034,7 +1053,7 @@ def api_enzyme_plot():
             # 标注：中文/英文自适应
             use_cn = font_path is not None
             notes = []
-            if has_blank:
+            if mean_neg is not None:
                 notes.append("已扣除阴性/空白" if use_cn else "blank subtracted")
             if align_start:
                 notes.append("已对齐起始值" if use_cn else "start aligned")

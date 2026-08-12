@@ -120,6 +120,23 @@ assert img.startswith("data:image/png;base64,"), img[:40]
 base64.b64decode(img.split(",", 1)[1])
 print("enzyme kinetics plot OK")
 
+# 5b. sub_blank（扣除阴性信号）：含平坦阴性孔 + show_blank 时阴性必须能画出来且正常渲染
+payload_sub = {
+    "type": "kinetics", "sub_blank": True, "show_blank": True,
+    "wells": {
+        "A1": {"times": tt, "od": [0.1 + 0.002 * x for x in range(len(tt))],
+               "name": "WT", "conc_ng_ml": 200, "ref": "",
+               "fit": {"slope": 0.002, "intercept": 0.1}},
+        "B1": {"times": tt, "od": [0.08] * len(tt),
+               "name": "Neg", "ref": "neg",
+               "fit": {"slope": 0.0, "intercept": 0.08}},
+    },
+}
+resp = client.post("/api/enzyme/plot", json=payload_sub)
+assert resp.status_code == 200, resp.status_code
+assert resp.get_json()["image"].startswith("data:image/png;base64,")
+print("enzyme kinetics sub_blank (neg included) OK")
+
 payload_mm = {"type": "michaelis", "wells": {
     "A1": {"substrate_uM": 10, "rate": 0.001, "name": "WT"},
     "A2": {"substrate_uM": 20, "rate": 0.002, "name": "MUT"},
