@@ -993,11 +993,14 @@ def api_enzyme_plot():
                     if wd.get("times") and wd.get("od"):
                         wd["od"] = [o - mean_neg.get(t, 0.0) for t, o in zip(wd["times"], wd["od"])]
 
-            # 对齐：计算全部孔的起始/终止均值（在扣除之后）
+            # 对齐：起始/终止均值只统计样品/阳性孔——阴性/空白是参考（sub_blank 后≈0），
+            # 混进均值会把对齐目标拖向 0，既压低样品起点，又把阴性抬离 0，两条链路互相拆台
             all_first_od = []
             all_last_od = []
             if align_start or align_end:
                 for wd in wells_data.values():
+                    if wd.get("ref") in ("blank", "neg"):
+                        continue
                     if wd.get("od") and len(wd["od"]) > 0:
                         all_first_od.append(wd["od"][0])
                         all_last_od.append(wd["od"][-1])
@@ -1020,10 +1023,11 @@ def api_enzyme_plot():
                 times_min = [t / 60 for t in wd["times"]]
                 od_vals = list(wd["od"])
 
-                if align_start and od_vals:
+                # 对齐位移只作用于样品/阳性孔；阴性/空白保持 sub_blank 后的 0 位置
+                if align_start and od_vals and ref not in ("blank", "neg"):
                     shift = avg_first - od_vals[0]
                     od_vals = [v + shift for v in od_vals]
-                if align_end and od_vals:
+                if align_end and od_vals and ref not in ("blank", "neg"):
                     shift = avg_last - od_vals[-1]
                     od_vals = [v + shift for v in od_vals]
                 plotted_od.extend(od_vals)
