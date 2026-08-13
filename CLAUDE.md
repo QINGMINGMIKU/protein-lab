@@ -6,6 +6,8 @@
 
 本地蛋白质实验管理系统。Flask 后端 + 纯 SQLite（无 ORM），数据完全本地、离线可用。
 
+**产品定位：Scientific Workbench（不是 Research OS）**——帮助科学家更快从实验数据得到科学结论，而非管理研发活动。中心对象是「数据/分析/证据」，不是「项目/样品/实验管理」。减少认知成本、不增加管理成本（不做 LIMS/ELN/Inventory/Workflow 状态机/全量审计）。**AI 是一等用户**：数据/分析/上下文都要让 AI 不经 UI、通过 MCP 直接拿到且足够结构化可解读。
+
 - **蛋白库**：手动添加 / FASTA 批量导入 / 搜索 / 标签筛选与批量改标签 / 点击表头按 MW、消光系数排序
 - **计算工具**（5 个 tab）：
   - 蛋白浓度 — Beer-Lambert（ProtParam 消光系数）
@@ -14,7 +16,7 @@
   - 酶活计算 — TECAN xlsx 解析 + 96 孔板 UI + 动力学拟合 + Michaelis-Menten + 阴性扣除
   - 从实验复制 — 历史实验卡片回填
 - **实验归档**：一键保存 / Excel 导出 / 详情页 / 批量删除 + 撤销（内存 undo 栈，最多 20 条）
-- **MCP 服务器**：`mcp_server.py`，7 个工具
+- **MCP 服务器**：`mcp_server.py`，8 个工具，读写契约（唯一写工具 `save_experiment`）
 
 ## 环境
 
@@ -29,9 +31,10 @@
 ```
 protein_lab/
 ├── app.py              Flask 主应用（含 --mcp / --import-db 入口分发）
-├── calculators.py      计算核心（MW / ε / 浓度 / 稀释 / 酶活拟合）
-├── models.py           SQLite 数据模型（DB 路径走 paths.app_base_dir()）
-├── mcp_server.py       MCP stdio 服务器
+├── calculators.py      计算核心纯函数（MW / ε / 浓度 / 稀释 / 酶活拟合）
+├── services.py         统一实验写入入口（自动命名/校验/未来 audit·lineage 插桩点）
+├── models.py           SQLite 模型：CRUD + JSON 往返 + schema 迁移框架 + experiment_raw
+├── mcp_server.py       MCP stdio 服务器（读写契约：唯一写工具 save_experiment）
 ├── paths.py            路径解析（PyInstaller 打包与 dev 双模式）
 ├── fonts.py            CJK 字体解析 + matplotlib 中文配置
 ├── protein_lab.spec    PyInstaller 打包配置
@@ -53,6 +56,9 @@ protein_lab/
 - **`models.init_db()` 在 import 时执行**（models.py 末尾）——只要 `import models` 就触碰真实库。测试规范里的 reload 顺序就是为绕过这个副作用而设计。
 - **浓度单位 kernel（v0.0.5）**：`calculators.CONC_UNITS` + `convert_concentration(value, from, to, mw)`（canonical 基准 molar→µM、mass→ng/µL，跨 kind 需 mw：`µM × MW/1000 = ng/µL`）——**前端 `static/app.js` 有逐行镜像 `convertConc`/`formatConc`**，改动必须两边同步。计算器工具里浓度只做**显示层换算**（下拉框切单位），存档/详情页/导出仍固定 µM/mg/mL；`calc_conc()` 返回 6 单位。
 - **BLI 分析模块 `bli.py`（v0.0.6 地基）**：ForteBio CSV 解析（`parse_fortebio_csv`，元数据顺序==列顺序不可重排）→ `group_by_sample`（组内浓度降序）→ 传感器图 `generate_sensorgram_png`（SG 平滑/拟合虚线叠加/separate 模式，返回 PNG bytes）+ KD 内核 `fit_kd`（1:1 Langmuir **5 方法**：standard/split/joint/steady/mixed，+ 死曲线过滤 + NS 非特异扣除）。**绘图样式常量 `COLORS`/`PLOT_STYLE` 从这里抽出**，酶活 `/api/enzyme/plot` 已复用（函数内惰性 `from bli import ...` 避免模块顶部拖 scipy）。相界缺省走 `_detect_phases` 启发式（平滑后最后局部极大），强一致数据建议显式传 `t_assoc`/`t_dissoc`。回归测试在 `test_bli.py`（合成 fixture + 隔离临时库）。
+- **统一写入入口（架构升级 2026-08）**：`services.create_experiment` 收敛手动/from-calculation/MCP 三条写入路径（自动命名 + 空类型校验 + `coerce_int_list` 静默过滤坏 id）。未来 audit/lineage 的插桩点。`models.EXP_TYPES` 是 exp_type 单一来源，模板下拉/MCP 描述/测试全走常量。
+- **数据存储地基（v0.0.7）**：schema 迁移框架——`models.SCHEMA_VERSION` + 有序 `MIGRATIONS`，`_migrate()` 逐条 `BEGIN`→迁移→`PRAGMA user_version=N`→`COMMIT` 原子（**不能 executescript，会隐式提交**）；v1=现有 3 表（老库 no-op）、v2=`experiment_raw`。`experiment_raw`：**只写一次从不 UPDATE**（`exp_save_raw` 重复调用=新行），删实验不删 raw（FK `ON DELETE SET NULL`，规则 #2/#5/#8）。`get_db(read_only=True)` 开 `PRAGMA query_only` 拒写（MCP 只读契约基础设施）。
+- **MCP 读写契约（v0.0.7）**：唯一写工具 `save_experiment`；读工具零写库由 `test_models.py` 逐工具断言强制（库内容逐字节不变），**无运行时拦截**——新增读工具必须在测试 `read_cases` 注册。
 - **实验 `params`/`results` 可能是双重编码的 JSON 字符串**（历史数据遗留）——读这两个字段要 `while isinstance(val, str): json.loads` 防御性解包（见 `page_experiment_detail`、`_export_excel`）。
 - **undo 栈是内存态**（app.py `_undo_stack`，上限 20 条），重启即失。
 - **字体解析（v0.0.4）**：weblogo 与酶活绘图走 `fonts.py` 候选链——打包 Noto Sans SC（`resource_path("fonts/NotoSansSC-Regular.otf")`）→ 旧 dev 回退 `../fonts/simhei.ttf` → Windows 系统字体 → macOS 系统字体，返回第一个存在者。已不依赖上级工作区。
@@ -67,6 +73,7 @@ protein_lab/
 
 - **严禁在生产数据库上测试**：任何涉及删改数据的测试必须用独立临时库或先备份。
 - `app.py` 启动时自动将 `protein_lab.db` 复制到 `backups/`，保留最近 10 份。
+- **迁移前自动备份**：`_migrate()` 在首个未应用迁移前快照 `pre-migration_*.db`（保留 5 份）——app.py 启动备份晚于 import 时迁移，备份到手已是迁移后库，迁移前快照为破坏性迁移留回滚点。
 - 恢复方法：关闭服务 → 从 `backups/` 选一份复制回上级目录改名为 `protein_lab.db` → 重启。
 
 ## 测试规范
@@ -80,6 +87,7 @@ protein_lab/
   5. `from app import app`
 - 若必须用正式库，测试前先手动备份 `protein_lab.db`。
 - 跑测试一律用 `.venv/Scripts/python.exe`（系统 python 缺依赖）。
+- **回归套件**：`test_models.py`（14 节：JSON 往返 / exp_type 单一来源 / 迁移幂等 / raw 只插不更 / read_only 拒写 / MCP 读零写库 / 迁移前备份）+ `test_bli.py`（BLI 解析/绘图/KD + 酶活绘图）。CI 构建前自动跑（`MPLBACKEND=Agg`）。
 
 ## 发布纪律
 
@@ -107,12 +115,20 @@ protein_lab/
   - **浓度单位管理**：`calculators.CONC_UNITS` 与 `convert_concentration` 实现六单位互转，跨摩尔/质量换算需分子量，前端 JS 逐行镜像。蛋白浓度与 BLI 浓度梯度处增加单位下拉框，仅显示层换算，存档仍固定 µM/mg/mL。MCP 新增 `convert_concentration` 工具。
   - **酶活模块增强**：时间点筛选 UI；阴性信号级扣除，图内阴性归零；拟合后速率级校正 `slope_corrected`；拟合虚线锚定曲线首点并优先采用扣阴性后斜率；扣除与对齐解耦；纵轴取整；从实验复制重建时间面板；参考列样品兜底。
   - **BLI 模块**：`bli.py` 统一 ForteBio 解析、传感器图与五方法 KD 拟合内核，`test_bli.py` 为仓库首个回归测试；酶活绘图套用 BLI 样式。
-- v0.0.6 — BLI 原始数据拟合 + 多步稀释管理（**模块地基已铺好**：`bli.py` 统一 ForteBio 解析 + 传感器图 + 五方法 KD 内核 + `test_bli.py` 回归；UI 上传/参数面板/存档待接）
-- v0.0.7 — AKTA 峰图整理
-- v0.1.0（暂缓）— 连续实验管理（浓度→稀释→BLI/酶活串联工作流）
-- v0.2.0（规划）— **蛋白研发工作台**（骨架=蛋白档案，记忆=知识沉淀，血肉=小工具）。**明确不做：PDB/胶图资产库**——企业/客户交付平台向（可追溯、可演示），小作坊实验室自己跑数据自己看，价值低；轻量版=蛋白页列出关联实验（含 SDS-PAGE 类型）即可：
-  - **蛋白档案页**（`/proteins/<id>`）：变体系族归类（`1YPI_WT` / `1YPI_32|ppl=1.111` 按命名/标签归组）、关联实验时间线、指标趋势（历次浓度/BLI/酶活叠看走势）、协议记忆入口
-  - **实验知识沉淀**：蛋白成功方案自动记录，开始实验时自动提示（如 PD1 禁冻、60 mM imidazole、16-18°C 低温诱导）
-  - **妙妙小工具**：多曲线叠画对比（酶活 time-OD 勾选多孔/多实验 + 标 ΔOD/min 线性区）；图片标注峰/转折点（MM 标 Vmax/Km、AKTA 峰检测标注）；归档后变量重命名（孔位/样本显示名写回，导出/对比用新名）
+- v0.0.6 ✓ 已发布 (2026-08-13) — 仓库卫生：README 定位重写 + 撤技术报告 + 推送 GitHub
+- 架构升级 ✓ (2026-08-13) — 统一写入入口 services / 计算纯函数化（扣减/对齐/取整） / JSON 反序列化收归 models / 速率校正后端单写 / 校正语义修正（背景只扣阴性） / exp_type 单一来源
+- v0.0.7 ✓ 已发布 (2026-08-13) — **数据存储地基**：schema 迁移框架（`PRAGMA user_version`）/ `experiment_raw` 不可变快照 / 迁移前自动备份 / MCP 读写契约 / CI 测试步（test_models 14 节 + test_bli）
+- v0.0.8 — BLI 原始数据拟合 UI（raw→`experiment_raw` `data_type=bli_curves`，results 带 `BLI_ANALYSIS_VERSION`）
+- v0.0.9 — AKTA 峰图整理（`akta.py` 纯函数 + 峰检测/标注/导出，raw→`experiment_raw`）
+- v0.1.0 — 酶活原始/结果分离 + recompute（raw 落库、results 带 version、recompute 复算一致——可复现规则 #8）
+- v0.1.1 — 轻量谱系 + 实验上下文（`experiment_links` + `used_sample_from`，**供 AI 消费而非管理 workflow**；不做全量 audit）
+- v0.1.2 — MCP 证据包（`get_variant_context`：一个 variant 的全部实验/上下文/可复算入口）
+- v0.1.3 — Comparison：WT vs variant 多实验横切对比 + 判断辅助（Workbench 差异化核心）
+- v0.2.0 — AI 解读层（基于证据包判断 candidate 优先级）
+- 飞书 bot（支线）— 实验室飞书消息通道 → AI（tool-use）→ protein_lab MCP；**序列脱敏硬约束**；MVP 用现有 8 工具（查蛋白/算浓度/归档），价值在 v0.1.2 证据包后显现
 
-**设计原则**：减少 dirtywork（机械操作），不做决策替代（比较/筛选/看板）。
+**设计原则（Workbench 定位）**：
+- 减少认知成本、不增加管理成本：拖入数据 → 自动分析 → 给结论，不做项目/批次/审批流。
+- **AI 是一等用户**：数据/分析/上下文机器可读，MCP 可拿一切；外部 AI（Claude API/代理）不碰序列明文。
+- **序列脱敏（IP 保护）**：序列明文绝不出本地计算边界——所有「序列→数值」（MW/ε/浓度/组成）本地 calculators 算完只给派生物；MCP 返回默认剔除 `sequence` 字段（`_sanitize` 收口），`get_protein` 用 SHA-256 指纹前 12 位替代明文；飞书回复模板禁止输出序列。Weblogo 是唯一明文展示场景（浏览器本地）。
+- **明确不做**：LIMS/ELN/Inventory/Workflow 状态机、全量审计、PDB/胶图资产库、决策替代（比较/筛选/看板由工具辅助、不代做判断）。
