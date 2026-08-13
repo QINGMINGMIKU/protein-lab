@@ -17,6 +17,7 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import models
+import services
 from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert_concentration
 
 # ── MCP JSON-RPC dispatcher ────────────────────────────────
@@ -243,7 +244,7 @@ def handle_tools_call(id_, params):
                 p = models.protein_get_by_name(name)
                 if p:
                     protein_ids.append(p["id"])
-            eid = models.exp_create(
+            saved = services.create_experiment(
                 title=args["title"],
                 exp_type=args["exp_type"],
                 protein_ids=protein_ids,
@@ -252,7 +253,6 @@ def handle_tools_call(id_, params):
                 results=args.get("results", {}),
                 notes=args.get("notes", ""),
             )
-            saved = models.exp_get(eid)
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(saved, ensure_ascii=False, indent=2)}]})
 
         else:

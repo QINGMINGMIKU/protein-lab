@@ -21,6 +21,7 @@ importlib.reload(models)  # ⚠ 会把 DB_PATH 重置为真实路径（测试规
 TMP = tempfile.mkdtemp(prefix="protein_lab_test_")
 models.DB_PATH = os.path.join(TMP, "test.db")
 models.init_db()
+import services
 
 
 def _seed_protein(name="1YPI_WT", seq="MKRWAS"):
@@ -92,6 +93,37 @@ after = models.exp_list()
 assert len(after) == len(before), "init_db 重跑不应丢数据"
 assert all(isinstance(x["params"], dict) for x in after)
 print("6. init_db 幂等 OK")
+
+# ── 7. services.create_experiment：统一写入 + 自动命名 + 校验 ──
+e7 = services.create_experiment(title="", exp_type="浓度测定", protein_ids=[pid],
+                                params={"a": 1}, results={"b": 2})
+assert e7["title"].endswith("_浓度测定_01") or "_浓度测定_" in e7["title"], f"自动命名异常: {e7['title']}"
+assert e7["params"] == {"a": 1} and e7["results"] == {"b": 2}
+try:
+    services.create_experiment(title="x", exp_type="", params={})
+    raise AssertionError("空 exp_type 应抛 ValueError")
+except ValueError:
+    pass
+print("7. services.create_experiment OK")
+
+# ── 8. 三个写入入口都走 services（API 层冒烟）──
+from app import app
+client = app.test_client()
+r = client.post("/api/experiments", json={
+    "title": "", "exp_type": "BLI", "protein_ids": [pid],
+    "params": {"calc_type": "dilution"}, "results": {"steps": []},
+})
+assert r.status_code == 201, r.status_code
+assert isinstance(r.get_json()["params"], dict), "API 手动写入 params 应为 dict"
+r = client.post("/api/experiments/from-calculation", json={
+    "title": "", "exp_type": "酶活测定", "protein_ids": [pid],
+    "calc_type": "enzyme", "calc_params": {"wells": {}}, "calc_result": {},
+})
+assert r.status_code == 201, r.status_code
+body = r.get_json()
+assert body["params"]["calc_type"] == "enzyme", "calc_type 应打进 params"
+assert isinstance(body["results"], dict)
+print("8. API 写入入口 OK")
 
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)

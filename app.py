@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import paths
 import models
+import services
 from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics
 
 app = Flask(__name__,
@@ -358,80 +359,53 @@ def api_exp_get(eid):
     return jsonify(e)
 
 
-def _auto_exp_name(exp_type: str, date: str = "") -> str:
-    """自动命名: {date}_{exp_type}_{seq:02d}，seq 为当天同类型已有标题的最大后缀 + 1"""
-    if not date:
-        date = datetime.now().strftime("%Y-%m-%d")
-    seq = models.exp_next_seq(exp_type, date)
-    return f"{date}_{exp_type}_{seq:02d}"
-
-
 @app.route("/api/experiments/next-name", methods=["GET"])
 def api_exp_next_name():
     """获取自动命名（供前端 prompt 默认值 / 输入框占位）"""
     exp_type = request.args.get("exp_type", "").strip()
     if not exp_type:
         return jsonify({"error": "缺少 exp_type"}), 400
-    return jsonify({"name": _auto_exp_name(exp_type, request.args.get("date", ""))})
+    return jsonify({"name": services.auto_exp_name(exp_type, request.args.get("date", ""))})
 
 
 @app.route("/api/experiments", methods=["POST"])
 def api_exp_create():
     data = request.get_json()
-    title = data.get("title", "").strip()
-    exp_type = data.get("exp_type", "").strip()
-    if not exp_type:
-        return jsonify({"error": "实验类型不能为空"}), 400
-    if not title:
-        # 空标题兜底：自动命名
-        title = _auto_exp_name(exp_type, data.get("date", ""))
-
-    protein_ids = data.get("protein_ids", [])
-    if isinstance(protein_ids, list):
-        protein_ids = [int(p) for p in protein_ids if p]
-
-    eid = models.exp_create(
-        title=title, exp_type=exp_type,
-        protein_ids=protein_ids,
-        date=data.get("date", ""),
-        params=data.get("params", {}),
-        results=data.get("results", {}),
-        notes=data.get("notes", ""),
-    )
-    return jsonify(models.exp_get(eid)), 201
+    try:
+        e = services.create_experiment(
+            title=data.get("title", ""),
+            exp_type=data.get("exp_type", ""),
+            protein_ids=data.get("protein_ids", []),
+            date=data.get("date", ""),
+            params=data.get("params", {}),
+            results=data.get("results", {}),
+            notes=data.get("notes", ""),
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    return jsonify(e), 201
 
 
 @app.route("/api/experiments/from-calculation", methods=["POST"])
 def api_exp_from_calc():
     """从计算工具一键保存为实验"""
     data = request.get_json()
-    title = data.get("title", "").strip()
-    exp_type = data.get("exp_type", "").strip()
-    if not exp_type:
-        return jsonify({"error": "实验类型不能为空"}), 400
-    if not title:
-        # 空标题兜底：自动命名
-        title = _auto_exp_name(exp_type, data.get("date", ""))
-
-    protein_ids = data.get("protein_ids", [])
-    if isinstance(protein_ids, list):
-        protein_ids = [int(p) for p in protein_ids if p]
-
     # 将计算参数和结果打包进 params/results
     calc_params = data.get("calc_params", {})
     calc_result = data.get("calc_result", {})
-
     params = {"calc_type": data.get("calc_type", ""), **calc_params}
-    results = calc_result
-
-    eid = models.exp_create(
-        title=title, exp_type=exp_type,
-        protein_ids=protein_ids,
-        date=data.get("date", ""),
-        params=params, results=results,
-        notes=data.get("notes", ""),
-    )
-    return jsonify(models.exp_get(eid)), 201
+    try:
+        e = services.create_experiment(
+            title=data.get("title", ""),
+            exp_type=data.get("exp_type", ""),
+            protein_ids=data.get("protein_ids", []),
+            date=data.get("date", ""),
+            params=params, results=calc_result,
+            notes=data.get("notes", ""),
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    return jsonify(e), 201
 
 
 @app.route("/api/experiments/<int:eid>", methods=["PUT"])
