@@ -30,7 +30,19 @@
 - **实验自动命名** — `{日期}_{实验类型}_{序号}`，同一天同类型自动递增；导出文件也遵循命名
 - **实验归档** — 一键保存 / Excel 导出 / 详情页 / 批量删除 + 撤销；启动自动备份数据库（保留最近 10 份）
 - **MCP 服务器** — 8 个工具，供 Claude 等 AI 通过 MCP 协议调用
-- **测试** — `test_bli.py` 回归（BLI 解析/绘图/KD 拟合 + 酶活绘图端点）
+- **测试** — `test_models.py`（14 节：JSON 往返 / 迁移框架 / 原始数据不可变 / MCP 读写契约）+ `test_bli.py`（BLI 解析/绘图/KD 拟合 + 酶活绘图）；CI 每次构建前自动运行
+
+## 数据完整性（v0.0.7）
+
+湿实验数据丢了就再也补不回来。数据层围绕 8 条完整性规则设计：
+
+| 能力 | 说明 |
+|---|---|
+| **版本化 schema 迁移** | `PRAGMA user_version` + 有序迁移列表，应用启动即自动升级；老库非破坏升级，数据原样不动 |
+| **原始数据不可变** | `experiment_raw` 表**只写一次、从不覆盖**（新分析=新快照行）；删除实验不删原始数据（FK `ON DELETE SET NULL`） |
+| **迁移前自动备份** | 每次 schema 升级前快照 `pre-migration_*.db`（保留 5 份）；启动例行备份保留 10 份 |
+| **MCP 读写契约** | 唯一写工具 `save_experiment`，读工具零写库——由测试逐工具断言强制，不是口头约定 |
+| **架构分层** | `models`（数据+序列化）→ `services`（统一写入入口）→ `calculators`（纯函数，可单测）→ `app`（编排渲染）；速率校正等计算**后端单写**，消灭前后端双写漂移 |
 
 ## 运行方式
 
@@ -98,10 +110,11 @@ macOS 下 venv 路径为 `.venv/bin/python`。
 ```
 protein_lab/
 ├── app.py              Flask 主应用（含 --mcp / --import-db 入口分发）
-├── calculators.py      计算核心（MW / ε / 浓度 / 稀释 / 酶活拟合）
+├── calculators.py      计算核心纯函数（MW / ε / 浓度 / 稀释 / 酶活拟合）
 ├── bli.py              BLI 内核（ForteBio 解析 / 传感器图 / 五方法 KD 拟合）
-├── models.py           SQLite 数据模型（DB 路径由 paths.app_base_dir() 决定）
-├── mcp_server.py       MCP stdio 服务器
+├── models.py           SQLite 模型：CRUD + JSON 往返 + schema 迁移框架 + experiment_raw
+├── services.py         统一实验写入入口（自动命名 / 校验 / 未来 audit·lineage 插桩点）
+├── mcp_server.py       MCP stdio 服务器（读写契约：唯一写工具 save_experiment）
 ├── paths.py            路径解析（PyInstaller 打包与 dev 双模式）
 ├── fonts.py            CJK 字体解析 + matplotlib 中文配置
 ├── protein_lab.spec    PyInstaller 打包配置
@@ -112,7 +125,19 @@ protein_lab/
 ├── templates/          Jinja2 页面模板
 ├── static/             JS + CSS
 ├── fonts/              Noto Sans SC（OFL，打包进二进制）
-├── .github/workflows/  CI 双平台构建
-├── backups/            数据库自动备份
+├── .github/workflows/  CI 双平台构建 + 测试步
+├── backups/            数据库自动备份（例行 10 份 + 迁移前 pre-migration 5 份）
 └── protein_lab.db     自动生成，首次运行创建
 ```
+
+## 版本历史
+
+| 版本 | 内容 |
+|---|---|
+| v0.0.1 | 基础蛋白库 / 浓度 + BLI 梯度 / 实验归档 / MCP |
+| v0.0.2 | Weblogo / 撤销 / ProtParam / 酶活计算 / 启动自动备份 |
+| v0.0.3 | 批量改标签 / 表头排序 / Weblogo 换行 + 区间 + 多聚体 |
+| v0.0.4 | PyInstaller **onedir** 打包 / GitHub Actions 双平台构建 / macOS 兼容 / waitress / `--mcp` / `--import-db` |
+| v0.0.5 | 浓度单位管理 / 酶活增强（时间点筛选、阴性扣除、速率校正）/ BLI 模块（ForteBio 解析 + 五方法 KD） |
+| **架构升级**（2026-08） | 统一写入入口 / 计算纯函数化 / 反序列化收归 models / 校正后端单写 / 实验类型单一来源 |
+| **v0.0.7**（当前） | **数据存储地基**：schema 迁移框架 / experiment_raw 不可变快照 / 迁移前自动备份 / MCP 读写契约 / CI 测试步 |
