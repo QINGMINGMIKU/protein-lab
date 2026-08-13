@@ -16,59 +16,118 @@ DB_PATH = os.path.join(app_base_dir(), "protein_lab.db")
 EXP_TYPES = ("BLI", "SDS-PAGE", "AKTA", "浓度测定", "酶活测定", "其他")
 
 
-def get_db() -> sqlite3.Connection:
+def get_db(read_only: bool = False) -> sqlite3.Connection:
+    """获取连接。read_only=True 时开 query_only——任何写操作被 SQLite 拒绝，
+    供 MCP 读工具等只读契约使用（见 mcp_server.py 读写契约）。"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    if read_only:
+        conn.execute("PRAGMA query_only = ON")
     return conn
 
 
-def init_db():
-    """创建表（如果不存在）+ 自动迁移旧 schema"""
-    conn = get_db()
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS proteins (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT UNIQUE NOT NULL,
-            sequence    TEXT NOT NULL,
-            mw          REAL,
-            nW          INTEGER DEFAULT 0,
-            nY          INTEGER DEFAULT 0,
-            nC          INTEGER DEFAULT 0,
-            ext_red     REAL,
-            ext_ox      REAL,
-            abs_0_1pct  REAL,
-            tag         TEXT DEFAULT '',
-            notes       TEXT DEFAULT '',
-            created_at  TEXT DEFAULT (datetime('now','localtime')),
-            updated_at  TEXT DEFAULT (datetime('now','localtime'))
-        );
+# ── Schema 迁移框架 ────────────────────────────────────────
+# 用 PRAGMA user_version 记录 schema 版本；MIGRATIONS 按序逐条迁移，每步 BEGIN→迁移→
+# user_version=N→COMMIT 原子。老库（user_version=0）从 v1 起跑：v1 全是 CREATE IF NOT
+# EXISTS + 旧列清理，对已有表是 no-op——这是"非破坏性升级"的保证（数据原样不动）。
 
-        CREATE TABLE IF NOT EXISTS experiments (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            title       TEXT NOT NULL,
-            exp_type    TEXT NOT NULL,
-            date        TEXT DEFAULT (date('now','localtime')),
-            params      TEXT DEFAULT '{}',
-            results     TEXT DEFAULT '{}',
-            notes       TEXT DEFAULT '',
-            created_at  TEXT DEFAULT (datetime('now','localtime'))
-        );
+SCHEMA_VERSION = 2  # 当前 schema 版本（与 MIGRATIONS 末项一致）
 
-        CREATE TABLE IF NOT EXISTS experiment_proteins (
-            experiment_id INTEGER NOT NULL,
-            protein_id    INTEGER NOT NULL,
-            PRIMARY KEY (experiment_id, protein_id),
-            FOREIGN KEY (experiment_id) REFERENCES experiments(id) ON DELETE CASCADE,
-            FOREIGN KEY (protein_id) REFERENCES proteins(id) ON DELETE CASCADE
-        );
-    """)
-    # 自动迁移：如果旧表有 protein_id 列，删除之 (SQLite 3.35+)
+
+def _migrate_v1_post(conn):
+    """v1 附加清理：旧 schema 的 experiments 表可能残留 protein_id 列，删除之 (SQLite 3.35+)"""
     cols = [r[1] for r in conn.execute("PRAGMA table_info(experiments)").fetchall()]
     if "protein_id" in cols:
         conn.execute("ALTER TABLE experiments DROP COLUMN protein_id")
-    conn.commit()
-    conn.close()
+
+
+MIGRATIONS = [
+    {
+        "version": 1,
+        "sql": [
+            """CREATE TABLE IF NOT EXISTS proteins (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT UNIQUE NOT NULL,
+                sequence    TEXT NOT NULL,
+                mw          REAL,
+                nW          INTEGER DEFAULT 0,
+                nY          INTEGER DEFAULT 0,
+                nC          INTEGER DEFAULT 0,
+                ext_red     REAL,
+                ext_ox      REAL,
+                abs_0_1pct  REAL,
+                tag         TEXT DEFAULT '',
+                notes       TEXT DEFAULT '',
+                created_at  TEXT DEFAULT (datetime('now','localtime')),
+                updated_at  TEXT DEFAULT (datetime('now','localtime'))
+            )""",
+            """CREATE TABLE IF NOT EXISTS experiments (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                title       TEXT NOT NULL,
+                exp_type    TEXT NOT NULL,
+                date        TEXT DEFAULT (date('now','localtime')),
+                params      TEXT DEFAULT '{}',
+                results     TEXT DEFAULT '{}',
+                notes       TEXT DEFAULT '',
+                created_at  TEXT DEFAULT (datetime('now','localtime'))
+            )""",
+            """CREATE TABLE IF NOT EXISTS experiment_proteins (
+                experiment_id INTEGER NOT NULL,
+                protein_id    INTEGER NOT NULL,
+                PRIMARY KEY (experiment_id, protein_id),
+                FOREIGN KEY (experiment_id) REFERENCES experiments(id) ON DELETE CASCADE,
+                FOREIGN KEY (protein_id) REFERENCES proteins(id) ON DELETE CASCADE
+            )""",
+        ],
+        "post": _migrate_v1_post,
+    },
+    {
+        "version": 2,
+        # experiment_raw：原始数据快照，只写一次、从不 UPDATE（规则 #2/#8）。
+        # FK ON DELETE SET NULL：删实验不删 raw（规则 #5），双向保险。
+        "sql": [
+            """CREATE TABLE IF NOT EXISTS experiment_raw (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id INTEGER,
+                data_type     TEXT NOT NULL,
+                payload       TEXT NOT NULL,
+                created_at    TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (experiment_id) REFERENCES experiments(id) ON DELETE SET NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_raw_exp ON experiment_raw(experiment_id)",
+        ],
+    },
+]
+
+
+def _migrate():
+    conn = get_db()
+    try:
+        current = conn.execute("PRAGMA user_version").fetchone()[0]
+        for m in MIGRATIONS:
+            v = m["version"]
+            if current >= v:
+                continue
+            conn.execute("BEGIN")
+            try:
+                for stmt in m["sql"]:
+                    conn.execute(stmt)
+                if m.get("post"):
+                    m["post"](conn)
+                conn.execute(f"PRAGMA user_version = {v}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            current = v
+    finally:
+        conn.close()
+
+
+def init_db():
+    """迁移到最新 schema。保持历史语义：import models 即触发（models.py 末尾调用）。"""
+    _migrate()
 
 
 # ── Proteins CRUD ──────────────────────────────────────────
@@ -355,6 +414,44 @@ def exp_delete_all() -> int:
     count = cur.rowcount
     conn.close()
     return count
+
+
+# ── experiment_raw：原始数据快照 ───────────────────────────
+# 规则 #2/#5/#8：payload 只写一次、从不 UPDATE；同实验多次分析=多行快照；
+# 删实验时 FK SET NULL 保留 raw，不级联删除。
+
+def exp_save_raw(exp_id: int, data_type: str, payload) -> int:
+    """原始数据快照入库。只插不更——重复调用生成新行，旧行永不改动。"""
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO experiment_raw (experiment_id, data_type, payload) VALUES (?,?,?)",
+        (exp_id, data_type, json.dumps(payload, ensure_ascii=False)))
+    conn.commit()
+    rid = cur.lastrowid
+    conn.close()
+    return rid
+
+
+def exp_raw_list(exp_id: int) -> list[dict]:
+    """某实验的全部原始数据快照元数据（不含 payload，避免大字段进列表）"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, experiment_id, data_type, created_at FROM experiment_raw "
+        "WHERE experiment_id = ? ORDER BY id", (exp_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def exp_raw_get(raw_id: int) -> dict | None:
+    """单条原始数据（含 payload，_json_unwrap 解包为 dict）"""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM experiment_raw WHERE id = ?", (raw_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["payload"] = _json_unwrap(d.get("payload"))
+    return d
 
 
 # ── Init on import ─────────────────────────────────────────

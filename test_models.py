@@ -143,6 +143,80 @@ for url in ("/experiments", f"/experiments/{lst[0]['id']}"):
         assert f'<option value="{t}">' in html, f"{url} 缺少 exp_type 选项: {t}"
 print("9. exp_type 单一来源渲染 OK")
 
+# ── 10. 迁移框架：user_version 正确 + 幂等（重跑不改变任何数据）──
+def _db_dump():
+    """全表逐行快照，用于断言"库内容逐字节不变"（比行数严格：UPDATE 也能暴露）"""
+    conn = models.get_db()
+    dump = {}
+    for t in ("proteins", "experiments", "experiment_proteins", "experiment_raw"):
+        dump[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t}").fetchall()]
+    conn.close()
+    return dump
+
+conn = models.get_db()
+v = conn.execute("PRAGMA user_version").fetchone()[0]
+conn.close()
+assert v == models.SCHEMA_VERSION, f"user_version 应={models.SCHEMA_VERSION}，实际 {v}"
+before = _db_dump()
+models.init_db()  # 再迁移一遍
+assert _db_dump() == before, "迁移重跑不应改变任何数据"
+print("10. 迁移幂等 OK")
+
+# ── 11. experiment_raw：只插不更 / 删实验不删 raw（FK SET NULL）──
+eid_r = services.create_experiment(title="raw测试", exp_type="BLI", protein_ids=[],
+                                   params={}, results={})["id"]
+rid1 = models.exp_save_raw(eid_r, "bli_curves", {"curves": [[1, 2], [3, 4]]})
+rid2 = models.exp_save_raw(eid_r, "bli_curves", {"curves": [[5, 6]]})
+assert rid1 != rid2, "重复保存应生成新行（只插不更）"
+r1 = models.exp_raw_get(rid1)
+assert r1 is not None and r1["payload"] == {"curves": [[1, 2], [3, 4]]}, "旧行 payload 应原样保留"
+lst_raw = models.exp_raw_list(eid_r)
+assert [x["id"] for x in lst_raw] == [rid1, rid2], "应按 id 升序列出全部快照"
+assert all("payload" not in x for x in lst_raw), "列表不应携带大字段"
+models.exp_delete(eid_r)
+assert models.exp_get(eid_r) is None, "实验应已物理删除（v0.0.7 阶段，软删在 v0.1.0）"
+r1 = models.exp_raw_get(rid1)
+r2 = models.exp_raw_get(rid2)
+assert r1 and r2, "删实验后 raw 必须保留"
+assert r1["experiment_id"] is None and r2["experiment_id"] is None, "FK 应置 NULL"
+print("11. experiment_raw 只插不更 / 删实验留 raw OK")
+
+# ── 12. get_db(read_only=True)：写操作被 SQLite 拒绝 ──
+import sqlite3
+ro = models.get_db(read_only=True)
+try:
+    ro.execute("INSERT INTO experiments (title, exp_type) VALUES ('x','BLI')")
+    raise AssertionError("只读连接应拒绝写操作")
+except sqlite3.OperationalError:
+    pass
+finally:
+    ro.close()
+print("12. get_db read_only 拒绝写 OK")
+
+# ── 13. MCP 读写契约：读工具零写库（逐工具调用后库内容逐字节不变）──
+import contextlib, io
+import mcp_server
+assert mcp_server.WRITE_TOOLS == {"save_experiment"}, f"写工具应仅 save_experiment: {mcp_server.WRITE_TOOLS}"
+names = {t["name"] for t in mcp_server.TOOLS}
+assert names == mcp_server.READ_TOOLS | mcp_server.WRITE_TOOLS, "每个工具必须归入读或写"
+read_cases = [
+    ("search_proteins", {"query": "1YPI"}),
+    ("get_protein", {"name": "1YPI_WT"}),
+    ("list_proteins", {}),
+    ("calculate_concentration", {"sequence": "MKRWAS", "a280": 0.5}),
+    ("convert_concentration", {"value": 1, "from_unit": "uM", "to_unit": "nM"}),
+    ("calculate_dilution", {"stock_conc_uM": 100, "start_conc_uM": 10}),
+    ("list_experiments", {}),
+]
+before = _db_dump()
+for tool, args in read_cases:
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mcp_server.handle_tools_call(None, {"name": tool, "arguments": args})
+    assert buf.getvalue().strip(), f"{tool} 应有响应"
+    assert _db_dump() == before, f"读工具 {tool} 不应写库"
+print("13. MCP 读工具零写库 OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")

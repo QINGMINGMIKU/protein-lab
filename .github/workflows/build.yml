@@ -29,6 +29,12 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt -r requirements-build.txt
 
+      # 回归测试：models 层 + BLI/酶活模块。MPLBACKEND=Agg 确保无头环境绘图不弹窗。
+      - name: Run tests
+        env:
+          MPLBACKEND: Agg
+        run: python test_models.py && python test_bli.py
+
       - name: Build with PyInstaller
         run: pyinstaller protein_lab.spec --noconfirm
 

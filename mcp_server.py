@@ -20,6 +20,14 @@ import models
 import services
 from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert_concentration
 
+# ── MCP 读写契约（数据完整性规则 #6）──────────────────────
+# 读工具（search/get/list/calculate_*）是纯函数：只查询 + 纯计算，零写库。
+# 唯一写工具是 save_experiment（走 services.create_experiment 统一写入入口）。
+# 新工具必须归入二者之一；读工具若意外触库写入，由 test_models 的"读零写库"
+# 断言拦截（逐工具调用后对比库内容不变）。
+
+WRITE_TOOLS = {"save_experiment"}
+
 # ── MCP JSON-RPC dispatcher ────────────────────────────────
 
 def send_response(id_, result):
@@ -144,6 +152,10 @@ TOOLS = [
 ]
 
 
+# 读工具 = 全部工具 - 写工具。新增工具若忘记归入 WRITE_TOOLS，会在这里立刻暴露（守卫断言）。
+READ_TOOLS = {t["name"] for t in TOOLS} - WRITE_TOOLS
+
+
 def handle_initialize(id_, params):
     return send_response(id_, {
         "protocolVersion": "2024-11-05",
@@ -159,6 +171,10 @@ def handle_tools_list(id_, params):
 def handle_tools_call(id_, params):
     tool_name = params.get("name", "")
     args = params.get("arguments", {})
+    # 读写契约守卫（规则 #6）：读工具必须声明在 WRITE_TOOLS 之外；
+    # 违反契约（读工具想写库）在此被识别。真正拦截写库的是 test_models 读零写库断言。
+    if tool_name not in WRITE_TOOLS:
+        assert tool_name in READ_TOOLS, f"未归类的 MCP 工具（既非写工具也未声明只读）: {tool_name}"
 
     try:
         if tool_name == "search_proteins":
