@@ -256,22 +256,34 @@ def fit_kinetics(times: list, od: list) -> dict:
     return {"slope": dod_min, "intercept": round(float(b), 6), "r2": r2, "n": n}
 
 
+def _bg_priority(refs_present):
+    """背景孔优先级：阴性(neg) > 空白(blank)。两者并存只扣阴性——
+    空白是缓冲液基线，混进背景均值再扣回自己身上 = 被多扣一次。无背景返回 None。"""
+    if "neg" in refs_present:
+        return ("neg",)
+    if "blank" in refs_present:
+        return ("blank",)
+    return None
+
+
 def sub_blank(wells: dict, enabled: bool = True):
-    """扣除阴性/空白信号（sub_blank）：逐时间点减各阴性孔的均值 OD，阴性自身归零。
+    """扣除背景信号（sub_blank）：逐时间点减背景孔均值 OD，背景自身归零。
+    背景 = 阴性(neg) 孔（有样本无酶，捕获真实反应背景）；无 neg 回退空白(blank) 孔（缓冲液基线）。
     时间值匹配（而非索引），兼容个别孔缺测点错位。
     返回 (new_wells, mean_neg)：new_wells 每个孔 od 被替换为扣减后的新列表；
-    mean_neg 为 {time: mean_od}，未启用或无阴性/空白时返回 None。"""
-    mean_neg = None
+    mean_neg 为 {time: mean_od}，未启用或无背景孔时返回 None。"""
     if not enabled:
-        return wells, mean_neg
-    has_blank = any(wd.get("ref") in ("blank", "neg") for wd in wells.values())
-    if not has_blank:
-        return wells, mean_neg
+        return wells, None
+    bg_refs = _bg_priority({wd.get("ref") for wd in wells.values()})
+    if not bg_refs:
+        return wells, None
     buckets = {}
     for wd in wells.values():
-        if wd.get("ref") in ("blank", "neg") and wd.get("times") and wd.get("od"):
+        if wd.get("ref") in bg_refs and wd.get("times") and wd.get("od"):
             for t, o in zip(wd["times"], wd["od"]):
                 buckets.setdefault(t, []).append(o)
+    if not buckets:
+        return wells, None
     mean_neg = {t: sum(v) / len(v) for t, v in buckets.items()}
     new_wells = {}
     for wid, wd in wells.items():
@@ -329,20 +341,24 @@ def snap_ylim(values, pad: float = 0.06):
 
 
 def correct_slopes(fits: dict, refs: dict) -> dict:
-    """速率级阴性扣除：blank/neg 孔的斜率均值作背景，校正所有孔（含参考孔自身）。
-    fits: {well_id: fit_kinetics 输出}；refs: {well_id: ref}（ref in ("blank","neg") 为参考孔）。
-    返回新 fits dict：每孔补 blank_corrected（是否扣除）与 slope_corrected（扣减后斜率）。"""
-    blank_slopes = []
-    for wid, fit in fits.items():
-        if refs.get(wid) in ("blank", "neg") and fit.get("slope") is not None:
-            blank_slopes.append(fit["slope"])
-    blank_avg = sum(blank_slopes) / len(blank_slopes) if blank_slopes else 0.0
+    """速率级背景扣除：以背景孔斜率均值校正样品/阳性/阴性自身。
+    背景 = 阴性(neg) 优先，无 neg 回退空白(blank)（两者并存只扣阴性）。
+    空白(blank) 孔是缓冲液基线——信号层已被 sub_blank 扣平，速率层再扣 = 被多扣一次成负值，故不做速率校正。
+    fits: {well_id: fit_kinetics 输出}；refs: {well_id: ref}。
+    返回新 fits dict：非空白孔补 blank_corrected（是否扣除）与 slope_corrected（扣减后斜率）。"""
+    bg_refs = _bg_priority(set(refs.values()))
+    bg_slopes = []
+    if bg_refs:
+        for wid, fit in fits.items():
+            if refs.get(wid) in bg_refs and fit.get("slope") is not None:
+                bg_slopes.append(fit["slope"])
+    bg_avg = sum(bg_slopes) / len(bg_slopes) if bg_slopes else 0.0
     out = {}
     for wid, fit in fits.items():
         nf = dict(fit)
-        if fit.get("slope") is not None:
-            nf["blank_corrected"] = bool(blank_slopes)
-            if blank_slopes:
-                nf["slope_corrected"] = round(fit["slope"] - blank_avg, 6)
+        if fit.get("slope") is not None and refs.get(wid) != "blank":
+            nf["blank_corrected"] = bool(bg_slopes)
+            if bg_slopes:
+                nf["slope_corrected"] = round(fit["slope"] - bg_avg, 6)
         out[wid] = nf
     return out

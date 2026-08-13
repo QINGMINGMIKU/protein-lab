@@ -1763,7 +1763,8 @@ async function enzymeCalc(wellIds, silent = false) {
     const { times, od } = enzymeFilteredData(wd);  // 只算激活的时间点
     payload.wells[id] = { times, od, ref: enzymeWellInfo[id]?.ref };
   }
-  // 速率级阴性扣除需要全板的阴性/空白孔作参考（即使当前未选中）——后端据此算 slope_corrected
+  // 速率级背景扣除需要全板的阴性/空白孔作参考（即使当前未选中）——后端据此算 slope_corrected。
+  // 背景优先级：阴性(neg) > 空白(blank)，两者并存只扣阴性（空白是基线，不混入背景）
   for (const [id, wd] of Object.entries(enzymeData.wells)) {
     const info = enzymeWellInfo[id] || {};
     if ((info.ref === "blank" || info.ref === "neg") && !payload.wells[id]) {
@@ -1780,9 +1781,9 @@ async function enzymeCalc(wellIds, silent = false) {
     }
     renderEnzymeTable(wellIds);
     updateWellForm();
-    const blankCount = Object.values(enzymeWellInfo).filter(w =>
-      (w.ref === "blank" || w.ref === "neg") && w.fit?.slope != null).length;
-    const msg = blankCount ? `计算完成 (已扣除 ${blankCount} 个阴性/空白孔)` : "计算完成";
+    const negCount = Object.values(enzymeWellInfo).filter(w =>
+      w.ref === "neg" && w.fit?.slope != null).length;
+    const msg = negCount ? `计算完成 (已扣除 ${negCount} 个阴性对照孔)` : "计算完成";
     if (!silent) toast(msg);
   } catch (err) { toast(err.message, true); }
 }

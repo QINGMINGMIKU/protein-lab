@@ -100,17 +100,25 @@ from calculators import sub_blank, align_wells, snap_ylim, correct_slopes
 def _close(a, b, tol=1e-9):
     return abs(a - b) < tol
 
-# 5a. sub_blank：逐时间点扣阴性均值，阴性自身归零；未启用/无阴性原样返回
+# 5a. sub_blank：逐时间点扣背景均值，背景自身归零；neg+blank 并存只扣阴性（空白不入背景）
 wells = {
     "A1": {"times": [0, 1, 2], "od": [0.10, 0.12, 0.14], "ref": ""},
     "B1": {"times": [0, 1, 2], "od": [0.08, 0.08, 0.08], "ref": "neg"},
     "B2": {"times": [0, 1, 2], "od": [0.10, 0.10, 0.10], "ref": "blank"},
 }
 subbed, mean_neg = sub_blank(wells, enabled=True)
-assert set(mean_neg) == {0, 1, 2} and all(_close(v, 0.09) for v in mean_neg.values()), mean_neg
-assert all(_close(a, b) for a, b in zip(subbed["A1"]["od"], [0.01, 0.03, 0.05])), subbed["A1"]["od"]
-assert _close(subbed["B1"]["od"][0], 0.08 - 0.09), "阴性自身应被扣到 ≈0"
-# 未启用：原样返回、mean_neg=None；无阴性：也原样
+assert set(mean_neg) == {0, 1, 2} and all(_close(v, 0.08) for v in mean_neg.values()), mean_neg
+assert all(_close(a, b) for a, b in zip(subbed["A1"]["od"], [0.02, 0.04, 0.06])), subbed["A1"]["od"]
+assert _close(subbed["B1"]["od"][0], 0.0), "阴性自身应被扣到 ≈0"
+# 空白不入背景：扣的是 neg 均值，故 B2 = 0.10 - 0.08 = 0.02（不被「多扣」）
+assert all(_close(a, b) for a, b in zip(subbed["B2"]["od"], [0.02, 0.02, 0.02])), subbed["B2"]["od"]
+# 仅空白：回退用空白作背景（兼容老用法）
+w_bo = {"A1": {"times": [0, 1], "od": [0.20, 0.22], "ref": ""},
+        "B2": {"times": [0, 1], "od": [0.05, 0.05], "ref": "blank"}}
+sbo, mno = sub_blank(w_bo, enabled=True)
+assert all(_close(v, 0.05) for v in mno.values()), mno
+assert all(_close(a, b) for a, b in zip(sbo["A1"]["od"], [0.15, 0.17])), sbo["A1"]["od"]
+# 未启用：原样返回、mean_neg=None；无背景孔：也原样
 w_off, mn_off = sub_blank(wells, enabled=False)
 assert mn_off is None and w_off is wells
 w_none, mn_none = sub_blank({"A1": {"times": [0], "od": [0.1], "ref": ""}}, enabled=True)
@@ -139,22 +147,29 @@ lo, hi = snap_ylim([0.0, 1.0, 2.0])
 assert _close(lo, -0.2) and _close(hi, 2.2), (lo, hi)  # span=2 → step=0.1 → [-0.2, 2.2]
 print("snap_ylim OK", (lo, hi))
 
-# 5d. correct_slopes：阴性/空白斜率均值作背景，校正所有孔（含参考孔自身）
+# 5d. correct_slopes：仅阴性斜率均值作背景；空白是基线不入背景、不被校正
 fits = {
     "A1": {"slope": 0.010, "intercept": 0.1, "r2": 0.99, "n": 20},   # 样品
-    "B1": {"slope": 0.002, "intercept": 0.08, "r2": 0.90, "n": 20},  # 阴性
+    "B1": {"slope": 0.002, "intercept": 0.08, "r2": 0.90, "n": 20},  # 阴性（背景）
+    "D1": {"slope": 0.001, "intercept": 0.05, "r2": 0.95, "n": 20},  # 空白（基线）
     "C1": {"slope": None, "intercept": None, "r2": None, "n": 1},    # 数据点不足
 }
-refs = {"A1": "", "B1": "neg", "C1": ""}
+refs = {"A1": "", "B1": "neg", "D1": "blank", "C1": ""}
 out = correct_slopes(fits, refs)
 assert out["A1"]["blank_corrected"] is True
-assert _close(out["A1"]["slope_corrected"], 0.008), out["A1"]   # 0.010 - 0.002
+assert _close(out["A1"]["slope_corrected"], 0.008), out["A1"]   # 0.010 - 0.002（只扣阴性）
 assert out["B1"]["blank_corrected"] is True
 assert _close(out["B1"]["slope_corrected"], 0.000), out["B1"]   # 阴性自身也扣
+# 空白不入背景、不被速率校正——避免被多扣成负值
+assert "slope_corrected" not in out["D1"] and "blank_corrected" not in out["D1"], out["D1"]
 assert "slope_corrected" not in out["C1"] and "blank_corrected" not in out["C1"], out["C1"]
-# 无阴性：blank_corrected=False，不产生 slope_corrected
+# 无背景：blank_corrected=False，不产生 slope_corrected
 out2 = correct_slopes({"A1": {"slope": 0.010}}, {"A1": ""})
 assert out2["A1"]["blank_corrected"] is False and "slope_corrected" not in out2["A1"]
+# 仅空白作背景：样品扣空白均值，空白自身不被校正
+out3 = correct_slopes({"A1": {"slope": 0.010}, "D1": {"slope": 0.001}}, {"A1": "", "D1": "blank"})
+assert _close(out3["A1"]["slope_corrected"], 0.009), out3
+assert "slope_corrected" not in out3["D1"]
 print("correct_slopes OK")
 
 # ── 6. 酶活绘图端点（隔离临时库）──
@@ -210,15 +225,17 @@ assert resp.status_code == 200, resp.status_code
 assert resp.get_json()["image"].startswith("data:image/png;base64,")
 print("enzyme michaelis plot OK")
 
-# 6b. /api/enzyme/fit 返回速率级校正（slope_corrected 已收归后端）
+# 6b. /api/enzyme/fit 返回速率级校正（slope_corrected 已收归后端；空白不被校正）
 resp = client.post("/api/enzyme/fit", json={"wells": {
     "A1": {"times": tt, "od": [0.1 + 0.002 * x for x in range(len(tt))], "ref": ""},
     "B1": {"times": tt, "od": [0.08 + 0.0005 * x for x in range(len(tt))], "ref": "neg"},
+    "C1": {"times": tt, "od": [0.07] * len(tt), "ref": "blank"},
 }})
 assert resp.status_code == 200, resp.status_code
 fit_res = resp.get_json()
 assert fit_res["A1"]["blank_corrected"] is True, fit_res
 assert "slope_corrected" in fit_res["A1"] and fit_res["B1"]["slope_corrected"] is not None
+assert "slope_corrected" not in fit_res["C1"], "空白不做速率校正"
 print("enzyme fit slope_corrected OK")
 
 assert client.get("/calculator").status_code == 200
