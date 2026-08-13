@@ -5,6 +5,7 @@ SQLite 数据模型 — proteins + experiments 表的 CRUD
 import sqlite3
 import json
 import os
+import shutil
 from datetime import datetime
 
 from paths import app_base_dir
@@ -101,10 +102,39 @@ MIGRATIONS = [
 ]
 
 
+def _backup_before_migration():
+    """迁移前就地把库备份到 backups/（pre-migration 标记），保留最近 5 份。
+
+    为什么需要：迁移在 import models 时触发（app.py 顶部 import），而 app.py 的启动例行
+    备份在 main 块才执行——备份到手的已是迁移后库。这里在**首个未应用迁移**之前快照一份，
+    为未来可能的破坏性迁移（如 DROP COLUMN 带数据）留迁移前回滚点。仅清理 pre-migration_
+    前缀，不动 app.py 的 protein_lab_ 例行备份。
+    """
+    backup_dir = os.path.join(os.path.dirname(DB_PATH), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dst = os.path.join(backup_dir, f"pre-migration_{stamp}.db")
+    shutil.copy2(DB_PATH, dst)
+    existing = sorted(
+        [f for f in os.listdir(backup_dir)
+         if f.startswith("pre-migration_") and f.endswith(".db")],
+        reverse=True,
+    )
+    for old in existing[5:]:
+        os.remove(os.path.join(backup_dir, old))
+
+
 def _migrate():
+    # 先短连接读当前版本，再决定是否备份：迁移前必须无打开的写连接（Windows 文件句柄）
     conn = get_db()
     try:
         current = conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
+    if current < MIGRATIONS[-1]["version"] and os.path.exists(DB_PATH):
+        _backup_before_migration()
+    conn = get_db()
+    try:
         for m in MIGRATIONS:
             v = m["version"]
             if current >= v:

@@ -217,6 +217,49 @@ for tool, args in read_cases:
     assert _db_dump() == before, f"读工具 {tool} 不应写库"
 print("13. MCP 读工具零写库 OK")
 
+# ── 14. 迁移前自动备份：老库升级时留下迁移前快照（P1 修复回归）──
+import shutil
+sub = os.path.join(TMP, "mig_backup_test")
+os.makedirs(sub, exist_ok=True)
+bpath = os.path.join(sub, "seed.db")
+c = sqlite3.connect(bpath)
+c.execute("PRAGMA user_version = 0")
+c.executescript("""
+    CREATE TABLE proteins (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
+        sequence TEXT NOT NULL, mw REAL, nW INTEGER DEFAULT 0, nY INTEGER DEFAULT 0,
+        nC INTEGER DEFAULT 0, ext_red REAL, ext_ox REAL, abs_0_1pct REAL,
+        tag TEXT DEFAULT '', notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')));
+    CREATE TABLE experiments (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
+        exp_type TEXT NOT NULL, date TEXT DEFAULT (date('now','localtime')),
+        params TEXT DEFAULT '{}', results TEXT DEFAULT '{}', notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')));
+    CREATE TABLE experiment_proteins (experiment_id INTEGER NOT NULL, protein_id INTEGER NOT NULL,
+        PRIMARY KEY (experiment_id, protein_id));
+    INSERT INTO proteins (name, sequence) VALUES ('老库蛋白', 'MKRWAS');
+""")
+c.commit()
+c.close()
+saved = models.DB_PATH
+models.DB_PATH = bpath
+models.init_db()  # 触发迁移：应先生成 pre-migration 备份，再升级主库
+bks = sorted([f for f in os.listdir(os.path.join(sub, "backups"))
+              if f.startswith("pre-migration_") and f.endswith(".db")])
+assert bks, "应生成 pre-migration 备份"
+bkc = sqlite3.connect(os.path.join(sub, "backups", bks[-1]))
+tabs = [r[0] for r in bkc.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+assert "experiment_raw" not in tabs, "备份应是迁移前状态（无 experiment_raw）"
+assert bkc.execute("SELECT COUNT(*) FROM proteins").fetchone()[0] == 1, "备份应含老库数据"
+assert bkc.execute("PRAGMA user_version").fetchone()[0] == 0, "备份 user_version 应为 0"
+bkc.close()
+c = sqlite3.connect(bpath)
+tabs = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+assert "experiment_raw" in tabs, "主库应已迁移到含 experiment_raw"
+assert c.execute("SELECT COUNT(*) FROM proteins").fetchone()[0] == 1, "迁移不应丢数据"
+c.close()
+models.DB_PATH = saved
+print("14. 迁移前自动备份 OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")

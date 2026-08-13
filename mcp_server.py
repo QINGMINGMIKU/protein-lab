@@ -171,10 +171,10 @@ def handle_tools_list(id_, params):
 def handle_tools_call(id_, params):
     tool_name = params.get("name", "")
     args = params.get("arguments", {})
-    # 读写契约守卫（规则 #6）：读工具必须声明在 WRITE_TOOLS 之外；
-    # 违反契约（读工具想写库）在此被识别。真正拦截写库的是 test_models 读零写库断言。
-    if tool_name not in WRITE_TOOLS:
-        assert tool_name in READ_TOOLS, f"未归类的 MCP 工具（既非写工具也未声明只读）: {tool_name}"
+    # 读写契约（规则 #6）：读工具零写库无运行时拦截——它们内部走 models 可写连接，
+    # 任何 assert 都拦不住。真正的防线是 test_models 的"读零写库"断言（逐个调用后
+    # 库内容逐字节不变），新增读工具必须在 test 的 read_cases 里注册。
+    # WRITE_TOOLS / READ_TOOLS 仅作契约声明 + 测试引用，提醒新工具归入哪一侧。
 
     try:
         if tool_name == "search_proteins":
