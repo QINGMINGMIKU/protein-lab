@@ -22,7 +22,7 @@ import numpy as np
 import paths
 import models
 import services
-from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics
+from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics, sub_blank, align_wells, snap_ylim
 
 app = Flask(__name__,
             template_folder=paths.resource_path("templates"),
@@ -942,34 +942,9 @@ def api_enzyme_plot():
         fig, ax = plt.subplots(figsize=(9, 6))
 
         if plot_type == "kinetics":
-            # 扣除阴性/空白信号（sub_blank）：逐时间点减各阴性孔的均值 OD，阴性自身归零。
-            # 时间值匹配（而非索引），兼容个别孔缺测点错位。
-            has_blank = any(wd.get("ref") in ("blank", "neg") for wd in wells_data.values())
-            mean_neg = None
-            if body.get("sub_blank", False) and has_blank:
-                buckets = {}
-                for wd in wells_data.values():
-                    if wd.get("ref") in ("blank", "neg") and wd.get("times") and wd.get("od"):
-                        for t, o in zip(wd["times"], wd["od"]):
-                            buckets.setdefault(t, []).append(o)
-                mean_neg = {t: sum(v) / len(v) for t, v in buckets.items()}
-                for wd in wells_data.values():
-                    if wd.get("times") and wd.get("od"):
-                        wd["od"] = [o - mean_neg.get(t, 0.0) for t, o in zip(wd["times"], wd["od"])]
-
-            # 对齐：起始/终止均值只统计样品/阳性孔——阴性/空白是参考（sub_blank 后≈0），
-            # 混进均值会把对齐目标拖向 0，既压低样品起点，又把阴性抬离 0，两条链路互相拆台
-            all_first_od = []
-            all_last_od = []
-            if align_start or align_end:
-                for wd in wells_data.values():
-                    if wd.get("ref") in ("blank", "neg"):
-                        continue
-                    if wd.get("od") and len(wd["od"]) > 0:
-                        all_first_od.append(wd["od"][0])
-                        all_last_od.append(wd["od"][-1])
-            avg_first = sum(all_first_od) / len(all_first_od) if all_first_od else 0.0
-            avg_last = sum(all_last_od) / len(all_last_od) if all_last_od else 0.0
+            # 扣除阴性/空白 + 对齐起始/终止：纯函数在 calculators 层（sub_blank/align_wells），可单测
+            wells_data, mean_neg = sub_blank(wells_data, enabled=body.get("sub_blank", False))
+            wells_data, _avg_first, _avg_last = align_wells(wells_data, align_start, align_end)
 
             idx = 0  # 实际绘制的孔序号（跳过隐藏的阴性/空白），用于逐孔取 BLI 配色
             plotted_od = []  # 收集实际绘制曲线/拟合线的纵坐标，用于纵轴取整缩放
@@ -985,15 +960,7 @@ def api_enzyme_plot():
                 conc = wd.get("conc_ng_ml", "")
                 lbl = f"{label}" + (f" ({conc} ng/mL)" if conc else "")
                 times_min = [t / 60 for t in wd["times"]]
-                od_vals = list(wd["od"])
-
-                # 对齐位移只作用于样品/阳性孔；阴性/空白保持 sub_blank 后的 0 位置
-                if align_start and od_vals and ref not in ("blank", "neg"):
-                    shift = avg_first - od_vals[0]
-                    od_vals = [v + shift for v in od_vals]
-                if align_end and od_vals and ref not in ("blank", "neg"):
-                    shift = avg_last - od_vals[-1]
-                    od_vals = [v + shift for v in od_vals]
+                od_vals = list(wd["od"])  # 已含 sub_blank + 对齐（见上），直接绘制
                 plotted_od.extend(od_vals)
 
                 # 逐孔取 BLI 配色；阳性对照加粗突出
@@ -1015,14 +982,10 @@ def api_enzyme_plot():
                     plotted_od.extend(od_fit)
                 idx += 1
 
-            # 纵轴：数据范围外扩 6% 后按数量级取整到整刻度，避免难看的自动刻度
-            if plotted_od:
-                lo, hi = min(plotted_od), max(plotted_od)
-                span = max(hi - lo, 1e-9)
-                lo -= 0.06 * span
-                hi += 0.06 * span
-                step = 10 ** (int(np.floor(np.log10(span))) - 1)
-                ax.set_ylim(np.floor(lo / step) * step, np.ceil(hi / step) * step)
+            # 纵轴：数据范围外扩后按数量级取整到整刻度，避免难看的自动刻度
+            ylim = snap_ylim(plotted_od)
+            if ylim:
+                ax.set_ylim(*ylim)
 
             # 标注：中文/英文自适应
             use_cn = font_path is not None

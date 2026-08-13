@@ -254,3 +254,75 @@ def fit_kinetics(times: list, od: list) -> dict:
     else:
         r2 = None
     return {"slope": dod_min, "intercept": round(float(b), 6), "r2": r2, "n": n}
+
+
+def sub_blank(wells: dict, enabled: bool = True):
+    """扣除阴性/空白信号（sub_blank）：逐时间点减各阴性孔的均值 OD，阴性自身归零。
+    时间值匹配（而非索引），兼容个别孔缺测点错位。
+    返回 (new_wells, mean_neg)：new_wells 每个孔 od 被替换为扣减后的新列表；
+    mean_neg 为 {time: mean_od}，未启用或无阴性/空白时返回 None。"""
+    mean_neg = None
+    if not enabled:
+        return wells, mean_neg
+    has_blank = any(wd.get("ref") in ("blank", "neg") for wd in wells.values())
+    if not has_blank:
+        return wells, mean_neg
+    buckets = {}
+    for wd in wells.values():
+        if wd.get("ref") in ("blank", "neg") and wd.get("times") and wd.get("od"):
+            for t, o in zip(wd["times"], wd["od"]):
+                buckets.setdefault(t, []).append(o)
+    mean_neg = {t: sum(v) / len(v) for t, v in buckets.items()}
+    new_wells = {}
+    for wid, wd in wells.items():
+        if wd.get("times") and wd.get("od"):
+            nd = dict(wd)
+            nd["od"] = [o - mean_neg.get(t, 0.0) for t, o in zip(wd["times"], wd["od"])]
+            new_wells[wid] = nd
+        else:
+            new_wells[wid] = wd
+    return new_wells, mean_neg
+
+
+def align_wells(wells: dict, align_start: bool = False, align_end: bool = False):
+    """对齐起始/终止值：均值只统计样品/阳性孔（阴性/空白是参考，sub_blank 后≈0）。
+    位移只作用于样品/阳性孔。返回 (new_wells, avg_first, avg_last)。"""
+    all_first_od = []
+    all_last_od = []
+    if align_start or align_end:
+        for wd in wells.values():
+            if wd.get("ref") in ("blank", "neg"):
+                continue
+            if wd.get("od") and len(wd["od"]) > 0:
+                all_first_od.append(wd["od"][0])
+                all_last_od.append(wd["od"][-1])
+    avg_first = sum(all_first_od) / len(all_first_od) if all_first_od else 0.0
+    avg_last = sum(all_last_od) / len(all_last_od) if all_last_od else 0.0
+    new_wells = {}
+    for wid, wd in wells.items():
+        ref = wd.get("ref", "")
+        od_vals = list(wd.get("od") or [])
+        if od_vals and ref not in ("blank", "neg") and (align_start or align_end):
+            if align_start:
+                od_vals = [v + (avg_first - od_vals[0]) for v in od_vals]
+            if align_end:
+                od_vals = [v + (avg_last - od_vals[-1]) for v in od_vals]
+            nd = dict(wd)
+            nd["od"] = od_vals
+            new_wells[wid] = nd
+        else:
+            new_wells[wid] = wd
+    return new_wells, avg_first, avg_last
+
+
+def snap_ylim(values, pad: float = 0.06):
+    """纵轴范围：数据范围外扩 pad 后按数量级取整到整刻度，避免难看的自动刻度。
+    返回 (lo, hi)；values 为空返回 None。"""
+    if not values:
+        return None
+    lo, hi = min(values), max(values)
+    span = max(hi - lo, 1e-9)
+    lo -= pad * span
+    hi += pad * span
+    step = 10 ** (int(np.floor(np.log10(span))) - 1)
+    return float(np.floor(lo / step) * step), float(np.ceil(hi / step) * step)

@@ -7,8 +7,9 @@
 1. parse_fortebio_csv / group_by_sample —— 合成 ForteBio CSV 的解析与分组
 2. generate_sensorgram_png —— PNG 头校验 + fit 叠加 + separate 模式
 3. fit_kd —— 自动相界检测 + 显式相界下 5 方法 KD 与仿真真值同数量级
-4. /api/enzyme/plot（kinetics + michaelis）→ 200 + base64 PNG（隔离临时库）
-5. /calculator 仍 200
+4. 酶活纯函数（calculators.sub_blank / align_wells / snap_ylim）
+5. /api/enzyme/plot（kinetics + michaelis）→ 200 + base64 PNG（隔离临时库）
+6. /calculator 仍 200
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
@@ -93,7 +94,52 @@ kd_joint = res["joint"]["kd"]
 assert 10 < kd_joint < 1000, f"joint KD {kd_joint} 偏离真值过远"
 print(f"KD OK: standard={kd_std:.1f} nM, joint={kd_joint:.1f} nM (truth 100)")
 
-# ── 5. 酶活绘图端点（隔离临时库）──
+# ── 5. 酶活纯函数（calculators：sub_blank / align_wells / snap_ylim）──
+from calculators import sub_blank, align_wells, snap_ylim
+
+def _close(a, b, tol=1e-9):
+    return abs(a - b) < tol
+
+# 5a. sub_blank：逐时间点扣阴性均值，阴性自身归零；未启用/无阴性原样返回
+wells = {
+    "A1": {"times": [0, 1, 2], "od": [0.10, 0.12, 0.14], "ref": ""},
+    "B1": {"times": [0, 1, 2], "od": [0.08, 0.08, 0.08], "ref": "neg"},
+    "B2": {"times": [0, 1, 2], "od": [0.10, 0.10, 0.10], "ref": "blank"},
+}
+subbed, mean_neg = sub_blank(wells, enabled=True)
+assert set(mean_neg) == {0, 1, 2} and all(_close(v, 0.09) for v in mean_neg.values()), mean_neg
+assert all(_close(a, b) for a, b in zip(subbed["A1"]["od"], [0.01, 0.03, 0.05])), subbed["A1"]["od"]
+assert _close(subbed["B1"]["od"][0], 0.08 - 0.09), "阴性自身应被扣到 ≈0"
+# 未启用：原样返回、mean_neg=None；无阴性：也原样
+w_off, mn_off = sub_blank(wells, enabled=False)
+assert mn_off is None and w_off is wells
+w_none, mn_none = sub_blank({"A1": {"times": [0], "od": [0.1], "ref": ""}}, enabled=True)
+assert mn_none is None and w_none["A1"]["od"] == [0.1]
+print("sub_blank OK")
+
+# 5b. align_wells：均值只统计样品/阳性，位移只作用于样品/阳性
+w3 = {
+    "A1": {"times": [0, 1], "od": [0.10, 0.20], "ref": ""},
+    "A2": {"times": [0, 1], "od": [0.30, 0.40], "ref": "pos"},
+    "B1": {"times": [0, 1], "od": [0.05, 0.06], "ref": "neg"},
+}
+aligned, af, al = align_wells(w3, align_start=True, align_end=False)
+assert _close(af, 0.20), af  # (0.10 + 0.30) / 2
+assert all(_close(a, b) for a, b in zip(aligned["A1"]["od"], [0.20, 0.30])), aligned["A1"]["od"]
+assert all(_close(a, b) for a, b in zip(aligned["A2"]["od"], [0.20, 0.30])), aligned["A2"]["od"]
+assert aligned["B1"]["od"] == [0.05, 0.06], "阴性不参与对齐"
+# 无对齐开关：原样返回
+w_n, _, _ = align_wells(w3, align_start=False, align_end=False)
+assert w_n["A1"]["od"] == [0.10, 0.20]
+print("align_wells OK", af)
+
+# 5c. snap_ylim：外扩 6% + 数量级取整；空值返回 None
+assert snap_ylim([]) is None
+lo, hi = snap_ylim([0.0, 1.0, 2.0])
+assert _close(lo, -0.2) and _close(hi, 2.2), (lo, hi)  # span=2 → step=0.1 → [-0.2, 2.2]
+print("snap_ylim OK", (lo, hi))
+
+# ── 6. 酶活绘图端点（隔离临时库）──
 import models
 importlib.reload(models)  # ⚠ 会把 DB_PATH 重置为真实路径（测试规范要求）
 models.DB_PATH = os.path.join(TMP, "test.db")
