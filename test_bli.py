@@ -95,7 +95,7 @@ assert 10 < kd_joint < 1000, f"joint KD {kd_joint} 偏离真值过远"
 print(f"KD OK: standard={kd_std:.1f} nM, joint={kd_joint:.1f} nM (truth 100)")
 
 # ── 5. 酶活纯函数（calculators：sub_blank / align_wells / snap_ylim）──
-from calculators import sub_blank, align_wells, snap_ylim
+from calculators import sub_blank, align_wells, snap_ylim, correct_slopes
 
 def _close(a, b, tol=1e-9):
     return abs(a - b) < tol
@@ -138,6 +138,24 @@ assert snap_ylim([]) is None
 lo, hi = snap_ylim([0.0, 1.0, 2.0])
 assert _close(lo, -0.2) and _close(hi, 2.2), (lo, hi)  # span=2 → step=0.1 → [-0.2, 2.2]
 print("snap_ylim OK", (lo, hi))
+
+# 5d. correct_slopes：阴性/空白斜率均值作背景，校正所有孔（含参考孔自身）
+fits = {
+    "A1": {"slope": 0.010, "intercept": 0.1, "r2": 0.99, "n": 20},   # 样品
+    "B1": {"slope": 0.002, "intercept": 0.08, "r2": 0.90, "n": 20},  # 阴性
+    "C1": {"slope": None, "intercept": None, "r2": None, "n": 1},    # 数据点不足
+}
+refs = {"A1": "", "B1": "neg", "C1": ""}
+out = correct_slopes(fits, refs)
+assert out["A1"]["blank_corrected"] is True
+assert _close(out["A1"]["slope_corrected"], 0.008), out["A1"]   # 0.010 - 0.002
+assert out["B1"]["blank_corrected"] is True
+assert _close(out["B1"]["slope_corrected"], 0.000), out["B1"]   # 阴性自身也扣
+assert "slope_corrected" not in out["C1"] and "blank_corrected" not in out["C1"], out["C1"]
+# 无阴性：blank_corrected=False，不产生 slope_corrected
+out2 = correct_slopes({"A1": {"slope": 0.010}}, {"A1": ""})
+assert out2["A1"]["blank_corrected"] is False and "slope_corrected" not in out2["A1"]
+print("correct_slopes OK")
 
 # ── 6. 酶活绘图端点（隔离临时库）──
 import models
@@ -191,6 +209,17 @@ resp = client.post("/api/enzyme/plot", json=payload_mm)
 assert resp.status_code == 200, resp.status_code
 assert resp.get_json()["image"].startswith("data:image/png;base64,")
 print("enzyme michaelis plot OK")
+
+# 6b. /api/enzyme/fit 返回速率级校正（slope_corrected 已收归后端）
+resp = client.post("/api/enzyme/fit", json={"wells": {
+    "A1": {"times": tt, "od": [0.1 + 0.002 * x for x in range(len(tt))], "ref": ""},
+    "B1": {"times": tt, "od": [0.08 + 0.0005 * x for x in range(len(tt))], "ref": "neg"},
+}})
+assert resp.status_code == 200, resp.status_code
+fit_res = resp.get_json()
+assert fit_res["A1"]["blank_corrected"] is True, fit_res
+assert "slope_corrected" in fit_res["A1"] and fit_res["B1"]["slope_corrected"] is not None
+print("enzyme fit slope_corrected OK")
 
 assert client.get("/calculator").status_code == 200
 print("/calculator OK")

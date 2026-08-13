@@ -326,3 +326,23 @@ def snap_ylim(values, pad: float = 0.06):
     hi += pad * span
     step = 10 ** (int(np.floor(np.log10(span))) - 1)
     return float(np.floor(lo / step) * step), float(np.ceil(hi / step) * step)
+
+
+def correct_slopes(fits: dict, refs: dict) -> dict:
+    """速率级阴性扣除：blank/neg 孔的斜率均值作背景，校正所有孔（含参考孔自身）。
+    fits: {well_id: fit_kinetics 输出}；refs: {well_id: ref}（ref in ("blank","neg") 为参考孔）。
+    返回新 fits dict：每孔补 blank_corrected（是否扣除）与 slope_corrected（扣减后斜率）。"""
+    blank_slopes = []
+    for wid, fit in fits.items():
+        if refs.get(wid) in ("blank", "neg") and fit.get("slope") is not None:
+            blank_slopes.append(fit["slope"])
+    blank_avg = sum(blank_slopes) / len(blank_slopes) if blank_slopes else 0.0
+    out = {}
+    for wid, fit in fits.items():
+        nf = dict(fit)
+        if fit.get("slope") is not None:
+            nf["blank_corrected"] = bool(blank_slopes)
+            if blank_slopes:
+                nf["slope_corrected"] = round(fit["slope"] - blank_avg, 6)
+        out[wid] = nf
+    return out

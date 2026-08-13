@@ -1761,34 +1761,28 @@ async function enzymeCalc(wellIds, silent = false) {
     const wd = enzymeData.wells[id];
     if (!wd) continue;
     const { times, od } = enzymeFilteredData(wd);  // 只算激活的时间点
-    payload.wells[id] = { times, od };
+    payload.wells[id] = { times, od, ref: enzymeWellInfo[id]?.ref };
+  }
+  // 速率级阴性扣除需要全板的阴性/空白孔作参考（即使当前未选中）——后端据此算 slope_corrected
+  for (const [id, wd] of Object.entries(enzymeData.wells)) {
+    const info = enzymeWellInfo[id] || {};
+    if ((info.ref === "blank" || info.ref === "neg") && !payload.wells[id]) {
+      const { times, od } = enzymeFilteredData(wd);
+      payload.wells[id] = { times, od, ref: info.ref };
+    }
   }
   try {
     const r = await API.post("/api/enzyme/fit", payload);
-    // 先写入新的拟合结果
+    // 后端已算好 slope_corrected / blank_corrected，这里只写回 + 显示
     for (const [id, fit] of Object.entries(r)) {
       if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
       enzymeWellInfo[id].fit = fit;
     }
-    // 再从新拟合结果中找阴性/空白孔均值
-    let blankSlopes = [];
-    for (const [wid, info] of Object.entries(enzymeWellInfo)) {
-      if ((info.ref === "blank" || info.ref === "neg") && info.fit && info.fit.slope != null) {
-        blankSlopes.push(info.fit.slope);
-      }
-    }
-    const blankAvg = blankSlopes.length ? blankSlopes.reduce((a, b) => a + b, 0) / blankSlopes.length : 0;
-
-    for (const [id, info] of Object.entries(enzymeWellInfo)) {
-      if (!info.fit || info.fit.slope == null) continue;
-      info.fit.blank_corrected = blankSlopes.length > 0;
-      if (blankSlopes.length > 0) {
-        info.fit.slope_corrected = +(info.fit.slope - blankAvg).toFixed(6);
-      }
-    }
     renderEnzymeTable(wellIds);
     updateWellForm();
-    const msg = blankSlopes.length ? `计算完成 (已扣除 ${blankSlopes.length} 个阴性/空白孔均值 ΔOD/min=${blankAvg.toFixed(6)})` : "计算完成";
+    const blankCount = Object.values(enzymeWellInfo).filter(w =>
+      (w.ref === "blank" || w.ref === "neg") && w.fit?.slope != null).length;
+    const msg = blankCount ? `计算完成 (已扣除 ${blankCount} 个阴性/空白孔)` : "计算完成";
     if (!silent) toast(msg);
   } catch (err) { toast(err.message, true); }
 }

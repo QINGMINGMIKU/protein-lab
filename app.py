@@ -22,7 +22,7 @@ import numpy as np
 import paths
 import models
 import services
-from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics, sub_blank, align_wells, snap_ylim
+from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics, sub_blank, align_wells, snap_ylim, correct_slopes
 
 app = Flask(__name__,
             template_folder=paths.resource_path("templates"),
@@ -907,14 +907,17 @@ def api_enzyme_parse():
 
 @app.route("/api/enzyme/fit", methods=["POST"])
 def api_enzyme_fit():
-    """对指定孔做线性拟合，返回 ΔOD/min + R²"""
+    """对指定孔做线性拟合，返回 ΔOD/min + R²；并按阴性/空白孔斜率均值做速率级校正
+    （slope_corrected，前端只显示、不再自己算——计算收归后端）。"""
     body = request.get_json()
     wells_data = body.get("wells", {})
-    results = {}
+    fits = {}
+    refs = {}
     for well_id, wd in wells_data.items():
+        refs[well_id] = wd.get("ref")
         if wd.get("times") and wd.get("od"):
-            results[well_id] = fit_kinetics(wd["times"], wd["od"])
-    return jsonify(results)
+            fits[well_id] = fit_kinetics(wd["times"], wd["od"])
+    return jsonify(correct_slopes(fits, refs))
 
 
 @app.route("/api/enzyme/plot", methods=["POST"])
