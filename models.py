@@ -12,6 +12,9 @@ from paths import app_base_dir
 # 打包(onefile)后 __file__ 指向临时解压目录，DB 必须放 EXE 同目录；dev 下即源码目录
 DB_PATH = os.path.join(app_base_dir(), "protein_lab.db")
 
+# 实验类型清单（单一来源）——模板下拉 / MCP 工具描述都从这读，避免各处硬编码漂移
+EXP_TYPES = ("BLI", "SDS-PAGE", "AKTA", "浓度测定", "酶活测定", "其他")
+
 
 def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)

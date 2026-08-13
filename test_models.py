@@ -130,6 +130,19 @@ assert body["params"]["calc_type"] == "enzyme", "calc_type 应打进 params"
 assert isinstance(body["results"], dict)
 print("8. API 写入入口 OK")
 
+# ── 9. exp_type 单一来源：模板下拉从 models.EXP_TYPES 渲染，无硬编码漂移 ──
+exp_types = list(models.EXP_TYPES)
+assert len(exp_types) >= 6 and "酶活测定" in exp_types, f"EXP_TYPES 缺类型: {exp_types}"
+lst = models.exp_list()
+assert lst, "应存在实验用于详情页渲染"
+for url in ("/experiments", f"/experiments/{lst[0]['id']}"):
+    r = client.get(url)
+    assert r.status_code == 200, r.status_code
+    html = r.get_data(as_text=True)
+    for t in exp_types:
+        assert f'<option value="{t}">' in html, f"{url} 缺少 exp_type 选项: {t}"
+print("9. exp_type 单一来源渲染 OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")

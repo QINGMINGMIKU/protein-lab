@@ -35,12 +35,7 @@
     <div class="form-row">
       <label>类型
         <select id="editType">
-          <option value="BLI">BLI</option>
-          <option value="SDS-PAGE">SDS-PAGE</option>
-          <option value="AKTA">AKTA</option>
-          <option value="浓度测定">浓度测定</option>
-          <option value="酶活测定">酶活测定</option>
-          <option value="其他">其他</option>
+          {% for t in exp_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
         </select>
       </label>
       <label>日期 <input type="date" id="editDate"></label>

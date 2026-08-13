@@ -118,7 +118,7 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "exp_type": {"type": "string", "description": "实验类型: BLI, SDS-PAGE, AKTA, 浓度测定, 酶活测定, 其他"},
+                "exp_type": {"type": "string", "description": f"实验类型: {', '.join(models.EXP_TYPES)}"},
                 "limit": {"type": "integer", "description": "返回条数上限，默认 30"}
             },
             "required": []
@@ -131,7 +131,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "实验标题"},
-                "exp_type": {"type": "string", "description": "实验类型: BLI, SDS-PAGE, AKTA, 浓度测定, 酶活测定, 其他"},
+                "exp_type": {"type": "string", "description": f"实验类型: {', '.join(models.EXP_TYPES)}"},
                 "protein_names": {"type": "array", "items": {"type": "string"}, "description": "关联蛋白名称列表（可选）"},
                 "date": {"type": "string", "description": "日期 YYYY-MM-DD，默认今天"},
                 "params": {"type": "object", "description": "实验参数 (JSON object)"},

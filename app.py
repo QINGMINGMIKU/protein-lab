@@ -63,7 +63,7 @@ def page_calculator():
 
 @app.route("/experiments")
 def page_experiments():
-    return render_template("experiments.html")
+    return render_template("experiments.html", exp_types=models.EXP_TYPES)
 
 
 @app.route("/experiments/<int:eid>")
@@ -75,7 +75,7 @@ def page_experiment_detail(eid):
     for field in ("params", "results"):
         val = e.get(field)
         e[field] = val if isinstance(val, dict) else {}
-    return render_template("experiment_detail.html", exp=e)
+    return render_template("experiment_detail.html", exp=e, exp_types=models.EXP_TYPES)
 
 
 # ═══════════════════════════════════════════════════════════
