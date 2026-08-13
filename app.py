@@ -60,16 +60,6 @@ def page_calculator():
     return render_template("calculator.html")
 
 
-def _json_unescape(val):
-    """防御性解包：历史数据可能把 JSON 字符串再编码一层（双重编码），须循环解到非字符串为止"""
-    while isinstance(val, str):
-        try:
-            val = json.loads(val)
-        except Exception:
-            break
-    return val
-
-
 @app.route("/experiments")
 def page_experiments():
     return render_template("experiments.html")
@@ -80,9 +70,9 @@ def page_experiment_detail(eid):
     e = models.exp_get(eid)
     if not e:
         return "实验不存在", 404
-    # 解析 JSON 字符串字段供模板使用（处理历史双编码问题）
+    # models.exp_get 已反序列化 params/results（见 models._json_unwrap），这里只兜底成 dict 供模板
     for field in ("params", "results"):
-        val = _json_unescape(e.get(field))
+        val = e.get(field)
         e[field] = val if isinstance(val, dict) else {}
     return render_template("experiment_detail.html", exp=e)
 
@@ -591,7 +581,7 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
 
     # 根据实验类型选择数据表头（实验名称/日期/类型 单独成行，不进表头）
     def _get_calc_type(e):
-        p = _json_unescape(e.get("params", {}))
+        p = e.get("params") or {}
         return p.get("calc_type", "") if isinstance(p, dict) else ""
     all_enzyme = exps and all(_get_calc_type(e) == "enzyme" for e in exps)
     enzyme_long_rows = []  # 长格式（孔位-时间-OD），全酶活导出时附加为第二个 Sheet
@@ -615,8 +605,8 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
 
     first_exp = True
     for e in exps:
-        params = _json_unescape(e.get("params", "{}"))
-        results = _json_unescape(e.get("results", "{}"))
+        params = e.get("params") or {}
+        results = e.get("results") or {}
         calc_type = params.get("calc_type", "")
         proteins = params.get("proteins", [])
 

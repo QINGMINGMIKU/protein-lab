@@ -181,6 +181,17 @@ def protein_delete_all() -> int:
 
 # ── Experiments CRUD ───────────────────────────────────────
 
+def _json_unwrap(val):
+    """防御性解包：历史数据可能把 JSON 字符串再编码一层（双重编码），循环解到非字符串为止。
+    结果不强制 dict——旧浓度格式的 results 可能是 list，须原样保留。"""
+    while isinstance(val, str):
+        try:
+            val = json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            break
+    return val
+
+
 def _set_exp_proteins(conn: sqlite3.Connection, experiment_id: int,
                       protein_ids: list[int]) -> None:
     """同步实验-蛋白关联（先删后插）"""
@@ -214,6 +225,8 @@ def exp_list(exp_type: str = "", limit: int = 50) -> list[dict]:
     for r in rows:
         d = dict(r)
         d["protein_names"] = d["protein_names"] or ""
+        d["params"] = _json_unwrap(d.get("params"))
+        d["results"] = _json_unwrap(d.get("results"))
         results.append(d)
     return results
 
@@ -255,6 +268,8 @@ def exp_get(exp_id: int) -> dict | None:
         return None
     d = dict(row)
     d["protein_names"] = d["protein_names"] or ""
+    d["params"] = _json_unwrap(d.get("params"))
+    d["results"] = _json_unwrap(d.get("results"))
     # 同时返回 protein_ids 数组方便前端编辑
     ids = conn.execute(
         "SELECT protein_id FROM experiment_proteins WHERE experiment_id = ?",
