@@ -271,7 +271,9 @@ def sub_blank(wells: dict, enabled: bool = True):
     背景 = 阴性(neg) 孔（有样本无酶，捕获真实反应背景）；无 neg 回退空白(blank) 孔（缓冲液基线）。
     时间值匹配（而非索引），兼容个别孔缺测点错位。
     返回 (new_wells, mean_neg)：new_wells 每个孔 od 被替换为扣减后的新列表；
-    mean_neg 为 {time: mean_od}，未启用或无背景孔时返回 None。"""
+    mean_neg 为 {time: mean_od}，未启用或无背景孔时返回 None。
+    注意：new_wells 是浅拷贝——受影响孔的 dict 为新对象但 fit 等嵌套结构与原对象共享引用；
+    未受影响孔直接复用原 dict，调用方不要深改嵌套结构。"""
     if not enabled:
         return wells, None
     bg_refs = _bg_priority({wd.get("ref") for wd in wells.values()})
@@ -298,7 +300,8 @@ def sub_blank(wells: dict, enabled: bool = True):
 
 def align_wells(wells: dict, align_start: bool = False, align_end: bool = False):
     """对齐起始/终止值：均值只统计样品/阳性孔（阴性/空白是参考，sub_blank 后≈0）。
-    位移只作用于样品/阳性孔。返回 (new_wells, avg_first, avg_last)。"""
+    位移只作用于样品/阳性孔。返回 (new_wells, avg_first, avg_last)。
+    注意：与 sub_blank 同为浅拷贝语义——受影响孔为新 dict、嵌套结构与原对象共享引用。"""
     all_first_od = []
     all_last_od = []
     if align_start or align_end:
@@ -340,25 +343,26 @@ def snap_ylim(values, pad: float = 0.06):
     return float(np.floor(lo / step) * step), float(np.ceil(hi / step) * step)
 
 
-def correct_slopes(fits: dict, refs: dict) -> dict:
+def correct_slopes(fits: dict, refs: dict) -> tuple[dict, dict | None]:
     """速率级背景扣除：以背景孔斜率均值校正样品/阳性/阴性自身。
     背景 = 阴性(neg) 优先，无 neg 回退空白(blank)（两者并存只扣阴性）。
     空白(blank) 孔是缓冲液基线——信号层已被 sub_blank 扣平，速率层再扣 = 被多扣一次成负值，故不做速率校正。
     fits: {well_id: fit_kinetics 输出}；refs: {well_id: ref}。
-    返回新 fits dict：非空白孔补 blank_corrected（是否扣除）与 slope_corrected（扣减后斜率）。"""
+    返回 (out, bg)：out 为非空白孔补 blank_corrected / slope_corrected 的新 fits；
+    bg = {"avg": 背景均值, "count": 背景孔数}，无背景返回 None。"""
     bg_refs = _bg_priority(set(refs.values()))
     bg_slopes = []
     if bg_refs:
         for wid, fit in fits.items():
             if refs.get(wid) in bg_refs and fit.get("slope") is not None:
                 bg_slopes.append(fit["slope"])
-    bg_avg = sum(bg_slopes) / len(bg_slopes) if bg_slopes else 0.0
+    bg = {"avg": sum(bg_slopes) / len(bg_slopes), "count": len(bg_slopes)} if bg_slopes else None
     out = {}
     for wid, fit in fits.items():
         nf = dict(fit)
         if fit.get("slope") is not None and refs.get(wid) != "blank":
-            nf["blank_corrected"] = bool(bg_slopes)
-            if bg_slopes:
-                nf["slope_corrected"] = round(fit["slope"] - bg_avg, 6)
+            nf["blank_corrected"] = bool(bg)
+            if bg:
+                nf["slope_corrected"] = round(fit["slope"] - bg["avg"], 6)
         out[wid] = nf
-    return out
+    return out, bg

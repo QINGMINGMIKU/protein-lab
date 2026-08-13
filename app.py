@@ -427,7 +427,7 @@ def api_exp_update_proteins(eid):
     data = request.get_json()
     protein_ids = data.get("protein_ids", [])
     if isinstance(protein_ids, list):
-        protein_ids = [int(p) for p in protein_ids if p]
+        protein_ids = services.coerce_int_list(protein_ids)
     models.exp_update(eid, protein_ids=protein_ids)
     return jsonify(models.exp_get(eid))
 
@@ -917,7 +917,8 @@ def api_enzyme_fit():
         refs[well_id] = wd.get("ref")
         if wd.get("times") and wd.get("od"):
             fits[well_id] = fit_kinetics(wd["times"], wd["od"])
-    return jsonify(correct_slopes(fits, refs))
+    corrected, bg = correct_slopes(fits, refs)
+    return jsonify({"wells": corrected, "bg": bg})
 
 
 @app.route("/api/enzyme/plot", methods=["POST"])

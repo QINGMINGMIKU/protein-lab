@@ -1775,15 +1775,14 @@ async function enzymeCalc(wellIds, silent = false) {
   try {
     const r = await API.post("/api/enzyme/fit", payload);
     // 后端已算好 slope_corrected / blank_corrected，这里只写回 + 显示
-    for (const [id, fit] of Object.entries(r)) {
+    for (const [id, fit] of Object.entries(r.wells)) {
       if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
       enzymeWellInfo[id].fit = fit;
     }
     renderEnzymeTable(wellIds);
     updateWellForm();
-    const negCount = Object.values(enzymeWellInfo).filter(w =>
-      w.ref === "neg" && w.fit?.slope != null).length;
-    const msg = negCount ? `计算完成 (已扣除 ${negCount} 个阴性对照孔)` : "计算完成";
+    const bg = r.bg;
+    const msg = bg ? `计算完成 (已扣除背景 ${bg.count} 个孔, 均值 ΔOD/min=${bg.avg.toFixed(6)})` : "计算完成";
     if (!silent) toast(msg);
   } catch (err) { toast(err.message, true); }
 }

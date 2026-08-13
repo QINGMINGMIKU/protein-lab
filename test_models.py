@@ -99,6 +99,11 @@ e7 = services.create_experiment(title="", exp_type="浓度测定", protein_ids=[
                                 params={"a": 1}, results={"b": 2})
 assert e7["title"].endswith("_浓度测定_01") or "_浓度测定_" in e7["title"], f"自动命名异常: {e7['title']}"
 assert e7["params"] == {"a": 1} and e7["results"] == {"b": 2}
+# 非法 protein_ids 不抛错，静默过滤（避免 Python 原始错误文本泄漏）
+assert services.coerce_int_list(["abc", pid, None, 0, ""]) == [pid], "非 int id 应被过滤"
+e7b = services.create_experiment(title="坏ids", exp_type="BLI",
+                                 protein_ids=["abc", pid, None, "1.5"])
+assert e7b["protein_ids"] == [pid], f"坏 id 应被过滤: {e7b['protein_ids']}"
 try:
     services.create_experiment(title="x", exp_type="", params={})
     raise AssertionError("空 exp_type 应抛 ValueError")

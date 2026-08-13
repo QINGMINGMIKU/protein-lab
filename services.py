@@ -18,6 +18,20 @@ def auto_exp_name(exp_type: str, date: str = "") -> str:
     return f"{date}_{exp_type}_{seq:02d}"
 
 
+def coerce_int_list(values) -> list[int]:
+    """把 id 列表规整为 int：跳过空值与不能转 int 的项（不抛错，
+    避免 API 把 Python 原始错误文本 `invalid literal for int()...` 泄漏给前端）。"""
+    out = []
+    for v in values or []:
+        if not v:
+            continue
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def create_experiment(title: str, exp_type: str, protein_ids: list[int] = None,
                       date: str = "", params: dict = None, results: dict = None,
                       notes: str = "", auto_name: bool = True) -> dict:
@@ -31,7 +45,7 @@ def create_experiment(title: str, exp_type: str, protein_ids: list[int] = None,
     if auto_name and not title:
         title = auto_exp_name(exp_type, date)
     if isinstance(protein_ids, list):
-        protein_ids = [int(p) for p in protein_ids if p]
+        protein_ids = coerce_int_list(protein_ids)
     eid = models.exp_create(
         title=title, exp_type=exp_type, protein_ids=protein_ids,
         date=date, params=params, results=results, notes=notes,

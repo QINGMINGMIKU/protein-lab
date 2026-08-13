@@ -155,7 +155,7 @@ fits = {
     "C1": {"slope": None, "intercept": None, "r2": None, "n": 1},    # 数据点不足
 }
 refs = {"A1": "", "B1": "neg", "D1": "blank", "C1": ""}
-out = correct_slopes(fits, refs)
+out, bg = correct_slopes(fits, refs)
 assert out["A1"]["blank_corrected"] is True
 assert _close(out["A1"]["slope_corrected"], 0.008), out["A1"]   # 0.010 - 0.002（只扣阴性）
 assert out["B1"]["blank_corrected"] is True
@@ -163,13 +163,16 @@ assert _close(out["B1"]["slope_corrected"], 0.000), out["B1"]   # 阴性自身�
 # 空白不入背景、不被速率校正——避免被多扣成负值
 assert "slope_corrected" not in out["D1"] and "blank_corrected" not in out["D1"], out["D1"]
 assert "slope_corrected" not in out["C1"] and "blank_corrected" not in out["C1"], out["C1"]
-# 无背景：blank_corrected=False，不产生 slope_corrected
-out2 = correct_slopes({"A1": {"slope": 0.010}}, {"A1": ""})
+assert bg == {"avg": 0.002, "count": 1}, bg
+# 无背景：blank_corrected=False，不产生 slope_corrected，bg=None
+out2, bg2 = correct_slopes({"A1": {"slope": 0.010}}, {"A1": ""})
 assert out2["A1"]["blank_corrected"] is False and "slope_corrected" not in out2["A1"]
+assert bg2 is None
 # 仅空白作背景：样品扣空白均值，空白自身不被校正
-out3 = correct_slopes({"A1": {"slope": 0.010}, "D1": {"slope": 0.001}}, {"A1": "", "D1": "blank"})
+out3, bg3 = correct_slopes({"A1": {"slope": 0.010}, "D1": {"slope": 0.001}}, {"A1": "", "D1": "blank"})
 assert _close(out3["A1"]["slope_corrected"], 0.009), out3
 assert "slope_corrected" not in out3["D1"]
+assert bg3 == {"avg": 0.001, "count": 1}, bg3
 print("correct_slopes OK")
 
 # ── 6. 酶活绘图端点（隔离临时库）──
@@ -233,9 +236,11 @@ resp = client.post("/api/enzyme/fit", json={"wells": {
 }})
 assert resp.status_code == 200, resp.status_code
 fit_res = resp.get_json()
-assert fit_res["A1"]["blank_corrected"] is True, fit_res
-assert "slope_corrected" in fit_res["A1"] and fit_res["B1"]["slope_corrected"] is not None
-assert "slope_corrected" not in fit_res["C1"], "空白不做速率校正"
+wells = fit_res["wells"]
+assert wells["A1"]["blank_corrected"] is True, fit_res
+assert "slope_corrected" in wells["A1"] and wells["B1"]["slope_corrected"] is not None
+assert "slope_corrected" not in wells["C1"], "空白不做速率校正"
+assert fit_res["bg"]["count"] == 1 and _close(fit_res["bg"]["avg"], 0.06), fit_res["bg"]
 print("enzyme fit slope_corrected OK")
 
 assert client.get("/calculator").status_code == 200
