@@ -449,11 +449,18 @@ def api_exp_update_proteins(eid):
     return jsonify(models.exp_get(eid))
 
 
+def _exp_undo_payload(e: dict) -> dict:
+    """实验删除进 undo 栈前，附带其原始数据快照 id 列表——恢复时重挂孤儿 raw（FK 已 SET NULL）。"""
+    d = dict(e)
+    d["_raw_ids"] = [r["id"] for r in models.exp_raw_list(e["id"])]
+    return d
+
+
 @app.route("/api/experiments/<int:eid>", methods=["DELETE"])
 def api_exp_delete(eid):
     e = models.exp_get(eid)
     if e:
-        _push_undo("experiment", dict(e))
+        _push_undo("experiment", _exp_undo_payload(e))
     models.exp_delete(eid)
     return jsonify({"ok": True})
 
@@ -465,7 +472,7 @@ def api_exp_batch_delete():
     for eid in ids:
         e = models.exp_get(int(eid))
         if e:
-            _push_undo("experiment", dict(e))
+            _push_undo("experiment", _exp_undo_payload(e))
             models.exp_delete(int(eid))
             deleted += 1
     return jsonify({"ok": True, "deleted": deleted})
@@ -475,7 +482,7 @@ def api_exp_batch_delete():
 def api_exp_delete_all():
     exps = models.exp_list(limit=9999)
     for e in exps:
-        _push_undo("experiment", dict(e))
+        _push_undo("experiment", _exp_undo_payload(e))
     models.exp_delete_all()
     return jsonify({"ok": True, "deleted": len(exps)})
 
@@ -510,7 +517,7 @@ def api_undo_restore():
         return jsonify({"ok": True, "restored": data["name"]})
     elif item["type"] == "experiment":
         protein_ids = data.get("protein_ids", [])
-        models.exp_create(
+        new_eid = models.exp_create(
             title=data["title"], exp_type=data["exp_type"],
             protein_ids=protein_ids,
             date=data.get("date", ""),
@@ -518,6 +525,10 @@ def api_undo_restore():
             results=data.get("results", {}),
             notes=data.get("notes", ""),
         )
+        # 删除时 FK 把 raw.experiment_id 置 NULL；恢复后重挂回新 id，详情页快照不丢
+        raw_ids = data.get("_raw_ids") or []
+        if raw_ids:
+            models.exp_raw_relink(raw_ids, new_eid)
         return jsonify({"ok": True, "restored": data["title"]})
     return jsonify({"error": "未知类型"}), 400
 
@@ -1305,6 +1316,14 @@ def api_bli_save():
         "samples": samples_result,
     }
 
+    # 原始曲线快照（只写一次，规则 #2/#8）：与实验同事务原子落库（services 统一写入入口），
+    # 避免「先建实验再单独 save raw」的部分写入——raw 落库失败不再留孤儿实验。
+    # _json_safe 先清 NaN/Inf（float 曲线值），否则 json.dumps 产出非法 JSON 文本。
+    raw_payload = _json_safe({
+        "analysis_version": BLI_ANALYSIS_VERSION,
+        "params": params,
+        "curves": [_bli_curve_to_dict(c) for c in curves],
+    })
     try:
         exp = services.create_experiment(
             title=body.get("title", ""),
@@ -1314,17 +1333,10 @@ def api_bli_save():
             params=params,
             results=_json_safe(results),
             notes=body.get("notes", ""),
+            raw_snapshots=[("bli_curves", raw_payload)],
         )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400
-
-    # 原始曲线快照：只写一次（规则 #2/#8），删实验也不删 raw（FK SET NULL）
-    raw_payload = {
-        "analysis_version": BLI_ANALYSIS_VERSION,
-        "params": params,
-        "curves": [_bli_curve_to_dict(c) for c in curves],
-    }
-    models.exp_save_raw(exp["id"], "bli_curves", raw_payload)
     return jsonify(exp), 201
 
 
@@ -1652,6 +1664,15 @@ def api_akta_save():
         "events": {k: len(v) for k, v in sess["events"].items()},
     }
 
+    # 原始曲线快照（只写一次，规则 #2/#8）：与实验同事务原子落库（services 统一写入入口）。
+    # _json_safe 先清 NaN/Inf（通道浮点值），否则 json.dumps 产出非法 JSON 文本。
+    raw_payload = _json_safe({
+        "analysis_version": AKTA_ANALYSIS_VERSION,
+        "params": params,
+        "channel": ch.to_dict(full=True),
+        "events": sess["events"],
+        "meta": sess.get("meta", {}),
+    })
     try:
         exp = services.create_experiment(
             title=_akta_auto_title(body.get("title", ""), body.get("source", "")),
@@ -1661,19 +1682,10 @@ def api_akta_save():
             params=params,
             results=_json_safe(results),
             notes=body.get("notes", ""),
+            raw_snapshots=[("akta_traces", raw_payload)],
         )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400
-
-    # 原始曲线快照（只写一次）：所选通道全量 + 事件
-    raw_payload = {
-        "analysis_version": AKTA_ANALYSIS_VERSION,
-        "params": params,
-        "channel": ch.to_dict(full=True),
-        "events": sess["events"],
-        "meta": sess.get("meta", {}),
-    }
-    models.exp_save_raw(exp["id"], "akta_traces", raw_payload)
     return jsonify(exp), 201
 
 

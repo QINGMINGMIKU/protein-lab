@@ -28,6 +28,20 @@ from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert
 
 WRITE_TOOLS = {"save_experiment"}
 
+
+def _sanitize(p: dict, include_fp: bool = False) -> dict:
+    """序列脱敏收口（IP 保护）：返回的蛋白 dict 一律剔除 sequence 明文。
+
+    序列明文绝不出本地计算边界——AI/MCP 消费端只拿派生物（MW/ε/浓度）与指纹。
+    include_fp=True 时（get_protein）额外给 SHA-256 指纹前 12 位，替代明文序列：
+    可用来比对两蛋白是否同序列，又不泄露具体氨基酸。
+    """
+    import hashlib
+    out = {k: v for k, v in p.items() if k != "sequence"}
+    if include_fp and p.get("sequence"):
+        out["sequence_fp"] = hashlib.sha256(p["sequence"].encode()).hexdigest()[:12]
+    return out
+
 # ── MCP JSON-RPC dispatcher ────────────────────────────────
 
 def send_response(id_, result):
@@ -56,7 +70,7 @@ TOOLS = [
     },
     {
         "name": "get_protein",
-        "description": "按名称获取蛋白完整信息（序列、MW、消光系数、氨基酸组成）",
+        "description": "按名称获取蛋白完整信息（MW、消光系数、氨基酸组成、序列指纹）——序列明文按 IP 保护策略不返回，只给 SHA-256 指纹前 12 位",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -179,19 +193,20 @@ def handle_tools_call(id_, params):
     try:
         if tool_name == "search_proteins":
             result = models.protein_list(args.get("query", ""))
-            # 精简输出，不返完整序列
-            brief = [{k: v for k, v in r.items() if k != "sequence"} for r in result]
+            # 序列脱敏收口：不返序列明文（_sanitize）
+            brief = [_sanitize(r) for r in result]
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(brief, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "get_protein":
             p = models.protein_get_by_name(args["name"])
             if not p:
                 return send_response(id_, {"content": [{"type": "text", "text": f"未找到蛋白: {args['name']}"}]})
-            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(p, ensure_ascii=False, indent=2)}]})
+            # 序列脱敏：指纹替代明文（include_fp）
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(_sanitize(p, include_fp=True), ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "list_proteins":
             result = models.protein_list()
-            brief = [{k: v for k, v in r.items() if k != "sequence"} for r in result]
+            brief = [_sanitize(r) for r in result]
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(brief, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "calculate_concentration":

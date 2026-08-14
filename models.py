@@ -37,10 +37,19 @@ SCHEMA_VERSION = 2  # 当前 schema 版本（与 MIGRATIONS 末项一致）
 
 
 def _migrate_v1_post(conn):
-    """v1 附加清理：旧 schema 的 experiments 表可能残留 protein_id 列，删除之 (SQLite 3.35+)"""
+    """v1 附加清理：旧 schema 的 experiments 表可能残留 protein_id 列，删除之。
+
+    注意 `ALTER TABLE ... DROP COLUMN` 需要 SQLite 3.35+（2021-03 发布）。Python 3.9 部分
+    构建自带更老的 sqlite（如 3.31/3.34），此时硬删会抛语法错误把迁移搞崩——列残留无害
+    （代码已无任何引用），低版本下跳过即可，等升级 Python 后自然清除。
+    """
     cols = [r[1] for r in conn.execute("PRAGMA table_info(experiments)").fetchall()]
-    if "protein_id" in cols:
+    if "protein_id" not in cols:
+        return
+    ver = tuple(int(x) for x in sqlite3.sqlite_version.split("."))
+    if ver >= (3, 35, 0):
         conn.execute("ALTER TABLE experiments DROP COLUMN protein_id")
+    # else: SQLite < 3.35 不支持 DROP COLUMN，protein_id 残留（无引用、无害），跳过
 
 
 MIGRATIONS = [
@@ -393,6 +402,44 @@ def exp_create(title: str, exp_type: str, protein_ids: list[int] = None,
     return eid
 
 
+def exp_create_with_raw(title: str, exp_type: str, protein_ids: list[int] = None,
+                        date: str = "", params: dict = None, results: dict = None,
+                        notes: str = "", raw_snapshots: list[tuple[str, object]] = None) -> int:
+    """原子创建实验 + 落原始数据快照（单事务，要么全成要么全不成）。
+
+    raw_snapshots: [(data_type, payload), ...]。供 services.create_experiment 统一写入时
+    携带 raw（BLI/AKTA save），避免「先建实验、再单独 exp_save_raw」的部分写入——raw 落库
+    失败会留下无快照的孤儿实验（规则 #8 可复现性被破坏）。
+    """
+    conn = get_db()
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("BEGIN")
+    try:
+        cur = conn.execute("""
+            INSERT INTO experiments (title, exp_type, date, params, results, notes, created_at)
+            VALUES (?,?,?,?,?,?,?)
+        """, (title, exp_type, date,
+              json.dumps(params or {}, ensure_ascii=False),
+              json.dumps(results or {}, ensure_ascii=False),
+              notes, now))
+        eid = cur.lastrowid
+        if protein_ids:
+            _set_exp_proteins(conn, eid, protein_ids)
+        for data_type, payload in (raw_snapshots or []):
+            conn.execute(
+                "INSERT INTO experiment_raw (experiment_id, data_type, payload) VALUES (?,?,?)",
+                (eid, data_type, json.dumps(payload, ensure_ascii=False)))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return eid
+
+
 EXP_SAFE_COLUMNS = frozenset({"title", "exp_type", "date", "notes", "params", "results"})
 
 
@@ -503,6 +550,27 @@ def exp_raw_get(raw_id: int) -> dict | None:
     d = dict(row)
     d["payload"] = _json_unwrap(d.get("payload"))
     return d
+
+
+def exp_raw_relink(raw_ids: list[int], new_exp_id: int) -> None:
+    """把孤儿 raw 重挂到恢复的实验上（undo 恢复实验后用）。
+
+    场景：删除实验物理删行 → experiment_raw.experiment_id 被 FK SET NULL 置空；
+    undo 恢复重建实验得到新 id，这些 raw 需要重挂回才能继续在详情页看到。
+    只改关联字段、不动 payload——与「raw 只插不更」规则不冲突（payload 始终未变）。
+    """
+    conn = get_db()
+    conn.execute("BEGIN")
+    try:
+        for rid in raw_ids:
+            conn.execute("UPDATE experiment_raw SET experiment_id = ? WHERE id = ?",
+                         (new_exp_id, rid))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 # ── Init on import ─────────────────────────────────────────

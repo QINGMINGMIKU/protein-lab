@@ -217,6 +217,17 @@ for tool, args in read_cases:
     assert _db_dump() == before, f"读工具 {tool} 不应写库"
 print("13. MCP 读工具零写库 OK")
 
+# 序列脱敏收口（IP 保护）：get_protein 不得返回 sequence 明文，只给指纹
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    mcp_server.handle_tools_call(None, {"name": "get_protein", "arguments": {"name": "1YPI_WT"}})
+gp = json.loads(buf.getvalue().strip())
+gp_text = json.loads(gp["result"]["content"][0]["text"])
+assert "sequence" not in gp_text, "get_protein 不得返回序列明文"
+assert gp_text.get("sequence_fp"), "get_protein 应返回序列指纹"
+assert len(gp_text["sequence_fp"]) == 12, "指纹应为前 12 位"
+print("13b. get_protein 序列脱敏（指纹替代明文）OK")
+
 # ── 14. 迁移前自动备份：老库升级时留下迁移前快照（P1 修复回归）──
 import shutil
 sub = os.path.join(TMP, "mig_backup_test")
@@ -259,6 +270,49 @@ assert c.execute("SELECT COUNT(*) FROM proteins").fetchone()[0] == 1, "迁移不
 c.close()
 models.DB_PATH = saved
 print("14. 迁移前自动备份 OK")
+
+# ── 15. 原子写入：exp_create_with_raw 单事务建实验 + 落 raw（BLI/AKTA save 收敛）──
+a_id = services.create_experiment(
+    title="原子BLI", exp_type="BLI", protein_ids=[pid],
+    params={"smooth_window": 31}, results={"BLI_ANALYSIS_VERSION": "v1"},
+    raw_snapshots=[("bli_curves", {"curves": [[1.5, 2.5], [3.5, 4.5]]})],
+)["id"]
+assert models.exp_get(a_id) is not None, "实验应创建成功"
+araw = models.exp_raw_list(a_id)
+assert len(araw) == 1 and araw[0]["data_type"] == "bli_curves", "raw 应与实验同事务落库"
+a1 = models.exp_raw_get(araw[0]["id"])
+assert a1["payload"] == {"curves": [[1.5, 2.5], [3.5, 4.5]]}, "raw payload 应原样"
+# 多份 raw 也可
+b_id = services.create_experiment(
+    title="多raw", exp_type="AKTA", raw_snapshots=[
+        ("akta_traces", {"ch": [1]}), ("akta_traces", {"ch": [2]})],
+)["id"]
+assert len(models.exp_raw_list(b_id)) == 2, "多 raw 快照应一次落库"
+# 原子性：raw payload 含不可序列化对象时整个建实验失败，不留孤儿实验
+try:
+    services.create_experiment(title="坏raw", exp_type="BLI",
+                               raw_snapshots=[("bli_curves", {"x": set()})])
+    raise AssertionError("不可序列化 raw 应导致整事务回滚")
+except (TypeError, ValueError):
+    pass
+assert all(e["title"] != "坏raw" for e in models.exp_list()), "原子失败不应留孤儿实验"
+print("15. 原子写入（exp_create_with_raw）OK")
+
+# ── 16. undo 恢复断链修复：删实验 → raw 孤儿 → exp_raw_relink 重挂回新 id ──
+r_id = services.create_experiment(
+    title="断链测试", exp_type="BLI",
+    raw_snapshots=[("bli_curves", {"curves": [[1, 2]]})])["id"]
+r_raw = models.exp_raw_list(r_id)[0]
+models.exp_delete(r_id)
+orphan = models.exp_raw_get(r_raw["id"])
+assert orphan["experiment_id"] is None, "删实验后 raw 应成孤儿（FK SET NULL）"
+new_id = models.exp_create(title="断链恢复", exp_type="BLI", params={}, results={})
+models.exp_raw_relink([r_raw["id"]], new_id)
+relinked = models.exp_raw_get(r_raw["id"])
+assert relinked["experiment_id"] == new_id, "relink 后 raw 应挂回新实验"
+assert relinked["payload"] == {"curves": [[1, 2]]}, "relink 不得改动 payload"
+assert models.exp_raw_list(new_id)[0]["data_type"] == "bli_curves", "新实验应能读到快照"
+print("16. exp_raw_relink 断链修复 OK")
 
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)

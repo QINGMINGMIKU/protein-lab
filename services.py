@@ -34,10 +34,13 @@ def coerce_int_list(values) -> list[int]:
 
 def create_experiment(title: str, exp_type: str, protein_ids: list[int] = None,
                       date: str = "", params: dict = None, results: dict = None,
-                      notes: str = "", auto_name: bool = True) -> dict:
-    """统一创建实验：校验 + 自动命名 + 落库，返回完整实验 dict。
+                      notes: str = "", auto_name: bool = True,
+                      raw_snapshots: list[tuple[str, object]] = None) -> dict:
+    """统一创建实验：校验 + 自动命名 + 落库（可选原子携带 raw 快照），返回完整实验 dict。
 
-    auto_name=False 时标题留空不自动命名（MCP 已要求 title 必填，走默认 True 也无副作用）。"""
+    auto_name=False 时标题留空不自动命名（MCP 已要求 title 必填，走默认 True 也无副作用）。
+    raw_snapshots: [(data_type, payload), ...] —— 与实验在同事务内原子落库（experiment_raw），
+    避免先建实验再单独 save raw 的部分写入（孤儿实验）。BLI/AKTA 等需要快照的写入入口走这里。"""
     exp_type = (exp_type or "").strip()
     if not exp_type:
         raise ValueError("实验类型不能为空")
@@ -46,8 +49,15 @@ def create_experiment(title: str, exp_type: str, protein_ids: list[int] = None,
         title = auto_exp_name(exp_type, date)
     if isinstance(protein_ids, list):
         protein_ids = coerce_int_list(protein_ids)
-    eid = models.exp_create(
-        title=title, exp_type=exp_type, protein_ids=protein_ids,
-        date=date, params=params, results=results, notes=notes,
-    )
+    if raw_snapshots:
+        eid = models.exp_create_with_raw(
+            title=title, exp_type=exp_type, protein_ids=protein_ids,
+            date=date, params=params, results=results, notes=notes,
+            raw_snapshots=raw_snapshots,
+        )
+    else:
+        eid = models.exp_create(
+            title=title, exp_type=exp_type, protein_ids=protein_ids,
+            date=date, params=params, results=results, notes=notes,
+        )
     return models.exp_get(eid)
