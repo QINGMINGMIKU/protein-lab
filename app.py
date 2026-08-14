@@ -1362,6 +1362,20 @@ def _akta_get_session(session_id: str):
         return s if s else None
 
 
+def _akta_auto_title(title: str, source: str) -> str:
+    """AKTA 保存默认名：优先 zip 包名（去 .zip 扩展名，保留完整文件名含日期），
+    其次系统自动命名（services.create_experiment 的 {date}_AKTA_{seq}）。"""
+    title = (title or "").strip()
+    if title:
+        return title
+    src = (source or "").strip()
+    if src:
+        base = os.path.splitext(os.path.basename(src))[0]
+        if base:
+            return base
+    return ""
+
+
 @app.route("/api/akta/analyze", methods=["POST"])
 def api_akta_analyze():
     """上传 AKTA Unicorn zip（支持多文件批量）→ 逐个解析 →
@@ -1549,7 +1563,7 @@ def api_akta_save():
 
     try:
         exp = services.create_experiment(
-            title=body.get("title", ""),
+            title=_akta_auto_title(body.get("title", ""), body.get("source", "")),
             exp_type="AKTA",
             protein_ids=body.get("protein_ids", []),
             date=body.get("date", ""),

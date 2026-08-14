@@ -2743,7 +2743,9 @@ async function aktaSaveExp() {
   const run = aktaRuns[aktaCurrentRun];
   if (!run || run.error || !run.channel) { toast("请先选择文件/通道", true); return; }
   const autoName = await getAutoName("AKTA");
-  const title = prompt("实验名称:", autoName || "AKTA 峰图");
+  // 默认名优先用 zip 包名（去 .zip 扩展名），其次系统自动命名
+  const zipBase = (run.name || "").replace(/\.zip$/i, "");
+  const title = prompt("实验名称:", zipBase || autoName || "AKTA 峰图");
   if (!title) return;
   try {
     await API.post("/api/akta/save", {

@@ -180,6 +180,27 @@ raw1_after = models.exp_raw_get(raws[0]["id"])
 assert raw1_after["payload"]["channel"] == raw1["payload"]["channel"], "raw 不可变"
 print(f"akta save OK: exp#{saved['id']} raw#{raws[0]['id']} version={AKTA_ANALYSIS_VERSION}")
 
+# 5d2. 自动命名：title 留空时用 zip 包名（去 .zip 扩展名，含日期/描述部分保留）
+resp = client.post("/api/akta/save", json={
+    "session_id": sid, "channel": "UV", "min_height": 5, "smooth_window": 11,
+    "source": "1YPI_32 002.zip"})
+assert resp.status_code == 201, resp.status_code
+saved_auto = resp.get_json()
+assert saved_auto["title"] == "1YPI_32 002", saved_auto["title"]
+print("akta auto-title OK:", saved_auto["title"])
+# 带 title 时优先 title
+resp = client.post("/api/akta/save", json={
+    "session_id": sid, "title": "手动标题", "channel": "UV",
+    "min_height": 5, "smooth_window": 11, "source": "PD1.zip"})
+saved_t = resp.get_json()
+assert saved_t["title"] == "手动标题", saved_t["title"]
+# 无 title 也无 source → 系统自动命名 {date}_AKTA_{seq}
+resp = client.post("/api/akta/save", json={
+    "session_id": sid, "channel": "UV", "min_height": 5, "smooth_window": 11})
+saved_none = resp.get_json()
+assert "_AKTA_" in saved_none["title"], saved_none["title"]
+print("akta auto-title fallback OK:", saved_none["title"])
+
 # 5e. 会话守卫：无效 session → 400
 resp = client.post("/api/akta/plot", json={"session_id": "nope", "channel": "UV"})
 assert resp.status_code == 400
