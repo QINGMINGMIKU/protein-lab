@@ -20,17 +20,21 @@
 ## 功能
 
 - **蛋白库** — 手动添加 / FASTA 批量导入 / 搜索匹配 / 标签筛选与编辑 / **批量改标签**（选中多条添加/移除标签）/ **点击表头按 MW、消光系数排序**
-- **计算工具**（5 个标签页）：
+- **计算工具**（7 个标签页）：
   - 蛋白浓度 — Beer-Lambert 计算（Biopython ProtParam 消光系数，与 Expasy 一致）；**浓度单位切换**（M/uM/nM/mg/mL/ug/mL/ng/uL）
   - BLI 浓度梯度 — 递推稀释 + 统一体积 + 整百微升取整；**单位切换**
+  - **BLI 分析**（v0.0.8）— 上传 ForteBio CSV：传感器图（SG 平滑 + 拟合虚线 + 每样本出图）+ **5 方法 KD 拟合** + 保存为实验（**原始曲线落 experiment_raw 快照** + results 带分析版本）
+  - **AKTA 峰图**（v0.0.9）— 上传 AKTA Unicorn zip **原生解析**（无 pycorn 依赖）：通道列表 + Fraction 事件 → **峰检测/标注** + 峰表 Excel 导出 → 保存为实验（**原始曲线落快照**）
   - Weblogo — 勾选蛋白生成序列标识图；**长序列自动分块换行**（每块 50 位，编号连续）；可选**位点区间**和**多聚体裁剪**；**结果服务端缓存 + 切页自动恢复**
   - 酶活计算 — TECAN Spark xlsx 解析 + 96 孔板 UI + 动力学拟合（ΔOD/min、R²）+ Michaelis-Menten + **阴性扣除**（信号级归零 + 速率级校正）+ **时间点筛选** + 一键导出作图 Excel
   - 从实验复制 — 卡片式浏览历史实验，按类型过滤/搜索，一键加载到对应工具
 - **BLI 模块**（v0.0.5）— ForteBio CSV 解析 + 传感器图（Savitzky-Golay 平滑 + 拟合虚线）+ **五方法 KD 拟合内核**（standard / split / joint / steady / mixed，含死曲线过滤与 NS 扣除）
+- **BLI 原始数据拟合**（v0.0.8）— 上传 ForteBio CSV 一键分析：传感器图 / 5 方法 KD / **保存为实验（原始曲线落 experiment_raw 快照 + results 带分析版本）**
+- **AKTA 峰图整理**（v0.0.9）— 上传 AKTA Unicorn zip 原生解析（**无 pycorn 依赖，标准库实现**）：通道列表（UV/Cond/压力…）+ Fraction 事件 → **峰检测/标注/峰表导出 Excel** → 保存为实验（原始曲线落快照）
 - **实验自动命名** — `{日期}_{实验类型}_{序号}`，同一天同类型自动递增；导出文件也遵循命名
 - **实验归档** — 一键保存 / Excel 导出 / 详情页 / 批量删除 + 撤销；启动自动备份数据库（保留最近 10 份）
 - **MCP 服务器** — 8 个工具，供 Claude 等 AI 通过 MCP 协议调用
-- **测试** — `test_models.py`（14 节：JSON 往返 / 迁移框架 / 原始数据不可变 / MCP 读写契约）+ `test_bli.py`（BLI 解析/绘图/KD 拟合 + 酶活绘图）；CI 每次构建前自动运行
+- **测试** — `test_models.py`（14 节：JSON 往返 / 迁移框架 / 原始数据不可变 / MCP 读写契约）+ `test_bli.py`（BLI 解析/绘图/KD 拟合 + 酶活绘图 + **BLI 分析 API**）+ `test_akta.py`（**AKTA 原生解析/峰检测/峰图 + API**，用真实样例 zip）；CI 每次构建前自动运行
 
 ## 数据完整性（v0.0.7）
 
@@ -112,6 +116,7 @@ protein_lab/
 ├── app.py              Flask 主应用（含 --mcp / --import-db 入口分发）
 ├── calculators.py      计算核心纯函数（MW / ε / 浓度 / 稀释 / 酶活拟合）
 ├── bli.py              BLI 内核（ForteBio 解析 / 传感器图 / 五方法 KD 拟合）
+├── akta.py             AKTA 内核（Unicorn zip 原生解析 / 峰检测 / 峰图 / 峰表，v0.0.9）
 ├── models.py           SQLite 模型：CRUD + JSON 往返 + schema 迁移框架 + experiment_raw
 ├── services.py         统一实验写入入口（自动命名 / 校验 / 未来 audit·lineage 插桩点）
 ├── mcp_server.py       MCP stdio 服务器（读写契约：唯一写工具 save_experiment）
@@ -125,6 +130,7 @@ protein_lab/
 ├── templates/          Jinja2 页面模板
 ├── static/             JS + CSS
 ├── fonts/              Noto Sans SC（OFL，打包进二进制）
+├── fixtures/           AKTA 测试样例 zip（git 跟踪，CI 用）
 ├── .github/workflows/  CI 双平台构建 + 测试步
 ├── backups/            数据库自动备份（例行 10 份 + 迁移前 pre-migration 5 份）
 └── protein_lab.db     自动生成，首次运行创建
@@ -141,3 +147,7 @@ protein_lab/
 | v0.0.5 | 浓度单位管理 / 酶活增强（时间点筛选、阴性扣除、速率校正）/ BLI 模块（ForteBio 解析 + 五方法 KD） |
 | **架构升级**（2026-08） | 统一写入入口 / 计算纯函数化 / 反序列化收归 models / 校正后端单写 / 实验类型单一来源 |
 | **v0.0.7**（当前） | **数据存储地基**：schema 迁移框架 / experiment_raw 不可变快照 / 迁移前自动备份 / MCP 读写契约 / CI 测试步 |
+| **v0.0.8** | **BLI 原始数据拟合 UI**：ForteBio CSV 上传分析（传感器图 / 5 方法 KD 拟合）/ 保存为实验（raw→experiment_raw `bli_curves`，results 带 `BLI_ANALYSIS_VERSION`）|
+| **v0.0.9** | **AKTA 峰图整理**：`akta.py` 标准库原生解析 Unicorn zip（无 pycorn 依赖）/ 峰检测标注 / 峰表 Excel 导出 / 保存为实验（raw→experiment_raw `akta_traces`，results 带 `AKTA_ANALYSIS_VERSION`）|
+| **v0.0.8** | **BLI 原始数据拟合 UI**：ForteBio CSV 上传分析（传感器图 / 5 方法 KD）/ 保存为实验（raw→experiment_raw `bli_curves`，results 带 `BLI_ANALYSIS_VERSION`）/ 详情页原始快照展示 |
+| **v0.0.9** | **AKTA 峰图整理**：`akta.py` 标准库原生解析 Unicorn zip（无 pycorn 依赖）/ 峰检测标注 / 峰表 Excel 导出 / 保存为实验（raw→experiment_raw `akta_traces`，results 带 `AKTA_ANALYSIS_VERSION`） |

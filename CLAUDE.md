@@ -9,13 +9,15 @@
 **产品定位：Scientific Workbench（不是 Research OS）**——帮助科学家更快从实验数据得到科学结论，而非管理研发活动。中心对象是「数据/分析/证据」，不是「项目/样品/实验管理」。减少认知成本、不增加管理成本（不做 LIMS/ELN/Inventory/Workflow 状态机/全量审计）。**AI 是一等用户**：数据/分析/上下文都要让 AI 不经 UI、通过 MCP 直接拿到且足够结构化可解读。
 
 - **蛋白库**：手动添加 / FASTA 批量导入 / 搜索 / 标签筛选与批量改标签 / 点击表头按 MW、消光系数排序
-- **计算工具**（5 个 tab）：
+- **计算工具**（7 个 tab）：
   - 蛋白浓度 — Beer-Lambert（ProtParam 消光系数）
   - BLI 浓度梯度 — 递推稀释 + 统一体积 + 整百取整
+  - BLI 分析（v0.0.8）— 上传 ForteBio CSV：传感器图（SG 平滑/拟合虚线/每样本出图）+ 5 方法 KD 拟合 + 保存为实验（原始曲线落 experiment_raw 快照）
+  - AKTA 峰图（v0.0.9）— 上传 AKTA Unicorn zip 原生解析（无 pycorn 依赖）：通道列表 + Fraction 事件 → 峰检测/标注/峰表 Excel 导出 → 保存为实验（原始曲线落快照）
   - Weblogo — 勾选蛋白生成序列 logo；长序列自动分块换行（每块 50 位，编号连续）；可选位点区间（start/end，1-based 闭区间）与多聚体裁剪（multimer=N 裁剪为单亚基）；结果按请求参数服务端缓存 + 并发去重，切页回来看别的数据再回来自动恢复（不丢生成结果）
   - 酶活计算 — TECAN xlsx 解析 + 96 孔板 UI + 动力学拟合 + Michaelis-Menten + 阴性扣除
   - 从实验复制 — 历史实验卡片回填
-- **实验归档**：一键保存 / Excel 导出 / 详情页 / 批量删除 + 撤销（内存 undo 栈，最多 20 条）
+- **实验归档**：一键保存 / Excel 导出 / 详情页（含**原始数据快照表**：experiment_raw 类型/时间/分析版本）/ 批量删除 + 撤销（内存 undo 栈，最多 20 条）
 - **MCP 服务器**：`mcp_server.py`，8 个工具，读写契约（唯一写工具 `save_experiment`）
 
 ## 环境
@@ -32,6 +34,8 @@
 protein_lab/
 ├── app.py              Flask 主应用（含 --mcp / --import-db 入口分发）
 ├── calculators.py      计算核心纯函数（MW / ε / 浓度 / 稀释 / 酶活拟合）
+├── bli.py              BLI 内核（ForteBio 解析 / 传感器图 / 五方法 KD 拟合，v0.0.6+）
+├── akta.py             AKTA 内核（Unicorn zip 原生解析 / 峰检测 / 峰图 / 峰表，v0.0.9）
 ├── services.py         统一实验写入入口（自动命名/校验/未来 audit·lineage 插桩点）
 ├── models.py           SQLite 模型：CRUD + JSON 往返 + schema 迁移框架 + experiment_raw
 ├── mcp_server.py       MCP stdio 服务器（读写契约：唯一写工具 save_experiment）
@@ -45,7 +49,7 @@ protein_lab/
 ├── templates/          Jinja2 页面模板
 ├── static/             JS + CSS
 ├── fonts/              Noto Sans SC（OFL，打包进二进制）
-├── .github/workflows/  CI 双平台构建
+├── .github/workflows/  CI 双平台构建 + 测试步
 ├── backups/            数据库自动备份
 └── protein_lab.db     自动生成，首次运行创建
 ```
@@ -55,7 +59,8 @@ protein_lab/
 - **分层**：`app.py` 是单体 Flask（页面路由渲染 Jinja2 + `/api/*` JSON 接口 + 内存 undo 栈）；纯计算在 `calculators.py`（无 Flask 依赖，可独立复用）；SQL 全在 `models.py`；`mcp_server.py` 直接 `import models` + `calculators`，**与 Web 共用同一个 `protein_lab.db`**。
 - **`models.init_db()` 在 import 时执行**（models.py 末尾）——只要 `import models` 就触碰真实库。测试规范里的 reload 顺序就是为绕过这个副作用而设计。
 - **浓度单位 kernel（v0.0.5）**：`calculators.CONC_UNITS` + `convert_concentration(value, from, to, mw)`（canonical 基准 molar→µM、mass→ng/µL，跨 kind 需 mw：`µM × MW/1000 = ng/µL`）——**前端 `static/app.js` 有逐行镜像 `convertConc`/`formatConc`**，改动必须两边同步。计算器工具里浓度只做**显示层换算**（下拉框切单位），存档/详情页/导出仍固定 µM/mg/mL；`calc_conc()` 返回 6 单位。
-- **BLI 分析模块 `bli.py`（v0.0.6 地基）**：ForteBio CSV 解析（`parse_fortebio_csv`，元数据顺序==列顺序不可重排）→ `group_by_sample`（组内浓度降序）→ 传感器图 `generate_sensorgram_png`（SG 平滑/拟合虚线叠加/separate 模式，返回 PNG bytes）+ KD 内核 `fit_kd`（1:1 Langmuir **5 方法**：standard/split/joint/steady/mixed，+ 死曲线过滤 + NS 非特异扣除）。**绘图样式常量 `COLORS`/`PLOT_STYLE` 从这里抽出**，酶活 `/api/enzyme/plot` 已复用（函数内惰性 `from bli import ...` 避免模块顶部拖 scipy）。相界缺省走 `_detect_phases` 启发式（平滑后最后局部极大），强一致数据建议显式传 `t_assoc`/`t_dissoc`。回归测试在 `test_bli.py`（合成 fixture + 隔离临时库）。
+- **BLI 分析模块 `bli.py`（v0.0.6 地基 + v0.0.8 UI）**：ForteBio CSV 解析（`parse_fortebio_csv`，元数据顺序==列顺序不可重排）→ `group_by_sample`（组内浓度降序）→ 传感器图 `generate_sensorgram_png`（SG 平滑/拟合虚线叠加/separate 模式，返回 PNG bytes）+ KD 内核 `fit_kd`（1:1 Langmuir **5 方法**：standard/split/joint/steady/mixed，+ 死曲线过滤 + NS 非特异扣除）。**绘图样式常量 `COLORS`/`PLOT_STYLE` 从这里抽出**，酶活 `/api/enzyme/plot` 与 AKTA 峰图已复用（函数内惰性 `from bli import ...` 避免模块顶部拖 scipy）。相界缺省走 `_detect_phases` 启发式（平滑后最后局部极大），强一致数据建议显式传 `t_assoc`/`t_dissoc`。`BLI_ANALYSIS_VERSION` 常量随分析版本更新。Web 分析 UI（v0.0.8）：`/api/bli/analyze`（上传→会话缓存）→ `/plot`（传感器图）→ `/fit`（单样本 5 方法）→ `/save`（results 带 version + raw 落库 `bli_curves`）；会话 `_bli_sessions` 内存态（TTL 2h / 上限 10，Lock 保护）。回归测试在 `test_bli.py`（合成 fixture + 隔离临时库）。
+- **AKTA 分析模块 `akta.py`（v0.0.9）**：**标准库原生解析 Unicorn zip，无 pycorn 依赖**——外层 zip 的 `Chrom.N_MM_True` 是**嵌套 zip**（非标准结构：EOCD 不在文件尾、带尾部填充），需 `raw.rindex(_ZIP_MAGIC_END)+22` 截断才能被 zipfile 读取；嵌套 zip 内 `CoordinateData.Volumes/Amplitudes` 是 .NET 序列化 float32 数组，**数据从偏移 47 起、每 4 字节一个 float32、跳过尾部 48 字节**（pycorn `unpacker` 逻辑，格式经 REF 真实样例 zip 验证）。通道元数据在 `Chrom.1.Xml` 的 `<Curves><Curve>`（Name/CurveDataType/AmplitudeUnit/CurvePoints→BinaryCurvePointsFileName），事件（Fraction/Injection/Run Log）在 `<EventCurves>`。峰检测 `detect_peaks`：SG 平滑（`_smooth` 纯 numpy 实现）→ 基线取区间 5% 分位数 → scipy `find_peaks`（height + prominence + distance 合并分裂峰）→ 边界走回基线、梯形面积、半高宽。Web API（v0.0.8 同款会话模式）：`/api/akta/analyze|plot|export|save`，save 时 results 带 `AKTA_ANALYSIS_VERSION` + raw 落库 `akta_traces`。回归测试 `test_akta.py`（REF 两个真实 zip）。
 - **统一写入入口（架构升级 2026-08）**：`services.create_experiment` 收敛手动/from-calculation/MCP 三条写入路径（自动命名 + 空类型校验 + `coerce_int_list` 静默过滤坏 id）。未来 audit/lineage 的插桩点。`models.EXP_TYPES` 是 exp_type 单一来源，模板下拉/MCP 描述/测试全走常量。
 - **数据存储地基（v0.0.7）**：schema 迁移框架——`models.SCHEMA_VERSION` + 有序 `MIGRATIONS`，`_migrate()` 逐条 `BEGIN`→迁移→`PRAGMA user_version=N`→`COMMIT` 原子（**不能 executescript，会隐式提交**）；v1=现有 3 表（老库 no-op）、v2=`experiment_raw`。`experiment_raw`：**只写一次从不 UPDATE**（`exp_save_raw` 重复调用=新行），删实验不删 raw（FK `ON DELETE SET NULL`，规则 #2/#5/#8）。`get_db(read_only=True)` 开 `PRAGMA query_only` 拒写（MCP 只读契约基础设施）。
 - **MCP 读写契约（v0.0.7）**：唯一写工具 `save_experiment`；读工具零写库由 `test_models.py` 逐工具断言强制（库内容逐字节不变），**无运行时拦截**——新增读工具必须在测试 `read_cases` 注册。
@@ -87,7 +92,7 @@ protein_lab/
   5. `from app import app`
 - 若必须用正式库，测试前先手动备份 `protein_lab.db`。
 - 跑测试一律用 `.venv/Scripts/python.exe`（系统 python 缺依赖）。
-- **回归套件**：`test_models.py`（14 节：JSON 往返 / exp_type 单一来源 / 迁移幂等 / raw 只插不更 / read_only 拒写 / MCP 读零写库 / 迁移前备份）+ `test_bli.py`（BLI 解析/绘图/KD + 酶活绘图）。CI 构建前自动跑（`MPLBACKEND=Agg`）。
+- **回归套件**：`test_models.py`（14 节：JSON 往返 / exp_type 单一来源 / 迁移幂等 / raw 只插不更 / read_only 拒写 / MCP 读零写库 / 迁移前备份）+ `test_bli.py`（BLI 解析/绘图/KD + 酶活绘图 + **BLI 分析 API**）+ `test_akta.py`（**AKTA 原生解析/峰检测/峰图 + API**，fixtures/ 真实样例 zip）。CI 构建前自动跑（`MPLBACKEND=Agg`）。
 
 ## 发布纪律
 
