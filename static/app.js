@@ -2415,8 +2415,10 @@ function renderBliSamples() {
     </tr>`).join("");
 }
 
-// 样本按钮事件委托：用 data-sample 传参（onclick 内联字符串对含引号样本名不安全）
-document.getElementById("bliSampleList").addEventListener("click", (e) => {
+// 样本按钮事件委托：用 data-sample 传参（onclick 内联字符串对含引号样本名不安全）。
+// ⚠ 必须在元素存在时绑定——app.js 被所有页面共享，calc 页外该元素为 null。
+// 用可选链 + 顶层防错：只在 calculator 页面注册一次。
+document.addEventListener("click", function (e) {
   const btn = e.target.closest(".bli-pick");
   if (!btn) return;
   bliSelectSample(btn.dataset.sample);
@@ -2566,8 +2568,9 @@ function renderAktaChannels() {
     </tr>`).join("");
 }
 
-// 通道按钮事件委托：用 data-channel 传参（onclick 内联字符串对含引号通道名不安全）
-document.getElementById("aktaChannelList").addEventListener("click", (e) => {
+// 通道按钮事件委托：用 data-channel 传参（onclick 内联字符串对含引号通道名不安全）。
+// ⚠ 与 bli 样本按钮同因：app.js 全局共享，用 document 级委托 + closest 定位，元素缺省时不报错。
+document.addEventListener("click", function (e) {
   const btn = e.target.closest(".akta-pick");
   if (!btn) return;
   aktaSelectChannel(btn.dataset.channel);
