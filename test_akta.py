@@ -157,13 +157,13 @@ assert resp.status_code == 200, (resp.status_code, resp.get_json())
 ov_sh = resp.get_json()
 assert ov_sh["image"].startswith("data:image/png;base64,")
 img = base64.b64decode(ov_sh["image"].split(",", 1)[1])
-# 像素级：总图应有曲线色的阴影（蓝色 #2166ac 系，alpha 0.18 叠白 ≈ (211,220,247)）
+# 像素级：总图应有曲线色的连续阴影矩形（蓝色 #2166ac 系，alpha 0.15 叠白 ≈ (213,222,249)）
 from PIL import Image
 import numpy as np
 a = np.asarray(Image.open(io.BytesIO(img)).convert("RGB"))
-blue_shadow = np.sum((abs(a[:, :, 0].astype(int) - 211) < 30) &
-                     (abs(a[:, :, 1].astype(int) - 220) < 30) &
-                     (abs(a[:, :, 2].astype(int) - 247) < 30))
+blue_shadow = np.sum((abs(a[:, :, 0].astype(int) - 213) < 30) &
+                     (abs(a[:, :, 1].astype(int) - 222) < 30) &
+                     (abs(a[:, :, 2].astype(int) - 249) < 30))
 assert blue_shadow > 500, f"总图 frac 阴影缺失（蓝色像素 {blue_shadow}）"
 print(f"akta overlay frac-shadow OK: {blue_shadow} 阴影像素")
 
@@ -173,8 +173,8 @@ resp = client.post("/api/akta/overlay", json={
 assert resp.status_code == 400
 print("akta overlay guard OK")
 
-# 5b2. fraction_ranges / target_fraction_span 纯函数：1YPI 的 frac 区间与阴影三元组
-from akta import fraction_ranges, target_fraction_span
+# 5b2. fraction_ranges / target_fraction_span / span_bounds 纯函数
+from akta import fraction_ranges, target_fraction_span, span_bounds
 fr = fraction_ranges(r1["events"]["Fraction"], 36.4)
 assert len(fr) == 31, f"frac 区间数 {len(fr)} != 31"
 assert fr[0][0] < fr[1][0] and fr[-1][1] == 36.4, "区间应有序且末管延伸到 xmax"
@@ -183,10 +183,14 @@ span = target_fraction_span(fr, 23.96, xmin=0, xmax=36.4)
 assert span["self"] and span["prev"] and span["next"], span
 assert span["self"][0] < span["self"][1] and span["self_label"], span
 assert span["prev"][1] <= span["self"][0] and span["next"][0] >= span["self"][1], "前后 frac 应紧邻自身"
+# 连续矩形 = [prev.start, next.end]（1 个矩形覆盖 3 管）
+bounds = span_bounds(span)
+assert bounds == (span["prev"][0], span["next"][1]), bounds
 # 无事件 / 顶点不在 frac 内 → 安全返回 None
 assert target_fraction_span([], 5)["self"] is None
 assert target_fraction_span(fr, -1)["self"] is None
-print("fraction shadow span OK:", span["self"], "±", span["prev"][0], "..", span["next"][1])
+assert span_bounds(target_fraction_span([], 5)) is None
+print("fraction shadow bounds OK:", bounds, "（连续矩形覆盖 3 管）")
 
 # 5c. export：返回 xlsx
 resp = client.post("/api/akta/export", json={

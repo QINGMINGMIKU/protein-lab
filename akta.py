@@ -370,6 +370,19 @@ def target_fraction_span(fractions: List[Tuple[float, float, str]], apex_vol: fl
             "self_label": fractions[idx][2]}
 
 
+def span_bounds(span: dict) -> Optional[Tuple[float, float]]:
+    """阴影连续矩形的起止：合并 self + 前后 frac 的总跨度 [prev.start, next.end]。
+    缺 prev/next 时回退 self 边界；无有效区间返回 None。"""
+    if not span or not span.get("self"):
+        return None
+    s0, s1 = span["self"]
+    if span.get("prev"):
+        s0 = min(s0, span["prev"][0])
+    if span.get("next"):
+        s1 = max(s1, span["next"][1])
+    return (s0, s1) if s0 < s1 else None
+
+
 # ═══════════════════════════════════════════════════════════
 #  绘图
 # ═══════════════════════════════════════════════════════════
@@ -435,23 +448,20 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
             ax.plot(v, _smooth(a, smooth_window), color=COLORS[0], linewidth=2.2,
                     label=name)
 
-        # 目标峰 frac 矩形背景阴影（先画，避免盖住曲线）
+        # 目标峰 frac 矩形背景阴影（先画，避免盖住曲线）：
+        # 一个连续矩形覆盖 self+前后各 1 个 frac 的总跨度，顶部标自身 frac 标签
         if highlight_frac and events:
             target_peak = peaks[target_peak_idx] if 0 <= target_peak_idx < len(peaks) else None
             span = target_fraction_span(fraction_ranges(events, xmax),
                                         target_peak.apex_vol if target_peak else xmin,
                                         xmin, xmax) if target_peak else {"self": None}
-            if span.get("self"):
-                # 前后 frac：浅色；峰自身 frac：深色
-                for rng in (span["prev"], span["next"]):
-                    if rng and rng[0] < rng[1]:
-                        ax.axvspan(rng[0], rng[1], color="#5aae61", alpha=0.10, zorder=0)
-                s0, s1 = span["self"]
-                if s0 < s1:
-                    ax.axvspan(s0, s1, color="#4361ee", alpha=0.16, zorder=0)
-                    ax.text((s0 + s1) / 2, ax.get_ylim()[1] * 0.985,
-                            f"frac {span['self_label']}", fontsize=9,
-                            color="#4361ee", ha="center", va="top", fontweight="bold")
+            bounds = span_bounds(span)
+            if bounds:
+                s0, s1 = bounds
+                ax.axvspan(s0, s1, color="#4361ee", alpha=0.14, zorder=0)
+                ax.text((s0 + s1) / 2, ax.get_ylim()[1] * 0.985,
+                        f"frac {span['self_label']}", fontsize=9,
+                        color="#4361ee", ha="center", va="top", fontweight="bold")
 
         # 基线
         if len(v) > 3:
@@ -527,18 +537,16 @@ def generate_akta_overlay_png(channels: List[Channel], *,
     with plt.rc_context(PLOT_STYLE):
         fig, ax = plt.subplots(figsize=(11, 6.5))
 
-        # 目标峰 frac 阴影：先画（zorder=0），每文件用自己的曲线颜色
+        # 目标峰 frac 阴影：先画（zorder=0），每文件一个连续矩形（self+前后 frac 总跨度），
+        # 颜色跟随该文件曲线
         if frac_spans:
             for i, span in enumerate(frac_spans):
-                if not span or not span.get("self"):
+                bounds = span_bounds(span)
+                if not bounds:
                     continue
+                s0, s1 = bounds
                 base = COLORS[i % len(COLORS)]
-                for rng in (span.get("prev"), span.get("next")):
-                    if rng and rng[0] < rng[1]:
-                        ax.axvspan(rng[0], rng[1], color=base, alpha=0.10, zorder=0)
-                s0, s1 = span["self"]
-                if s0 < s1:
-                    ax.axvspan(s0, s1, color=base, alpha=0.18, zorder=0)
+                ax.axvspan(s0, s1, color=base, alpha=0.15, zorder=0)
 
         for i, ch in enumerate(channels):
             vols = np.asarray(ch.vols, dtype=float)
