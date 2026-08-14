@@ -2671,12 +2671,18 @@ async function aktaBatchPlot() {
     area.innerHTML = `<p style="color:#888;font-size:13px">正在生成总图（${okRuns.length} 个文件）...</p>`;
     try {
       const r = await API.post("/api/akta/overlay", {
-        runs: okRuns.map(run => ({ session_id: run.session_id, channel: run.channel })),
+        runs: okRuns.map(run => ({
+          session_id: run.session_id,
+          channel: run.channel,
+          target_peak_idx: run.target_peak || 0,
+        })),
         xmin: parseFloat(document.getElementById("aktaXmin").value || "0"),
         xmax: document.getElementById("aktaXmax").value,
+        min_height: parseFloat(document.getElementById("aktaMinHeight").value || "5"),
         smooth_window: parseInt(document.getElementById("aktaSmooth").value || "11", 10),
         normalize: normOn,
         show_events: document.getElementById("aktaShowEvents").checked,
+        highlight_frac: document.getElementById("aktaHighlightFrac").checked,
       });
       area.innerHTML = `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
         <div style="font-weight:600;margin-bottom:6px;font-size:14px">总图（${okRuns.length} 个文件${normOn ? " · 归一化" : ""}）</div>

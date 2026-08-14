@@ -499,13 +499,17 @@ def generate_akta_overlay_png(channels: List[Channel], *,
                               smooth_window: int = 11,
                               normalize: bool = False,
                               labels: Optional[List[str]] = None,
+                              frac_spans: Optional[List[dict]] = None,  # 每文件目标峰阴影三元组
                               title: str = "",
                               dpi: int = 200) -> bytes:
     """总图：把多个通道（通常来自不同 zip 的同名 UV 通道）的平滑曲线叠在一张图上。
 
     - 每个通道一条线，label 取 labels[i]（缺省用通道名），图例多条目
     - normalize=True：各通道各自区间内 min-max 归一化到 [0,1] 再叠加（可跨文件对比）
-    - 峰不单独标注（重叠后无法区分）；frac 阴影不适用（多曲线共享），仅可选竖线
+    - frac_spans：每文件一个 {"self": (s,e), "prev": (s,e)|None, "next": (s,e)|None}，
+      用该文件曲线的颜色画矩形阴影（自身深、前后浅），方便在总图上直接看到每个
+      目标峰收集在哪几管
+    - 峰不单独标注（重叠后无法区分）；可选 frac 竖线（show_events）
     """
     from fonts import setup_matplotlib_cjk
     setup_matplotlib_cjk()
@@ -522,6 +526,20 @@ def generate_akta_overlay_png(channels: List[Channel], *,
 
     with plt.rc_context(PLOT_STYLE):
         fig, ax = plt.subplots(figsize=(11, 6.5))
+
+        # 目标峰 frac 阴影：先画（zorder=0），每文件用自己的曲线颜色
+        if frac_spans:
+            for i, span in enumerate(frac_spans):
+                if not span or not span.get("self"):
+                    continue
+                base = COLORS[i % len(COLORS)]
+                for rng in (span.get("prev"), span.get("next")):
+                    if rng and rng[0] < rng[1]:
+                        ax.axvspan(rng[0], rng[1], color=base, alpha=0.10, zorder=0)
+                s0, s1 = span["self"]
+                if s0 < s1:
+                    ax.axvspan(s0, s1, color=base, alpha=0.18, zorder=0)
+
         for i, ch in enumerate(channels):
             vols = np.asarray(ch.vols, dtype=float)
             amps = _normalize_amps(np.asarray(ch.amps, dtype=float), vols, xmin, xmax, normalize)

@@ -1487,24 +1487,40 @@ def api_akta_plot():
 @app.route("/api/akta/overlay", methods=["POST"])
 def api_akta_overlay():
     """总图：把多个 session（zip）的指定通道平滑曲线叠在一张图。
-    参数：runs: [{session_id, channel}], xmin/xmax/smooth_window/normalize/show_events。
-    返回 {image}。"""
+    参数：runs: [{session_id, channel, target_peak_idx}], xmin/xmax/smooth_window/
+    normalize/show_events/highlight_frac。highlight_frac=True 时每个文件的目标峰
+    各自画 frac 阴影（自身+前后各 1 管，颜色跟随曲线）。返回 {image}。"""
     body = request.get_json() or {}
     runs_spec = body.get("runs") or []
     if not runs_spec:
         return jsonify({"error": "请选择至少一个文件"}), 400
     try:
         import base64
-        from akta import generate_akta_overlay_png
+        from akta import detect_peaks, generate_akta_overlay_png, \
+            fraction_ranges, target_fraction_span
         xmin = float(body.get("xmin", 0) or 0)
         xmax = body.get("xmax")
         xmax = float(xmax) if xmax not in (None, "") else None
         smooth = int(body.get("smooth_window", 11) or 11)
         normalize = bool(body.get("normalize", False))
         show_events = bool(body.get("show_events", False))
+        highlight_frac = bool(body.get("highlight_frac", True))
+        min_height = float(body.get("min_height", 5) or 5)
 
-        channels, labels, events_union = [], [], []
+        channels, labels, events_union, frac_spans = [], [], [], []
+        # 有效 xmax：显式传值或各通道最大体积
+        eff_xmax = xmax
         for spec in runs_spec:
+            sess = _akta_get_session(spec.get("session_id", ""))
+            if not sess:
+                continue
+            ch = sess["channels"].get(spec.get("channel", ""))
+            if ch is None:
+                continue
+            if len(ch.vols):
+                vmax = float(np.max(ch.vols))
+                eff_xmax = vmax if eff_xmax is None else max(eff_xmax, vmax)
+        for i, spec in enumerate(runs_spec):
             sess = _akta_get_session(spec.get("session_id", ""))
             if not sess:
                 continue
@@ -1514,7 +1530,23 @@ def api_akta_overlay():
             channels.append(ch)
             src = sess.get("source_name") or ""
             labels.append(os.path.splitext(os.path.basename(src))[0] if src else ch.name)
-            events_union.extend(sess["events"].get("Fraction", []))
+            frac_events = sess["events"].get("Fraction", [])
+            events_union.extend(frac_events)
+            # 每个文件的目标峰 frac 阴影：detect 峰 → 目标峰顶点 → 自身+前后 frac
+            if highlight_frac:
+                try:
+                    t_idx = int(spec.get("target_peak_idx", 0) or 0)
+                except (TypeError, ValueError):
+                    t_idx = 0
+                peaks = detect_peaks(ch, xmin=xmin, xmax=xmax, min_height=min_height,
+                                     smooth_window=smooth)
+                target = peaks[t_idx] if 0 <= t_idx < len(peaks) else (peaks[0] if peaks else None)
+                span = (target_fraction_span(fraction_ranges(frac_events, eff_xmax),
+                                             target.apex_vol, xmin, eff_xmax)
+                        if target else {"self": None})
+                frac_spans.append(span)
+            else:
+                frac_spans.append(None)
         if not channels:
             return jsonify({"error": "所选文件/通道均无效"}), 400
         if len(channels) < 2:
@@ -1524,6 +1556,7 @@ def api_akta_overlay():
             channels, events=events_union if show_events else None,
             xmin=xmin, xmax=xmax, show_events=show_events,
             smooth_window=smooth, normalize=normalize, labels=labels,
+            frac_spans=frac_spans,
             title="Overlay (%d runs)" % len(channels))
         return jsonify({"image": f"data:image/png;base64,{base64.b64encode(png).decode()}"})
     except Exception as e:

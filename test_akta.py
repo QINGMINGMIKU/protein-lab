@@ -13,7 +13,7 @@
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
-import os, sys, base64, importlib, tempfile, shutil
+import os, sys, base64, importlib, tempfile, shutil, io
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -147,6 +147,25 @@ assert resp.status_code == 200, (resp.status_code, resp.get_json())
 ov = resp.get_json()
 assert ov["image"].startswith("data:image/png;base64,"), ov["image"][:40]
 print("akta overlay OK:", len(ov["image"]) // 100, "xx base64")
+
+# 总图 + frac 阴影：highlight_frac=True 时每个文件的目标峰阴影三元组传入绘图
+resp = client.post("/api/akta/overlay", json={
+    "runs": [{"session_id": sid, "channel": "UV", "target_peak_idx": 0},
+             {"session_id": sid, "channel": "Cond", "target_peak_idx": 0}],
+    "min_height": 5, "smooth_window": 11, "highlight_frac": True})
+assert resp.status_code == 200, (resp.status_code, resp.get_json())
+ov_sh = resp.get_json()
+assert ov_sh["image"].startswith("data:image/png;base64,")
+img = base64.b64decode(ov_sh["image"].split(",", 1)[1])
+# 像素级：总图应有曲线色的阴影（蓝色 #2166ac 系，alpha 0.18 叠白 ≈ (211,220,247)）
+from PIL import Image
+import numpy as np
+a = np.asarray(Image.open(io.BytesIO(img)).convert("RGB"))
+blue_shadow = np.sum((abs(a[:, :, 0].astype(int) - 211) < 30) &
+                     (abs(a[:, :, 1].astype(int) - 220) < 30) &
+                     (abs(a[:, :, 2].astype(int) - 247) < 30))
+assert blue_shadow > 500, f"总图 frac 阴影缺失（蓝色像素 {blue_shadow}）"
+print(f"akta overlay frac-shadow OK: {blue_shadow} 阴影像素")
 
 # 总图：单通道 → 400（至少 2 个文件/通道）
 resp = client.post("/api/akta/overlay", json={
