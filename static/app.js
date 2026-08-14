@@ -523,6 +523,8 @@ document.addEventListener("click", function (e) {
   if (tab.dataset.tab === "dilution") loadBliImportExps();
   if (tab.dataset.tab === "weblogo") { loadWeblogoProteins(); restoreWeblogo(); }
   if (tab.dataset.tab === "enzyme") loadEnzymeProteinList();
+  if (tab.dataset.tab === "bli") refreshBliPlaceholder();
+  if (tab.dataset.tab === "akta") refreshAktaPlaceholder();
   refreshAutoNamePlaceholders();
 });
 
@@ -2363,6 +2365,298 @@ async function undoRestore() {
       toast(r.error || "无法撤销", true);
     }
   } catch (err) { toast("撤销失败: " + err.message, true); }
+}
+
+// ═════════════════════════════════════════════════════
+//  Tab: BLI 原始数据拟合（v0.0.8）
+// ═════════════════════════════════════════════════════
+
+let bliSession = null;       // /api/bli/analyze 返回的 session_id
+let bliSamples = [];         // [{sample, n_curves, concs, labels}]
+let bliSelectedSample = "";  // KD 拟合选中的样本
+let bliLastPlot = null;      // 最近一次传感器图 dataURL（切页回来可刷新）
+
+async function uploadBliFile() {
+  const file = document.getElementById("bliFile").files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const r = await fetch("/api/bli/analyze", { method: "POST", body: form });
+    const data = await r.json();
+    if (!r.ok) { toast(data.error, true); return; }
+    bliSession = data.session_id;
+    bliSamples = data.samples || [];
+    bliSelectedSample = bliSamples[0]?.sample || "";
+    bliLastPlot = null;
+    renderBliSamples();
+    document.getElementById("bliMeta").textContent =
+      `${file.name} | ${data.n_sensors} 传感器 | ${bliSamples.length} 样本`;
+    document.getElementById("bliAnalyzed").classList.remove("hidden");
+    document.getElementById("bliKdWrap").classList.add("hidden");
+    document.getElementById("bliPlotArea").innerHTML = "";
+    refreshBliPlaceholder();
+    toast("解析完成");
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderBliSamples() {
+  const tbody = document.getElementById("bliSampleList");
+  tbody.innerHTML = bliSamples.map(s => `
+    <tr>
+      <td><strong>${esc(s.sample)}</strong></td>
+      <td>${s.n_curves}</td>
+      <td style="font-size:12px;color:#666">${(s.concs || []).map(c => formatConc(c, "nM")).join(" / ")}</td>
+      <td><button class="btn btn-sm btn-outline" onclick="bliSelectSample('${esc(s.sample)}')">${bliSelectedSample === s.sample ? "✓ 选中" : "拟合"}</button></td>
+    </tr>`).join("");
+}
+
+function bliSelectSample(sid) {
+  bliSelectedSample = sid;
+  renderBliSamples();
+  bliFitSelected();
+}
+
+function bliParams() {
+  return {
+    session_id: bliSession,
+    smooth_window: parseInt(document.getElementById("bliSmooth").value || "0", 10),
+    fit: document.getElementById("bliFit").checked,
+    t_assoc: document.getElementById("bliTAssoc").value,
+    t_dissoc: document.getElementById("bliTDissoc").value,
+    n_concs: parseInt(document.getElementById("bliNConcs").value || "8", 10),
+    ns_sensor: document.getElementById("bliNsSensor").value.trim(),
+    no_cutoff: document.getElementById("bliNoCutoff").checked,
+  };
+}
+
+async function bliPlot() {
+  if (!bliSession) { toast("请先上传数据", true); return; }
+  try {
+    const r = await API.post("/api/bli/plot", bliParams());
+    document.getElementById("bliPlotArea").innerHTML =
+      `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+        <img src="${r.image}" style="max-width:100%" alt="传感器图">
+      </div>`;
+    bliLastPlot = r.image;
+  } catch (err) { toast(err.message, true); }
+}
+
+async function bliPlotSeparate() {
+  if (!bliSession) { toast("请先上传数据", true); return; }
+  try {
+    const r = await API.post("/api/bli/plot", { ...bliParams(), separate: true });
+    const html = Object.entries(r.images || {}).map(([sid, img]) =>
+      `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px">
+        <div style="font-weight:600;margin-bottom:6px">${esc(sid)}</div>
+        <img src="${img}" style="max-width:100%" alt="${esc(sid)}">
+      </div>`).join("");
+    document.getElementById("bliPlotArea").innerHTML = html;
+    bliLastPlot = null;
+  } catch (err) { toast(err.message, true); }
+}
+
+async function bliFitSelected() {
+  if (!bliSession || !bliSelectedSample) { toast("请先选择样本", true); return; }
+  try {
+    const r = await API.post("/api/bli/fit", { ...bliParams(), sample: bliSelectedSample });
+    document.getElementById("bliKdWrap").classList.remove("hidden");
+    renderBliKd(bliSelectedSample, r);
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderBliKd(sample, res) {
+  const phase = res.phase || {};
+  const methods = ["standard", "split", "joint", "steady", "mixed"];
+  const rows = methods.map(m => {
+    const v = res[m];
+    if (!v) return `<tr><td>${m}</td><td colspan="4" style="color:#888">拟合失败</td></tr>`;
+    const kd = v.kd != null && isFinite(v.kd) ? `${formatConc(v.kd, "nM")} nM` : "—";
+    const kon = v.kon != null && isFinite(v.kon) ? (+v.kon).toExponential(2) : "—";
+    const koff = v.koff != null && isFinite(v.koff) ? (+v.koff).toExponential(2) : "—";
+    const extra = v.kd_steady_mixed != null ? `KD(稳态) ${formatConc(v.kd_steady_mixed, "nM")}` :
+                 (v.kd_kinetic_mixed != null ? `KD(动力学) ${formatConc(v.kd_kinetic_mixed, "nM")}` : "");
+    return `<tr><td><strong>${m}</strong></td><td>${kd}</td><td>${kon}</td><td>${koff}</td><td>${extra}</td></tr>`;
+  }).join("");
+  document.getElementById("bliKdTables").innerHTML = `
+    <div style="font-size:13px;color:#555;margin-bottom:6px">
+      样本 <strong>${esc(sample)}</strong> · 相界 assoc ${phase.t_assoc?.toFixed(1)} s → dissoc ${phase.t_dissoc?.toFixed(1)} s
+    </div>
+    <table class="calc-table">
+      <thead><tr><th>方法</th><th>KD</th><th>kon (1/M·s)</th><th>koff (1/s)</th><th>备注</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function bliSaveExp() {
+  if (!bliSession) { toast("请先上传数据", true); return; }
+  const autoName = await getAutoName("BLI");
+  const title = prompt("实验名称:", autoName || "BLI 分析");
+  if (!title) return;
+  try {
+    await API.post("/api/bli/save", {
+      ...bliParams(),
+      title,
+      date: todayLocal(),
+      source: document.getElementById("bliFile").files[0]?.name || "",
+    });
+    toast("已保存为实验记录（含原始曲线快照）");
+  } catch (err) { toast(err.message, true); }
+}
+
+function refreshBliPlaceholder() {
+  const el = document.getElementById("bliAnaExpName");
+  if (!el) return;
+  getAutoName("BLI").then(auto => {
+    el.placeholder = auto ? `实验名称（默认 ${auto}）` : "实验名称（可选）";
+  });
+}
+
+// ═════════════════════════════════════════════════════
+//  Tab: AKTA 峰图整理（v0.0.9）
+// ═════════════════════════════════════════════════════
+
+let aktaSession = null;      // /api/akta/analyze 返回的 session_id
+let aktaChannels = [];       // [{name, data_type, unit, n_points, vol_start, vol_end, amp_min, amp_max}]
+let aktaSelectedChannel = "";
+
+async function uploadAktaFile() {
+  const file = document.getElementById("aktaFile").files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const r = await fetch("/api/akta/analyze", { method: "POST", body: form });
+    const data = await r.json();
+    if (!r.ok) { toast(data.error, true); return; }
+    aktaSession = data.session_id;
+    aktaChannels = data.channels || [];
+    aktaSelectedChannel = (data.uv_channels && data.uv_channels[0]) || aktaChannels[0]?.name || "";
+    renderAktaChannels();
+    const evInfo = Object.entries(data.events || {})
+      .map(([k, v]) => `${k}: ${v}`).join(" · ");
+    document.getElementById("aktaMeta").textContent =
+      `${file.name} | ${aktaChannels.length} 通道 | ${evInfo || "无事件"}`;
+    document.getElementById("aktaEventsInfo").textContent =
+      `${evInfo ? "事件: " + evInfo : ""}${data.meta?.skipped?.length ? ` · 跳过 ${data.meta.skipped.length} 通道` : ""}`;
+    document.getElementById("aktaAnalyzed").classList.remove("hidden");
+    document.getElementById("aktaPeakTableWrap").classList.add("hidden");
+    document.getElementById("aktaPlotArea").innerHTML = "";
+    refreshAktaPlaceholder();
+    toast("解析完成");
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderAktaChannels() {
+  const tbody = document.getElementById("aktaChannelList");
+  tbody.innerHTML = aktaChannels.map(ch => `
+    <tr>
+      <td><strong>${esc(ch.name)}</strong>${ch.data_type === "UV" ? ' <span style="color:#2166ac;font-size:11px">UV</span>' : ""}</td>
+      <td>${esc(ch.data_type)}</td>
+      <td>${esc(ch.unit)}</td>
+      <td>${ch.n_points}</td>
+      <td><button class="btn btn-sm btn-outline" onclick="aktaSelectChannel('${esc(ch.name)}')">${aktaSelectedChannel === ch.name ? "✓ 选中" : "分析"}</button></td>
+    </tr>`).join("");
+}
+
+function aktaSelectChannel(name) {
+  aktaSelectedChannel = name;
+  renderAktaChannels();
+  aktaPlot();
+}
+
+function aktaParams() {
+  return {
+    session_id: aktaSession,
+    channel: aktaSelectedChannel,
+    xmin: parseFloat(document.getElementById("aktaXmin").value || "0"),
+    xmax: document.getElementById("aktaXmax").value,
+    min_height: parseFloat(document.getElementById("aktaMinHeight").value || "5"),
+    smooth_window: parseInt(document.getElementById("aktaSmooth").value || "11", 10),
+    show_events: document.getElementById("aktaShowEvents").checked,
+  };
+}
+
+async function aktaPlot() {
+  if (!aktaSession || !aktaSelectedChannel) { toast("请先选择通道", true); return; }
+  try {
+    const r = await API.post("/api/akta/plot", aktaParams());
+    document.getElementById("aktaPlotArea").innerHTML =
+      `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+        <img src="${r.image}" style="max-width:100%" alt="AKTA 峰图">
+      </div>`;
+    renderAktaPeaks(r.peaks || []);
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderAktaPeaks(peaks) {
+  const wrap = document.getElementById("aktaPeakTableWrap");
+  const tbody = document.querySelector("#aktaPeakTable tbody");
+  if (!wrap || !tbody) return;
+  if (!peaks.length) {
+    wrap.classList.remove("hidden");
+    tbody.innerHTML = `<tr><td colspan="7" style="color:#888;text-align:center">未检测到峰（可调低最小峰高或缩小范围）</td></tr>`;
+    return;
+  }
+  wrap.classList.remove("hidden");
+  tbody.innerHTML = peaks.map((p, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${p.apex_vol}</td>
+      <td>${p.height}</td>
+      <td>${p.area}</td>
+      <td>${p.start_vol}</td>
+      <td>${p.end_vol}</td>
+      <td>${p.half_width}</td>
+    </tr>`).join("");
+}
+
+async function aktaExport() {
+  if (!aktaSession || !aktaSelectedChannel) { toast("请先选择通道", true); return; }
+  try {
+    const r = await fetch("/api/akta/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(aktaParams()),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || `导出失败 (${r.status})`);
+    }
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `akta_peaks_${aktaSelectedChannel.replace(/[^A-Za-z0-9_]/g, "_")}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    toast("已导出峰表 Excel");
+  } catch (err) { toast(err.message, true); }
+}
+
+async function aktaSaveExp() {
+  if (!aktaSession || !aktaSelectedChannel) { toast("请先选择通道", true); return; }
+  const autoName = await getAutoName("AKTA");
+  const title = prompt("实验名称:", autoName || "AKTA 峰图");
+  if (!title) return;
+  try {
+    await API.post("/api/akta/save", {
+      ...aktaParams(),
+      title,
+      date: todayLocal(),
+      source: document.getElementById("aktaFile").files[0]?.name || "",
+    });
+    toast("已保存为实验记录（含原始曲线快照）");
+  } catch (err) { toast(err.message, true); }
+}
+
+function refreshAktaPlaceholder() {
+  const el = document.getElementById("aktaExpName");
+  if (!el) return;
+  getAutoName("AKTA").then(auto => {
+    el.placeholder = auto ? `实验名称（默认 ${auto}）` : "实验名称（可选）";
+  });
 }
 
 // ═════════════════════════════════════════════════════

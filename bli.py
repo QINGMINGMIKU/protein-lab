@@ -11,6 +11,9 @@ BLI 分析模块 — ForteBio CSV 解析 / 传感器图生成 / 1:1 Langmuir KD 
 
 绘图样式常量 COLORS / PLOT_STYLE 供酶活等其他模块复用（参考 BLI 风格）。
 KD 拟合：5 种方法（standard / split / joint / steady / mixed）+ 死曲线过滤 + NS 非特异扣除。
+
+分析版本契约：Web 分析 UI 保存实验时，results 里带 BLI_ANALYSIS_VERSION；
+experiment_raw 落 data_type="bli_curves" 原始曲线快照（只写一次）。
 """
 
 import csv
@@ -22,6 +25,10 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from scipy.optimize import curve_fit, least_squares
 from scipy.signal import savgol_filter
+
+# BLI 分析版本（随 v0.0.8 引入）：写入 results["BLI_ANALYSIS_VERSION"]，
+# 供未来 recompute 对照——同版本 + 同 raw 快照 → 可复现同结果（规则 #8）。
+BLI_ANALYSIS_VERSION = "0.0.8"
 
 # ═══════════════════════════════════════════════════════════
 #  绘图样式（BLI 风格）—— 酶活等其他模块引用同一套

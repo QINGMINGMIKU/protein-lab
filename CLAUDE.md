@@ -118,8 +118,8 @@ protein_lab/
 - v0.0.6 ✓ 已发布 (2026-08-13) — 仓库卫生：README 定位重写 + 撤技术报告 + 推送 GitHub
 - 架构升级 ✓ (2026-08-13) — 统一写入入口 services / 计算纯函数化（扣减/对齐/取整） / JSON 反序列化收归 models / 速率校正后端单写 / 校正语义修正（背景只扣阴性） / exp_type 单一来源
 - v0.0.7 ✓ 已发布 (2026-08-13) — **数据存储地基**：schema 迁移框架（`PRAGMA user_version`）/ `experiment_raw` 不可变快照 / 迁移前自动备份 / MCP 读写契约 / CI 测试步（test_models 14 节 + test_bli）
-- v0.0.8 — BLI 原始数据拟合 UI（raw→`experiment_raw` `data_type=bli_curves`，results 带 `BLI_ANALYSIS_VERSION`）
-- v0.0.9 — AKTA 峰图整理（`akta.py` 纯函数 + 峰检测/标注/导出，raw→`experiment_raw`）
+- v0.0.8 ✓ 已完成 (2026-08-15) — **BLI 原始数据拟合 UI**：`/api/bli/analyze|plot|fit|save` 四端点 + 计算工具「BLI 分析」tab（上传 ForteBio CSV → 样本摘要/参数面板 → 传感器图/每样本图 → 5 方法 KD 表 → 保存实验）。results 带 `BLI_ANALYSIS_VERSION`，raw→`experiment_raw` `data_type=bli_curves`（只写一次）；会话 `_bli_sessions` 内存缓存（TTL 2h/上限 10）；详情页新增原始数据快照表（`exp_raw_list(with_version=True)` 轻量提取版本号）。
+- v0.0.9 ✓ 已完成 (2026-08-15) — **AKTA 峰图整理**：`akta.py` 纯函数模块——**标准库原生解析 Unicorn zip（无 pycorn 依赖）**：嵌套 zip `rindex(EOCD)+22` 截断 + float32 偏移 47 起解码（pycorn 逻辑，REF 真实样例 zip 验证）；峰检测（SG 平滑 + 5% 分位基线 + scipy find_peaks height/prominence/distance）；峰图（标注 + Fraction 事件竖线）；峰表 Excel 导出。`/api/akta/analyze|plot|export|save` + 计算工具「AKTA 峰图」tab；results 带 `AKTA_ANALYSIS_VERSION`，raw→`experiment_raw` `data_type=akta_traces`；`test_akta.py` 用 REF 两个真实 zip 回归。
 - v0.1.0 — 酶活原始/结果分离 + recompute（raw 落库、results 带 version、recompute 复算一致——可复现规则 #8）
 - v0.1.1 — 轻量谱系 + 实验上下文（`experiment_links` + `used_sample_from`，**供 AI 消费而非管理 workflow**；不做全量 audit）
 - v0.1.2 — MCP 证据包（`get_variant_context`：一个 variant 的全部实验/上下文/可复算入口）

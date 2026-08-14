@@ -75,7 +75,9 @@ def page_experiment_detail(eid):
     for field in ("params", "results"):
         val = e.get(field)
         e[field] = val if isinstance(val, dict) else {}
-    return render_template("experiment_detail.html", exp=e, exp_types=models.EXP_TYPES)
+    raws = models.exp_raw_list(eid, with_version=True)
+    return render_template("experiment_detail.html", exp=e, exp_types=models.EXP_TYPES,
+                           raws=raws)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1080,6 +1082,460 @@ def api_enzyme_export():
     return send_file(buf,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name="enzyme_well_time_od.xlsx")
+
+
+# ═══════════════════════════════════════════════════════════
+#  BLI 原始数据拟合 API（v0.0.8）
+#  ═══════════════════════════════════════════════════════════
+# 上传 ForteBio 预处理 CSV → 服务端解析缓存（会话）→ 传感器图 / 5 方法 KD 拟合 /
+# 保存为实验（results 带 BLI_ANALYSIS_VERSION；raw→experiment_raw data_type=bli_curves）。
+# 曲线数据量较大，不随每次请求回传——解析一次后按 session_id 复用（类 weblogo 缓存）。
+
+_bli_sessions = {}     # session_id -> {"curves": [...], "created": ts}
+_bli_lock = Lock()
+_BLI_SESSION_TTL = 2 * 3600   # 会话保留 2 小时
+_BLI_SESSION_MAX = 10         # 最多保留 10 个会话，防无限增长
+
+
+def _json_safe(obj):
+    """递归把 float 的 NaN/Inf 换成 None——jsonify 序列化非有限数会输出非法 JSON。"""
+    import math
+    if isinstance(obj, float):
+        return None if not math.isfinite(obj) else obj
+    if isinstance(obj, np.generic):
+        return _json_safe(obj.item())
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+def _bli_curve_to_dict(c) -> dict:
+    return {"label": c.label, "sample_id": c.sample_id, "conc_nM": c.conc_nM,
+            "time": [float(x) for x in c.time], "response": [float(x) for x in c.response]}
+
+
+def _bli_dict_to_curve(d: dict):
+    from bli import Curve
+    return Curve(label=d["label"], sample_id=d["sample_id"], conc_nM=d["conc_nM"],
+                 time=np.asarray(d["time"], float), response=np.asarray(d["response"], float))
+
+
+def _bli_new_session(curves) -> str:
+    import uuid
+    sid = uuid.uuid4().hex
+    now = datetime.now().timestamp()
+    with _bli_lock:
+        expired = [k for k, v in _bli_sessions.items() if now - v["created"] > _BLI_SESSION_TTL]
+        for k in expired:
+            del _bli_sessions[k]
+        if len(_bli_sessions) >= _BLI_SESSION_MAX:  # 超量丢最旧会话
+            oldest = min(_bli_sessions, key=lambda k: _bli_sessions[k]["created"])
+            del _bli_sessions[oldest]
+        _bli_sessions[sid] = {"curves": [_bli_curve_to_dict(c) for c in curves], "created": now}
+    return sid
+
+
+def _bli_get_session(session_id: str):
+    with _bli_lock:
+        s = _bli_sessions.get(session_id or "")
+        return s["curves"] if s else None
+
+
+def _bli_opt_float(v):
+    if v in (None, ""):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route("/api/bli/analyze", methods=["POST"])
+def api_bli_analyze():
+    """上传 ForteBio 预处理 CSV → 解析 → 返回样本摘要 + session_id（后续 plot/fit/save 复用）。"""
+    if "file" not in request.files:
+        return jsonify({"error": "请上传 ForteBio CSV 文件"}), 400
+    f = request.files["file"]
+    fd, tmp = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)
+    f.save(tmp)
+    try:
+        from bli import parse_fortebio_csv, group_by_sample
+        curves = parse_fortebio_csv(tmp)
+    except Exception as e:
+        return jsonify({"error": f"解析失败: {e}"}), 400
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    if not curves:
+        return jsonify({"error": "CSV 中无有效曲线数据"}), 400
+    sid = _bli_new_session(curves)
+    samples = []
+    for s_name, s_curves in group_by_sample(curves).items():
+        samples.append({
+            "sample": s_name,
+            "n_curves": len(s_curves),
+            "concs": [round(c.conc_nM, 4) for c in s_curves],
+            "labels": [c.label for c in s_curves],
+        })
+    return jsonify({"session_id": sid, "samples": samples, "n_sensors": len(curves)})
+
+
+@app.route("/api/bli/plot", methods=["POST"])
+def api_bli_plot():
+    """生成传感器图 PNG（base64）。参数：session_id / smooth_window / fit / t_assoc / t_dissoc /
+    separate（每 sample 一图）/ view / mask（sample 过滤）。"""
+    body = request.get_json() or {}
+    curves = _bli_get_session(body.get("session_id", ""))
+    if not curves:
+        return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
+    try:
+        import base64
+        from bli import generate_sensorgram_png
+        curves = [_bli_dict_to_curve(d) for d in curves]
+        png = generate_sensorgram_png(
+            curves,
+            smooth_window=int(body.get("smooth_window", 31) or 0),
+            fit=bool(body.get("fit")),
+            t_assoc=_bli_opt_float(body.get("t_assoc")),
+            t_dissoc=_bli_opt_float(body.get("t_dissoc")),
+            separate=bool(body.get("separate")),
+            mask=tuple(body.get("mask") or ()),
+            view=tuple(body.get("view") or ()),
+        )
+        if isinstance(png, dict):
+            images = {k: f"data:image/png;base64,{base64.b64encode(v).decode()}"
+                      for k, v in png.items()}
+            return jsonify({"images": images})
+        return jsonify({"image": f"data:image/png;base64,{base64.b64encode(png).decode()}"})
+    except Exception as e:
+        return jsonify({"error": f"绘图失败: {e}"}), 400
+
+
+@app.route("/api/bli/fit", methods=["POST"])
+def api_bli_fit():
+    """对指定 sample 做 5 方法 KD 拟合。参数：session_id / sample / t_assoc / t_dissoc /
+    n_concs / no_cutoff / ns_sensor / ns_subtract。"""
+    body = request.get_json() or {}
+    curves = _bli_get_session(body.get("session_id", ""))
+    if not curves:
+        return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
+    sample = body.get("sample", "")
+    s_curves = [c for c in (_bli_dict_to_curve(d) for d in curves) if c.sample_id == sample]
+    if not s_curves:
+        return jsonify({"error": f"找不到样本 {sample}"}), 400
+    try:
+        from bli import fit_kd
+        res = fit_kd(
+            s_curves,
+            t_assoc=_bli_opt_float(body.get("t_assoc")),
+            t_dissoc=_bli_opt_float(body.get("t_dissoc")),
+            n_concs=int(body.get("n_concs", 8) or 8),
+            no_cutoff=bool(body.get("no_cutoff")),
+            ns_sensor=body.get("ns_sensor") or None,
+            ns_subtract=body.get("ns_subtract", "proportional"),
+        )
+        return jsonify(_json_safe({"sample": sample, **res}))
+    except Exception as e:
+        return jsonify({"error": f"拟合失败: {e}"}), 400
+
+
+@app.route("/api/bli/save", methods=["POST"])
+def api_bli_save():
+    """保存 BLI 分析为实验：
+    - results 带 BLI_ANALYSIS_VERSION（版本契约，可复现规则 #8）
+    - 原始曲线落 experiment_raw（data_type=bli_curves，只写一次）
+    - 拟合结果由后端按提交参数重算，与用户看到的图/表一致。"""
+    body = request.get_json() or {}
+    curves = _bli_get_session(body.get("session_id", ""))
+    if not curves:
+        return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
+    curves = [_bli_dict_to_curve(d) for d in curves]
+    try:
+        from bli import fit_kd, group_by_sample, BLI_ANALYSIS_VERSION
+    except Exception as e:
+        return jsonify({"error": f"BLI 内核加载失败: {e}"}), 500
+
+    params = {
+        "source": body.get("source", ""),
+        "smooth_window": int(body.get("smooth_window", 31) or 0),
+        "fit_overlay": bool(body.get("fit_overlay")),
+        "t_assoc": _bli_opt_float(body.get("t_assoc")),
+        "t_dissoc": _bli_opt_float(body.get("t_dissoc")),
+        "n_concs": int(body.get("n_concs", 8) or 8),
+        "no_cutoff": bool(body.get("no_cutoff")),
+        "ns_sensor": body.get("ns_sensor") or None,
+        "ns_subtract": body.get("ns_subtract", "proportional"),
+    }
+
+    # 拟合：逐 sample 重算，与前端展示一致
+    samples_result = {}
+    for s_name, s_curves in group_by_sample(curves).items():
+        try:
+            r = fit_kd(
+                s_curves,
+                t_assoc=params["t_assoc"], t_dissoc=params["t_dissoc"],
+                n_concs=params["n_concs"], no_cutoff=params["no_cutoff"],
+                ns_sensor=params["ns_sensor"], ns_subtract=params["ns_subtract"],
+            )
+            samples_result[s_name] = r
+        except Exception as e:
+            samples_result[s_name] = {"error": str(e)}
+
+    results = {
+        "BLI_ANALYSIS_VERSION": BLI_ANALYSIS_VERSION,
+        "params": params,
+        "samples": samples_result,
+    }
+
+    try:
+        exp = services.create_experiment(
+            title=body.get("title", ""),
+            exp_type="BLI",
+            protein_ids=body.get("protein_ids", []),
+            date=body.get("date", ""),
+            params=params,
+            results=_json_safe(results),
+            notes=body.get("notes", ""),
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+
+    # 原始曲线快照：只写一次（规则 #2/#8），删实验也不删 raw（FK SET NULL）
+    raw_payload = {
+        "analysis_version": BLI_ANALYSIS_VERSION,
+        "params": params,
+        "curves": [_bli_curve_to_dict(c) for c in curves],
+    }
+    models.exp_save_raw(exp["id"], "bli_curves", raw_payload)
+    return jsonify(exp), 201
+
+
+# ═══════════════════════════════════════════════════════════
+#  AKTA 峰图整理 API（v0.0.9）
+#  ═══════════════════════════════════════════════════════════
+# 上传 AKTA Unicorn zip → 标准库原生解析（akta.py，无 pycorn 依赖）→ 通道/事件摘要
+# → 峰检测图 / 峰表导出 / 保存为实验（results 带 AKTA_ANALYSIS_VERSION；
+#   raw→experiment_raw data_type=akta_traces）。会话缓存类 BLI 分析。
+
+_akta_sessions = {}     # session_id -> {"channels": {...}, "events": {...}, "meta": {...}, "created": ts}
+_akta_lock = Lock()
+_AKTA_SESSION_TTL = 2 * 3600
+_AKTA_SESSION_MAX = 10
+
+
+def _akta_new_session(parsed: dict) -> str:
+    import uuid
+    sid = uuid.uuid4().hex
+    now = datetime.now().timestamp()
+    with _akta_lock:
+        expired = [k for k, v in _akta_sessions.items() if now - v["created"] > _AKTA_SESSION_TTL]
+        for k in expired:
+            del _akta_sessions[k]
+        if len(_akta_sessions) >= _AKTA_SESSION_MAX:
+            oldest = min(_akta_sessions, key=lambda k: _akta_sessions[k]["created"])
+            del _akta_sessions[oldest]
+        _akta_sessions[sid] = {**parsed, "created": now}
+    return sid
+
+
+def _akta_get_session(session_id: str):
+    with _akta_lock:
+        s = _akta_sessions.get(session_id or "")
+        return s if s else None
+
+
+@app.route("/api/akta/analyze", methods=["POST"])
+def api_akta_analyze():
+    """上传 AKTA Unicorn zip → 解析 → 返回通道摘要 + 事件摘要 + session_id。"""
+    if "file" not in request.files:
+        return jsonify({"error": "请上传 AKTA Unicorn zip 文件"}), 400
+    f = request.files["file"]
+    fd, tmp = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    f.save(tmp)
+    try:
+        from akta import parse_akta_zip, find_uv_channels
+        parsed = parse_akta_zip(tmp)
+    except Exception as e:
+        return jsonify({"error": f"解析失败: {e}"}), 400
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+    channels = parsed.get("channels", {})
+    if not channels:
+        return jsonify({"error": "zip 中未解析出任何通道数据"}), 400
+
+    sid = _akta_new_session(parsed)
+    channel_list = []
+    for name, ch in channels.items():
+        channel_list.append({
+            "name": name, "data_type": ch.data_type, "unit": ch.unit,
+            "n_points": ch.n_points(),
+            "vol_start": round(float(ch.vols[0]), 3) if len(ch.vols) else 0,
+            "vol_end": round(float(ch.vols[-1]), 3) if len(ch.vols) else 0,
+            "amp_min": round(float(np.min(ch.amps)), 3) if len(ch.amps) else 0,
+            "amp_max": round(float(np.max(ch.amps)), 3) if len(ch.amps) else 0,
+        })
+    events_summary = {k: len(v) for k, v in parsed.get("events", {}).items()}
+    return jsonify({
+        "session_id": sid,
+        "channels": channel_list,
+        "uv_channels": find_uv_channels(channels),
+        "events": events_summary,
+        "meta": parsed.get("meta", {}),
+    })
+
+
+@app.route("/api/akta/plot", methods=["POST"])
+def api_akta_plot():
+    """峰检测 + 峰图 PNG（base64）。参数：session_id / channel / xmin / xmax / min_height /
+    smooth_window / show_events。返回 {image, peaks}。"""
+    body = request.get_json() or {}
+    sess = _akta_get_session(body.get("session_id", ""))
+    if not sess:
+        return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
+    ch_name = body.get("channel", "")
+    ch = sess["channels"].get(ch_name)
+    if ch is None:
+        return jsonify({"error": f"找不到通道 {ch_name}"}), 400
+    try:
+        import base64
+        from akta import detect_peaks, generate_akta_png
+        xmin = float(body.get("xmin", 0) or 0)
+        xmax = body.get("xmax")
+        xmax = float(xmax) if xmax not in (None, "") else None
+        min_height = float(body.get("min_height", 5) or 5)
+        smooth = int(body.get("smooth_window", 11) or 11)
+        events = sess["events"].get("Fraction", []) if body.get("show_events", True) else None
+        peaks = detect_peaks(ch, xmin=xmin, xmax=xmax, min_height=min_height,
+                             smooth_window=smooth)
+        png = generate_akta_png(ch, peaks, events=events, xmin=xmin, xmax=xmax,
+                                show_events=bool(body.get("show_events", True)),
+                                smooth_window=smooth)
+        return jsonify({
+            "image": f"data:image/png;base64,{base64.b64encode(png).decode()}",
+            "peaks": [p.to_dict() for p in peaks],
+        })
+    except Exception as e:
+        return jsonify({"error": f"峰图生成失败: {e}"}), 400
+
+
+@app.route("/api/akta/export", methods=["POST"])
+def api_akta_export():
+    """导出峰表 Excel：Sheet1 峰表，Sheet2 峰-体积曲线数据（作图友好）。"""
+    body = request.get_json() or {}
+    sess = _akta_get_session(body.get("session_id", ""))
+    if not sess:
+        return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
+    ch_name = body.get("channel", "")
+    ch = sess["channels"].get(ch_name)
+    if ch is None:
+        return jsonify({"error": f"找不到通道 {ch_name}"}), 400
+    try:
+        from akta import detect_peaks
+        xmin = float(body.get("xmin", 0) or 0)
+        xmax = body.get("xmax")
+        xmax = float(xmax) if xmax not in (None, "") else None
+        min_height = float(body.get("min_height", 5) or 5)
+        smooth = int(body.get("smooth_window", 11) or 11)
+        peaks = detect_peaks(ch, xmin=xmin, xmax=xmax, min_height=min_height,
+                             smooth_window=smooth)
+    except Exception as e:
+        return jsonify({"error": f"峰检测失败: {e}"}), 400
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "峰表"
+    headers = ["峰号", "峰位 (mL)", "峰高 (mAU)", "面积 (mAU·mL)", "起点 (mL)", "终点 (mL)", "半高宽 (mL)"]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    for i, p in enumerate(peaks, 1):
+        ws.append([i, p.apex_vol, p.height, p.area, p.start_vol, p.end_vol, p.half_width])
+    ws2 = wb.create_sheet(f"曲线-{ch_name[:20]}")
+    ws2.append(["Volume (mL)", "Signal (%s)" % (ch.unit or "")])
+    for v, a in zip(ch.vols, ch.amps):
+        if xmin <= v <= (xmax if xmax is not None else float("inf")):
+            ws2.append([float(v), float(a)])
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name=f"akta_peaks_{ch_name.replace(' ', '_')}.xlsx")
+
+
+@app.route("/api/akta/save", methods=["POST"])
+def api_akta_save():
+    """保存 AKTA 峰图为实验：
+    - results 带 AKTA_ANALYSIS_VERSION + 峰表 + 通道摘要
+    - 原始通道曲线落 experiment_raw（data_type=akta_traces，只写一次）"""
+    body = request.get_json() or {}
+    sess = _akta_get_session(body.get("session_id", ""))
+    if not sess:
+        return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
+    ch_name = body.get("channel", "")
+    ch = sess["channels"].get(ch_name)
+    if ch is None:
+        return jsonify({"error": f"找不到通道 {ch_name}"}), 400
+    try:
+        from akta import detect_peaks, AKTA_ANALYSIS_VERSION
+        xmin = float(body.get("xmin", 0) or 0)
+        xmax = body.get("xmax")
+        xmax = float(xmax) if xmax not in (None, "") else None
+        min_height = float(body.get("min_height", 5) or 5)
+        smooth = int(body.get("smooth_window", 11) or 11)
+        peaks = detect_peaks(ch, xmin=xmin, xmax=xmax, min_height=min_height,
+                             smooth_window=smooth)
+    except Exception as e:
+        return jsonify({"error": f"峰检测失败: {e}"}), 400
+
+    params = {
+        "channel": ch_name,
+        "data_type": ch.data_type,
+        "unit": ch.unit,
+        "xmin": xmin,
+        "xmax": xmax,
+        "min_height": min_height,
+        "smooth_window": smooth,
+        "source": body.get("source", ""),
+    }
+    results = {
+        "AKTA_ANALYSIS_VERSION": AKTA_ANALYSIS_VERSION,
+        "params": params,
+        "n_peaks": len(peaks),
+        "peaks": [p.to_dict() for p in peaks],
+        "events": {k: len(v) for k, v in sess["events"].items()},
+    }
+
+    try:
+        exp = services.create_experiment(
+            title=body.get("title", ""),
+            exp_type="AKTA",
+            protein_ids=body.get("protein_ids", []),
+            date=body.get("date", ""),
+            params=params,
+            results=_json_safe(results),
+            notes=body.get("notes", ""),
+        )
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+
+    # 原始曲线快照（只写一次）：所选通道全量 + 事件
+    raw_payload = {
+        "analysis_version": AKTA_ANALYSIS_VERSION,
+        "params": params,
+        "channel": ch.to_dict(full=True),
+        "events": sess["events"],
+        "meta": sess.get("meta", {}),
+    }
+    models.exp_save_raw(exp["id"], "akta_traces", raw_payload)
+    return jsonify(exp), 201
 
 
 def open_browser(port):

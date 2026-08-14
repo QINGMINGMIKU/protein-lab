@@ -246,6 +246,72 @@ print("enzyme fit slope_corrected OK")
 assert client.get("/calculator").status_code == 200
 print("/calculator OK")
 
+# ── 7. BLI 分析 API（v0.0.8）：analyze → plot → fit → save（raw 落库 + version）──
+# 7a. analyze：上传合成 CSV
+with open(csv_path, "rb") as f:
+    resp = client.post("/api/bli/analyze",
+                       data={"file": (f, "fixture.csv")},
+                       content_type="multipart/form-data")
+assert resp.status_code == 200, resp.status_code
+ana = resp.get_json()
+assert ana["session_id"], ana
+assert {s["sample"] for s in ana["samples"]} == {"WT", "MUT"}, ana["samples"]
+sid = ana["session_id"]
+print("bli analyze OK:", {s["sample"]: s["n_curves"] for s in ana["samples"]})
+
+# 7b. plot：合并图 + separate 模式
+resp = client.post("/api/bli/plot", json={"session_id": sid, "smooth_window": 31, "fit": True})
+assert resp.status_code == 200, resp.status_code
+img = resp.get_json()["image"]
+assert img.startswith("data:image/png;base64,"), img[:40]
+resp = client.post("/api/bli/plot", json={"session_id": sid, "separate": True})
+sep = resp.get_json()["images"]
+assert set(sep) == {"WT", "MUT"}, sep
+print("bli plot OK")
+
+# 7c. fit：显式相界 → WT 的 standard KD 与真值同数量级
+resp = client.post("/api/bli/fit", json={
+    "session_id": sid, "sample": "WT", "t_assoc": 100, "t_dissoc": 400})
+assert resp.status_code == 200, resp.status_code
+fit_res = resp.get_json()
+assert fit_res["sample"] == "WT"
+kd_std = fit_res["standard"]["kd"]
+assert 10 < kd_std < 1000, f"API standard KD {kd_std} 偏离真值过远"
+print(f"bli fit OK: standard KD={kd_std:.1f} nM (truth 100)")
+
+# 7d. save：results 带 BLI_ANALYSIS_VERSION；raw→experiment_raw data_type=bli_curves
+from bli import BLI_ANALYSIS_VERSION
+resp = client.post("/api/bli/save", json={
+    "session_id": sid, "title": "BLI API 测试",
+    "t_assoc": 100, "t_dissoc": 400, "smooth_window": 31, "fit_overlay": True,
+    "source": "fixture.csv"})
+assert resp.status_code == 201, (resp.status_code, resp.get_json())
+saved = resp.get_json()
+assert saved["exp_type"] == "BLI"
+assert saved["results"]["BLI_ANALYSIS_VERSION"] == BLI_ANALYSIS_VERSION
+assert "samples" in saved["results"] and "WT" in saved["results"]["samples"]
+# raw 快照存在且只写一次（重复调用=新行，旧行不变）
+raws = models.exp_raw_list(saved["id"])
+assert len(raws) == 1 and raws[0]["data_type"] == "bli_curves", raws
+raw1 = models.exp_raw_get(raws[0]["id"])
+assert raw1["payload"]["analysis_version"] == BLI_ANALYSIS_VERSION
+assert len(raw1["payload"]["curves"]) == len(curves), "raw 曲线数与解析一致"
+resp2 = client.post("/api/bli/save", json={
+    "session_id": sid, "title": "BLI API 测试2",
+    "t_assoc": 100, "t_dissoc": 400})
+saved2 = resp2.get_json()
+raws2 = models.exp_raw_list(saved2["id"])
+assert len(raws2) == 1
+# 同一实验重复 save 两次（不同实验）各自有 raw；旧 raw 内容不变（只写一次）
+raw1_after = models.exp_raw_get(raws[0]["id"])
+assert raw1_after["payload"]["curves"] == raw1["payload"]["curves"], "raw 不可变（只插不更）"
+print(f"bli save OK: exp#{saved['id']} raw#{raws[0]['id']} version={BLI_ANALYSIS_VERSION}")
+
+# 7e. 会话失效：不存在的 session_id → 400
+resp = client.post("/api/bli/plot", json={"session_id": "nope"})
+assert resp.status_code == 400
+print("bli session guard OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")
