@@ -1409,6 +1409,9 @@ def api_akta_analyze():
             continue
 
         sid = _akta_new_session(parsed)
+        # 会话里记住源文件名（zip 包名），供绘图标题/图例/导出用
+        with _akta_lock:
+            _akta_sessions[sid]["source_name"] = f.filename
         channel_list = []
         for name, ch in channels.items():
             channel_list.append({
@@ -1459,11 +1462,17 @@ def api_akta_plot():
             target_peak_idx = int(body.get("target_peak_idx", 0) or 0)
         except (TypeError, ValueError):
             target_peak_idx = 0
+        # 图例/标题名：优先前端显式传 sample_name，其次会话里的 zip 包名（去扩展名），再退通道名
+        sample_name = (body.get("sample_name") or "").strip()
+        if not sample_name:
+            src = sess.get("source_name") or ""
+            sample_name = os.path.splitext(os.path.basename(src))[0] if src else ""
         png = generate_akta_png(ch, peaks, events=events, xmin=xmin, xmax=xmax,
                                 show_events=bool(body.get("show_events", False)),
                                 highlight_frac=bool(body.get("highlight_frac", True)),
                                 target_peak_idx=target_peak_idx,
-                                smooth_window=smooth)
+                                smooth_window=smooth,
+                                sample_name=sample_name)
         return jsonify({
             "image": f"data:image/png;base64,{base64.b64encode(png).decode()}",
             "peaks": [p.to_dict() for p in peaks],

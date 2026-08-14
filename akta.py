@@ -381,12 +381,15 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
                       highlight_frac: bool = True,    # 目标峰 frac 矩形阴影（默认开）
                       target_peak_idx: int = 0,       # 阴影跟随哪个峰（默认主峰/第一个）
                       smooth_window: int = 11,
+                      sample_name: str = "",          # 图例 smooth 条目名 + 图标题（默认 = 压缩包名）
                       dpi: int = 200) -> bytes:
     """生成峰图 PNG：UV 轨迹（平滑叠加）+ 基线 + 峰标注。
 
     - highlight_frac=True：目标峰自身 frac + 前后各 1 个 frac 画矩形背景阴影
       （中间深、两边浅；目标峰 = peaks[target_peak_idx]）
     - show_events=True：画 Fraction 事件竖线（默认关闭）
+    - sample_name：图例只保留 smooth 一条（raw 灰线为背景不占图例），
+      条目名与图标题都用它；缺省回退通道名。
     """
     from fonts import setup_matplotlib_cjk
     setup_matplotlib_cjk()
@@ -396,6 +399,8 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
 
     from bli import COLORS, PLOT_STYLE
 
+    name = (sample_name or "").strip() or channel.name or ""
+
     vols = np.asarray(channel.vols, dtype=float)
     amps = np.asarray(channel.amps, dtype=float)
     if xmax is None:
@@ -403,12 +408,13 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
 
     with plt.rc_context(PLOT_STYLE):
         fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(vols, amps, color="#b0b0b0", linewidth=1.2, alpha=0.7, label="raw")
+        # 原始灰线：背景参考，不带 label（不进图例）
+        ax.plot(vols, amps, color="#b0b0b0", linewidth=1.2, alpha=0.7)
         mask = (vols >= xmin) & (vols <= xmax)
         v, a = vols[mask], amps[mask]
         if len(v) > 3:
             ax.plot(v, _smooth(a, smooth_window), color=COLORS[0], linewidth=2.2,
-                    label=f"smooth (win={smooth_window})")
+                    label=name)
 
         # 目标峰 frac 矩形背景阴影（先画，避免盖住曲线）
         if highlight_frac and events:
@@ -457,7 +463,7 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
         ax.set_xlim(xmin, xmax)
         ax.set_xlabel(f"Volume (mL)" + (f" — {channel.name}" if channel.name else ""))
         ax.set_ylabel(f"Signal ({channel.unit})" if channel.unit else "Signal")
-        ax.set_title(f"{channel.name}  ({channel.n_points()} pts)", fontweight="bold")
+        ax.set_title(name, fontweight="bold")
         ax.legend(loc="upper right", fontsize=9)
         ax.grid(True, alpha=0.15)
 
