@@ -462,14 +462,35 @@ def exp_save_raw(exp_id: int, data_type: str, payload) -> int:
     return rid
 
 
-def exp_raw_list(exp_id: int) -> list[dict]:
-    """某实验的全部原始数据快照元数据（不含 payload，避免大字段进列表）"""
+def exp_raw_list(exp_id: int, with_version: bool = False) -> list[dict]:
+    """某实验的全部原始数据快照元数据（不含 payload 大字段，避免大字段进列表）。
+
+    with_version=True 时额外读 payload 里的 analysis_version（轻量，仅提取版本号，
+    不把整个 payload 放回列表）——详情页展示"分析版本"用，MCP/列表仍走轻量路径。
+    """
     conn = get_db()
     rows = conn.execute(
         "SELECT id, experiment_id, data_type, created_at FROM experiment_raw "
         "WHERE experiment_id = ? ORDER BY id", (exp_id,)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if with_version:
+            ver = conn.execute(
+                "SELECT payload FROM experiment_raw WHERE id = ?", (r["id"],)).fetchone()
+            d["analysis_version"] = _version_from_payload(ver["payload"]) if ver else None
+        out.append(d)
     conn.close()
-    return [dict(r) for r in rows]
+    return out
+
+
+def _version_from_payload(payload: str):
+    """从 raw payload JSON 提取 analysis_version（缺省 None）。"""
+    try:
+        p = _json_unwrap(payload)
+        return p.get("analysis_version") if isinstance(p, dict) else None
+    except Exception:
+        return None
 
 
 def exp_raw_get(raw_id: int) -> dict | None:

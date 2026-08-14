@@ -170,6 +170,84 @@
 {% endif %}
 
 <!-- ═══════════════════════════════════════════════ -->
+<!--  BLI 分析（v0.0.8）                              -->
+<!-- ═══════════════════════════════════════════════ -->
+{% if exp.exp_type == "BLI" and results.get("samples") %}
+<div class="calc-card" style="margin-bottom:20px">
+  <h2>BLI KD 拟合结果
+    <span style="font-size:12px;color:#888;font-weight:400">分析版本 v{{ results.get("BLI_ANALYSIS_VERSION", "?") }}</span>
+  </h2>
+  {% set params_bli = params %}
+  <p style="font-size:13px;color:#555;margin-bottom:8px">
+    相界：assoc {{ "%g"|format(params_bli.get("t_assoc")) if params_bli.get("t_assoc") else "自动检测" }} s →
+    dissoc {{ "%g"|format(params_bli.get("t_dissoc")) if params_bli.get("t_dissoc") else "自动检测" }} s
+    {% if params_bli.get("ns_sensor") %} · NS 扣除 {{ params_bli.get("ns_sensor") }}{% endif %}
+  </p>
+  {% for sid, sres in results.get("samples", {}).items() %}
+    {% if sres is mapping and sres.get("phase") %}
+    <div style="margin-bottom:14px">
+      <div style="font-weight:600;margin-bottom:4px">{{ sid }}
+        <span style="font-weight:400;color:#888;font-size:12px">
+          {% if sres.get("error") %}（{{ sres.error }}）{% endif %}
+        </span>
+      </div>
+      {% if not sres.get("error") %}
+      <table class="calc-table">
+        <thead><tr><th>方法</th><th>KD (nM)</th><th>kon (1/M·s)</th><th>koff (1/s)</th></tr></thead>
+        <tbody>
+        {% for m in ["standard", "split", "joint", "steady", "mixed"] %}
+          {% set mv = sres.get(m) %}
+          <tr>
+            <td>{{ m }}</td>
+            {% if mv %}
+              <td>{{ "%.3g"|format(mv.get("kd")) if mv.get("kd") != None else "—" }}</td>
+              <td>{{ "%.3g"|format(mv.get("kon")) if mv.get("kon") != None else "—" }}</td>
+              <td>{{ "%.3g"|format(mv.get("koff")) if mv.get("koff") != None else "—" }}</td>
+            {% else %}
+              <td colspan="3" style="color:#888">拟合失败</td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  AKTA 峰图（v0.0.9）                             -->
+<!-- ═══════════════════════════════════════════════ -->
+{% if exp.exp_type == "AKTA" and results.get("peaks") %}
+<div class="calc-card" style="margin-bottom:20px">
+  <h2>AKTA 峰检测结果
+    <span style="font-size:12px;color:#888;font-weight:400">分析版本 v{{ results.get("AKTA_ANALYSIS_VERSION", "?") }}</span>
+  </h2>
+  <p style="font-size:13px;color:#555;margin-bottom:8px">
+    通道 {{ params.get("channel", "?") }} · 检测到 {{ results.get("n_peaks", results.get("peaks")|length) }} 个峰
+    {% if params.get("xmin") or params.get("xmax") %}（体积 {{ params.get("xmin", 0) }}–{{ params.get("xmax") or "∞" }} mL）{% endif %}
+  </p>
+  <table class="calc-table">
+    <thead><tr><th>#</th><th>峰位 (mL)</th><th>峰高 (mAU)</th><th>面积 (mAU·mL)</th><th>起 (mL)</th><th>止 (mL)</th></tr></thead>
+    <tbody>
+    {% for p in results.get("peaks", []) %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ p.apex_vol }}</td>
+        <td>{{ p.height }}</td>
+        <td>{{ p.area }}</td>
+        <td>{{ p.start_vol }}</td>
+        <td>{{ p.end_vol }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- ═══════════════════════════════════════════════ -->
 <!--  其他实验：显示原始 JSON                         -->
 <!-- ═══════════════════════════════════════════════ -->
 {# 兜底：仅当类型无法识别（或浓度/BLI 缺蛋白数据无法渲染表格）时才显示原始 JSON；酶活/Weblogo 用 wells/image 渲染，不在此列 #}
@@ -188,6 +266,28 @@
 {% endif %}
 
 <a href="/experiments" style="display:inline-block;margin-top:8px;color:#888;font-size:14px">← 返回实验列表</a>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  原始数据快照（experiment_raw，只写一次）        -->
+<!-- ═══════════════════════════════════════════════ -->
+{% if raws %}
+<div class="calc-card" style="margin-bottom:20px">
+  <h2>原始数据快照 <span style="font-size:12px;color:#888;font-weight:400">（experiment_raw，只写一次、从不覆盖；删实验不删快照）</span></h2>
+  <table class="calc-table">
+    <thead><tr><th>#</th><th>数据类型</th><th>记录时间</th><th>分析版本</th></tr></thead>
+    <tbody>
+    {% for r in raws %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td><code>{{ r.data_type }}</code></td>
+        <td>{{ r.created_at }}</td>
+        <td>{{ ("v" ~ r.analysis_version) if r.analysis_version else "-" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <script>
 // 下载详情页图片，文件名用实验标题（已保存时通常即自动命名）
