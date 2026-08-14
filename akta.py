@@ -316,15 +316,78 @@ def _smooth(y: np.ndarray, window: int) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════
+#  Fraction 区间解析（阴影高亮用）
+# ═══════════════════════════════════════════════════════════
+
+def fraction_ranges(events: Optional[List[Tuple[float, str]]], xmax: float = float("inf")
+                    ) -> List[Tuple[float, float, str]]:
+    """把 Fraction 事件 (vol, label) 转成收集区间列表 [(start, end, label), ...]。
+
+    每个事件 = 一管的开始体积；区间 = [start, 下一事件 start)。最后一管延伸到 xmax。
+    事件缺失 / 空列表 → 返回 []。
+    """
+    if not events:
+        return []
+    evs = sorted(events, key=lambda e: e[0])
+    out = []
+    for i, (vol, label) in enumerate(evs):
+        end = evs[i + 1][0] if i + 1 < len(evs) else xmax
+        out.append((float(vol), float(end), str(label).strip()))
+    return out
+
+
+def find_fraction_index(fractions: List[Tuple[float, float, str]], vol: float) -> Optional[int]:
+    """返回包含体积 vol 的 frac 下标（区间 [start, end) 左闭右开）；无则 None。"""
+    for i, (s, e, _) in enumerate(fractions):
+        if s <= vol < e:
+            return i
+    return None
+
+
+def target_fraction_span(fractions: List[Tuple[float, float, str]], apex_vol: float,
+                         xmin: float = 0.0, xmax: Optional[float] = None
+                         ) -> dict:
+    """目标峰（顶点体积 apex_vol）自身 frac + 前后各 1 个 frac 的区间，用于矩形背景阴影。
+
+    返回 {"self": (s,e), "prev": (s,e)|None, "next": (s,e)|None, "self_label": str}。
+    区间已 clamp 到 [xmin, xmax]。无 fractions / 顶点不在任何 frac 内 → {"self": None, ...}。
+    """
+    if not fractions:
+        return {"self": None, "prev": None, "next": None, "self_label": ""}
+    idx = find_fraction_index(fractions, apex_vol)
+    if idx is None:
+        return {"self": None, "prev": None, "next": None, "self_label": ""}
+    hi = xmax if xmax is not None else float("inf")
+
+    def clamp(rng):
+        s, e = rng
+        return (max(s, xmin), min(e, hi))
+
+    self_rng = clamp(fractions[idx][:2])
+    prev_rng = clamp(fractions[idx - 1][:2]) if idx - 1 >= 0 else None
+    next_rng = clamp(fractions[idx + 1][:2]) if idx + 1 < len(fractions) else None
+    return {"self": self_rng, "prev": prev_rng, "next": next_rng,
+            "self_label": fractions[idx][2]}
+
+
+# ═══════════════════════════════════════════════════════════
 #  绘图
 # ═══════════════════════════════════════════════════════════
 
 def generate_akta_png(channel: Channel, peaks: List[Peak], *,
                       events: Optional[List[Tuple[float, str]]] = None,
                       xmin: float = 0.0, xmax: Optional[float] = None,
-                      show_events: bool = True, smooth_window: int = 11,
+                      show_events: bool = False,      # frac 竖线（默认不显示，可切换）
+                      highlight_frac: bool = True,    # 目标峰 frac 矩形阴影（默认开）
+                      target_peak_idx: int = 0,       # 阴影跟随哪个峰（默认主峰/第一个）
+                      smooth_window: int = 11,
                       dpi: int = 200) -> bytes:
-    """生成峰图 PNG：UV 轨迹（平滑叠加）+ 基线 + 峰标注 + Fraction 事件竖线。"""
+    """生成峰图 PNG：UV 轨迹（平滑叠加）+ 基线 + 峰标注。
+
+    - highlight_frac=True：目标峰自身 frac + 前后各 1 个 frac 画矩形背景阴影
+      （中间深、两边浅；目标峰 = peaks[target_peak_idx]）
+    - show_events=True：画 Fraction 事件竖线（默认关闭）
+    """
     from fonts import setup_matplotlib_cjk
     setup_matplotlib_cjk()
     import matplotlib
@@ -346,6 +409,25 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
         if len(v) > 3:
             ax.plot(v, _smooth(a, smooth_window), color=COLORS[0], linewidth=2.2,
                     label=f"smooth (win={smooth_window})")
+
+        # 目标峰 frac 矩形背景阴影（先画，避免盖住曲线）
+        if highlight_frac and events:
+            target_peak = peaks[target_peak_idx] if 0 <= target_peak_idx < len(peaks) else None
+            span = target_fraction_span(fraction_ranges(events, xmax),
+                                        target_peak.apex_vol if target_peak else xmin,
+                                        xmin, xmax) if target_peak else {"self": None}
+            if span.get("self"):
+                # 前后 frac：浅色；峰自身 frac：深色
+                for rng in (span["prev"], span["next"]):
+                    if rng and rng[0] < rng[1]:
+                        ax.axvspan(rng[0], rng[1], color="#5aae61", alpha=0.10, zorder=0)
+                s0, s1 = span["self"]
+                if s0 < s1:
+                    ax.axvspan(s0, s1, color="#4361ee", alpha=0.16, zorder=0)
+                    ax.text((s0 + s1) / 2, ax.get_ylim()[1] * 0.985,
+                            f"frac {span['self_label']}", fontsize=9,
+                            color="#4361ee", ha="center", va="top", fontweight="bold")
+
         # 基线
         if len(v) > 3:
             base = float(np.percentile(_smooth(a, smooth_window), 5))
@@ -353,7 +435,7 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
             ax.text(xmin + (xmax - xmin) * 0.01, base, f"baseline {base:.2f}",
                     fontsize=9, color="#777777", va="bottom")
 
-        # Fraction 事件竖线
+        # Fraction 事件竖线（默认关，用户可开）
         if show_events and events:
             for vol, txt in events:
                 if xmin <= vol <= xmax:

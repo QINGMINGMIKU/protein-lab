@@ -2525,88 +2525,160 @@ function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
 //  Tab: AKTA 峰图整理（v0.0.9）
 // ═════════════════════════════════════════════════════
 
-let aktaSession = null;      // /api/akta/analyze 返回的 session_id
-let aktaChannels = [];       // [{name, data_type, unit, n_points, vol_start, vol_end, amp_min, amp_max}]
-let aktaSelectedChannel = "";
+// 多 run 批量：一次上传多个 zip，每个 run 独立 session/channel/目标峰
+let aktaRuns = [];             // [{name, session_id, channels, uv_channels, events, meta, channel, target_peak}]
+let aktaCurrentRun = 0;        // 当前选中的 run 下标（峰表/单张图用它）
 
 async function uploadAktaFile() {
-  const file = document.getElementById("aktaFile").files[0];
-  if (!file) return;
+  const files = Array.from(document.getElementById("aktaFile").files || []);
+  if (!files.length) return;
   const form = new FormData();
-  form.append("file", file);
+  files.forEach(f => form.append("file", f));
   try {
     const r = await fetch("/api/akta/analyze", { method: "POST", body: form });
     const data = await r.json();
     if (!r.ok) { toast(data.error, true); return; }
-    aktaSession = data.session_id;
-    aktaChannels = data.channels || [];
-    aktaSelectedChannel = (data.uv_channels && data.uv_channels[0]) || aktaChannels[0]?.name || "";
-    renderAktaChannels();
-    const evInfo = Object.entries(data.events || {})
-      .map(([k, v]) => `${k}: ${v}`).join(" · ");
+    aktaRuns = (data.runs || []).map(run => {
+      if (run.error) return { ...run, channels: [], uv_channels: [], events: {}, meta: {} };
+      const uv = run.uv_channels && run.uv_channels[0];
+      return {
+        ...run,
+        channel: uv || run.channels[0]?.name || "",
+        target_peak: 0,   // 阴影跟随主峰（第 1 个）
+      };
+    });
+    aktaCurrentRun = 0;
+    const okRuns = aktaRuns.filter(r => !r.error);
+    const errRuns = aktaRuns.filter(r => r.error);
+    const totalCh = okRuns.reduce((n, r) => n + r.channels.length, 0);
     document.getElementById("aktaMeta").textContent =
-      `${file.name} | ${aktaChannels.length} 通道 | ${evInfo || "无事件"}`;
+      `${files.length} 文件 | ${okRuns.length} 成功${errRuns.length ? ` / ${errRuns.length} 失败` : ""} | ${totalCh} 通道`;
+    renderAktaRuns();
     document.getElementById("aktaEventsInfo").textContent =
-      `${evInfo ? "事件: " + evInfo : ""}${data.meta?.skipped?.length ? ` · 跳过 ${data.meta.skipped.length} 通道` : ""}`;
+      errRuns.map(r => `${r.name}: ${r.error}`).join("；");
     document.getElementById("aktaAnalyzed").classList.remove("hidden");
     document.getElementById("aktaPeakTableWrap").classList.add("hidden");
     document.getElementById("aktaPlotArea").innerHTML = "";
     refreshAktaPlaceholder();
-    toast("解析完成");
+    if (okRuns.length) { toast(`解析完成：${okRuns.length} 个文件`); }
+    else { toast("全部文件解析失败", true); }
   } catch (err) { toast(err.message, true); }
 }
 
-function renderAktaChannels() {
-  const tbody = document.getElementById("aktaChannelList");
-  tbody.innerHTML = aktaChannels.map(ch => `
-    <tr>
-      <td><strong>${esc(ch.name)}</strong>${ch.data_type === "UV" ? ' <span style="color:#2166ac;font-size:11px">UV</span>' : ""}</td>
-      <td>${esc(ch.data_type)}</td>
-      <td>${esc(ch.unit)}</td>
-      <td>${ch.n_points}</td>
-      <td><button class="btn btn-sm btn-outline akta-pick" data-channel="${escAttr(ch.name)}">${aktaSelectedChannel === ch.name ? "✓ 选中" : "分析"}</button></td>
-    </tr>`).join("");
+function renderAktaRuns() {
+  const box = document.getElementById("aktaRunList");
+  if (!box) return;
+  box.innerHTML = aktaRuns.map((run, ri) => {
+    if (run.error) {
+      return `<div style="border:1px solid #f0c0c0;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;background:#fff7f7">
+        <strong style="color:#c0392b">${esc(run.name)}</strong>
+        <span style="color:#888;margin-left:8px">${esc(run.error)}</span>
+      </div>`;
+    }
+    const chOpts = run.channels.map(ch =>
+      `<option value="${escAttr(ch.name)}" ${ch.name === run.channel ? "selected" : ""}>${esc(ch.name)} (${esc(ch.data_type)}${ch.unit ? " " + esc(ch.unit) : ""}, ${ch.n_points}pts)</option>`).join("");
+    const evInfo = Object.entries(run.events || {}).map(([k, v]) => `${k}:${v}`).join(" ");
+    return `<div style="border:1px solid ${aktaCurrentRun === ri ? "#4361ee" : "#e0e0e0"};border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;background:${aktaCurrentRun === ri ? "#f0f5ff" : "#fff"}" data-run="${ri}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <strong style="cursor:pointer" class="akta-run-select">${esc(run.name)}</strong>
+        <span style="color:#888;font-size:12px">${evInfo || "无事件"}</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center">
+        <select class="akta-run-channel" data-run="${ri}" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:12px">${chOpts}</select>
+        <button class="btn btn-sm btn-outline akta-run-plot" data-run="${ri}">📈</button>
+      </div>
+    </div>`;
+  }).join("");
 }
 
-// 通道按钮事件委托：用 data-channel 传参（onclick 内联字符串对含引号通道名不安全）。
-// ⚠ 与 bli 样本按钮同因：app.js 全局共享，用 document 级委托 + closest 定位，元素缺省时不报错。
+// 文件/通道列表的事件委托（document 级，缺省页面不报错）
 document.addEventListener("click", function (e) {
-  const btn = e.target.closest(".akta-pick");
-  if (!btn) return;
-  aktaSelectChannel(btn.dataset.channel);
+  const sel = e.target.closest(".akta-run-select");
+  if (sel) {
+    const ri = parseInt(sel.closest("[data-run]").dataset.run, 10);
+    aktaCurrentRun = ri;
+    renderAktaRuns();
+    aktaPlot();
+    return;
+  }
+  const plotBtn = e.target.closest(".akta-run-plot");
+  if (plotBtn) {
+    const ri = parseInt(plotBtn.dataset.run, 10);
+    aktaCurrentRun = ri;
+    aktaPlot();
+    return;
+  }
+  const pick = e.target.closest(".akta-pick");
+  if (pick) {
+    aktaSelectChannel(pick.dataset.channel);
+    return;
+  }
+});
+document.addEventListener("change", function (e) {
+  const sel = e.target.closest(".akta-run-channel");
+  if (!sel) return;
+  const ri = parseInt(sel.dataset.run, 10);
+  if (aktaRuns[ri]) aktaRuns[ri].channel = sel.value;
 });
 
 function aktaSelectChannel(name) {
-  aktaSelectedChannel = name;
-  renderAktaChannels();
+  const run = aktaRuns[aktaCurrentRun];
+  if (run) run.channel = name;
+  renderAktaRuns();
   aktaPlot();
 }
 
-function aktaParams() {
+function aktaParams(run) {
+  run = run || aktaRuns[aktaCurrentRun];
   return {
-    session_id: aktaSession,
-    channel: aktaSelectedChannel,
+    session_id: run.session_id,
+    channel: run.channel,
     xmin: parseFloat(document.getElementById("aktaXmin").value || "0"),
     xmax: document.getElementById("aktaXmax").value,
     min_height: parseFloat(document.getElementById("aktaMinHeight").value || "5"),
     smooth_window: parseInt(document.getElementById("aktaSmooth").value || "11", 10),
     show_events: document.getElementById("aktaShowEvents").checked,
+    highlight_frac: document.getElementById("aktaHighlightFrac").checked,
+    target_peak_idx: run.target_peak || 0,
   };
 }
 
 async function aktaPlot() {
-  if (!aktaSession || !aktaSelectedChannel) { toast("请先选择通道", true); return; }
+  const run = aktaRuns[aktaCurrentRun];
+  if (!run || run.error || !run.channel) { toast("请先选择文件/通道", true); return; }
   try {
-    const r = await API.post("/api/akta/plot", aktaParams());
+    const r = await API.post("/api/akta/plot", aktaParams(run));
     document.getElementById("aktaPlotArea").innerHTML =
       `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+        <div style="font-weight:600;margin-bottom:6px;font-size:14px">${esc(run.name)} — ${esc(run.channel)}</div>
         <img src="${r.image}" style="max-width:100%" alt="AKTA 峰图">
       </div>`;
-    renderAktaPeaks(r.peaks || []);
+    renderAktaPeaks(r.peaks || [], run);
   } catch (err) { toast(err.message, true); }
 }
 
-function renderAktaPeaks(peaks) {
+// 批量出图：所有成功 run 逐一出图，纵向排列
+async function aktaBatchPlot() {
+  const okRuns = aktaRuns.filter(r => !r.error && r.channel);
+  if (!okRuns.length) { toast("没有可出图的文件", true); return; }
+  const area = document.getElementById("aktaPlotArea");
+  area.innerHTML = `<p style="color:#888;font-size:13px">正在批量生成 ${okRuns.length} 张图...</p>`;
+  let html = "";
+  for (const run of okRuns) {
+    try {
+      const r = await API.post("/api/akta/plot", aktaParams(run));
+      html += `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:12px">
+        <div style="font-weight:600;margin-bottom:6px;font-size:14px">${esc(run.name)} — ${esc(run.channel)}</div>
+        <img src="${r.image}" style="max-width:100%" alt="${esc(run.name)}">
+      </div>`;
+    } catch (err) {
+      html += `<div style="border:1px solid #f0c0c0;border-radius:8px;padding:8px;margin-bottom:8px;color:#c0392b;font-size:13px">${esc(run.name)}: ${esc(err.message)}</div>`;
+    }
+  }
+  area.innerHTML = html;
+}
+
+function renderAktaPeaks(peaks, run) {
   const wrap = document.getElementById("aktaPeakTableWrap");
   const tbody = document.querySelector("#aktaPeakTable tbody");
   if (!wrap || !tbody) return;
@@ -2616,8 +2688,9 @@ function renderAktaPeaks(peaks) {
     return;
   }
   wrap.classList.remove("hidden");
+  const cur = run.target_peak || 0;
   tbody.innerHTML = peaks.map((p, i) => `
-    <tr>
+    <tr style="${i === cur ? "background:#f0f5ff" : ""}">
       <td>${i + 1}</td>
       <td>${p.apex_vol}</td>
       <td>${p.height}</td>
@@ -2625,16 +2698,29 @@ function renderAktaPeaks(peaks) {
       <td>${p.start_vol}</td>
       <td>${p.end_vol}</td>
       <td>${p.half_width}</td>
+      <td><button class="btn btn-sm btn-outline akta-peak-target" data-run-idx="${aktaCurrentRun}" data-peak="${i}">${i === cur ? "✓ 目标" : "目标"}</button></td>
     </tr>`).join("");
 }
 
+// 峰表点「目标」→ 切换阴影跟随的峰并重出图（document 级委托）
+document.addEventListener("click", function (e) {
+  const btn = e.target.closest(".akta-peak-target");
+  if (!btn) return;
+  const ri = parseInt(btn.dataset.runIdx, 10);
+  const pi = parseInt(btn.dataset.peak, 10);
+  if (aktaRuns[ri]) { aktaRuns[ri].target_peak = pi; aktaCurrentRun = ri; }
+  renderAktaRuns();
+  aktaPlot();
+});
+
 async function aktaExport() {
-  if (!aktaSession || !aktaSelectedChannel) { toast("请先选择通道", true); return; }
+  const run = aktaRuns[aktaCurrentRun];
+  if (!run || run.error || !run.channel) { toast("请先选择文件/通道", true); return; }
   try {
     const r = await fetch("/api/akta/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(aktaParams()),
+      body: JSON.stringify(aktaParams(run)),
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
@@ -2643,7 +2729,7 @@ async function aktaExport() {
     const blob = await r.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `akta_peaks_${aktaSelectedChannel.replace(/[^A-Za-z0-9_]/g, "_")}.xlsx`;
+    a.download = `akta_peaks_${run.channel.replace(/[^A-Za-z0-9_]/g, "_")}.xlsx`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2652,17 +2738,19 @@ async function aktaExport() {
   } catch (err) { toast(err.message, true); }
 }
 
+
 async function aktaSaveExp() {
-  if (!aktaSession || !aktaSelectedChannel) { toast("请先选择通道", true); return; }
+  const run = aktaRuns[aktaCurrentRun];
+  if (!run || run.error || !run.channel) { toast("请先选择文件/通道", true); return; }
   const autoName = await getAutoName("AKTA");
   const title = prompt("实验名称:", autoName || "AKTA 峰图");
   if (!title) return;
   try {
     await API.post("/api/akta/save", {
-      ...aktaParams(),
+      ...aktaParams(run),
       title,
       date: todayLocal(),
-      source: document.getElementById("aktaFile").files[0]?.name || "",
+      source: run.name || "",
     });
     toast("已保存为实验记录（含原始曲线快照）");
   } catch (err) { toast(err.message, true); }

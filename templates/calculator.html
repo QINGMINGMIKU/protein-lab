@@ -223,22 +223,20 @@
 <!-- ══════════════════════════════════════════════════ -->
 <div id="tab-akta" class="tab-panel hidden">
   <div class="toolbar" style="flex-wrap:wrap">
-    <input type="file" id="aktaFile" accept=".zip" onchange="uploadAktaFile()" style="display:none">
-    <button class="btn btn-outline" onclick="document.getElementById('aktaFile').click()">📁 上传 AKTA Unicorn zip</button>
+    <input type="file" id="aktaFile" accept=".zip" multiple onchange="uploadAktaFile()" style="display:none">
+    <button class="btn btn-outline" onclick="document.getElementById('aktaFile').click()">📁 上传 AKTA Unicorn zip（可多选）</button>
     <span id="aktaMeta" style="font-size:13px;color:#888;margin-left:8px"></span>
   </div>
 
   <div id="aktaAnalyzed" class="hidden" style="margin-top:12px">
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px">
-      <!-- 左侧：通道列表 -->
+      <!-- 左侧：文件 × 通道列表（批量） -->
       <div class="calc-card" style="padding:12px;min-width:0">
-        <h3 style="margin-bottom:8px">通道</h3>
-        <div class="table-scroll" style="max-height:300px;overflow-y:auto">
-          <table class="calc-table">
-            <thead><tr><th>通道</th><th>类型</th><th>单位</th><th>点数</th><th></th></tr></thead>
-            <tbody id="aktaChannelList"></tbody>
-          </table>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="margin:0">文件 / 通道</h3>
+          <button class="btn btn-sm btn-primary" onclick="aktaBatchPlot()">🖼 批量出图</button>
         </div>
+        <div id="aktaRunList"></div>
         <div style="margin-top:8px;font-size:13px;color:#555">
           <span id="aktaEventsInfo"></span>
         </div>
@@ -260,9 +258,14 @@
             <input type="number" id="aktaSmooth" value="11" min="3" step="2" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
           </label>
         </div>
-        <label style="font-size:13px;margin-top:8px;display:inline-flex;align-items:center;gap:5px">
-          <input type="checkbox" id="aktaShowEvents" checked> 标注 Fraction 事件
-        </label>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0">
+            <input type="checkbox" id="aktaHighlightFrac" checked> 高亮目标峰 frac 阴影
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0">
+            <input type="checkbox" id="aktaShowEvents"> 显示 frac 线条
+          </label>
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
           <button class="btn btn-primary" onclick="aktaPlot()">📈 峰图</button>
           <button class="btn btn-outline" onclick="aktaExport()">📊 导出峰表</button>
@@ -273,12 +276,12 @@
     <!-- 峰表 -->
     <div id="aktaPeakTableWrap" class="hidden" style="margin-top:12px">
       <div class="calc-card" style="padding:12px">
-        <h3 style="margin-bottom:8px">检测到的峰</h3>
+        <h3 style="margin-bottom:8px">检测到的峰（点「目标」切换阴影跟随的峰）</h3>
         <div class="table-scroll">
           <table class="calc-table" id="aktaPeakTable">
             <thead><tr>
               <th>#</th><th>峰位 (mL)</th><th>峰高 (mAU)</th><th>面积 (mAU·mL)</th>
-              <th>起 (mL)</th><th>止 (mL)</th><th>半高宽 (mL)</th>
+              <th>起 (mL)</th><th>止 (mL)</th><th>半高宽 (mL)</th><th>阴影</th>
             </tr></thead>
             <tbody></tbody>
           </table>

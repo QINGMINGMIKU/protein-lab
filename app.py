@@ -1364,51 +1364,64 @@ def _akta_get_session(session_id: str):
 
 @app.route("/api/akta/analyze", methods=["POST"])
 def api_akta_analyze():
-    """上传 AKTA Unicorn zip → 解析 → 返回通道摘要 + 事件摘要 + session_id。"""
-    if "file" not in request.files:
-        return jsonify({"error": "请上传 AKTA Unicorn zip 文件"}), 400
-    f = request.files["file"]
-    fd, tmp = tempfile.mkstemp(suffix=".zip")
-    os.close(fd)
-    f.save(tmp)
-    try:
-        from akta import parse_akta_zip, find_uv_channels
-        parsed = parse_akta_zip(tmp)
-    except Exception as e:
-        return jsonify({"error": f"解析失败: {e}"}), 400
-    finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+    """上传 AKTA Unicorn zip（支持多文件批量）→ 逐个解析 →
+    返回 {"runs": [{name, session_id, channels, uv_channels, events, meta}]}。"""
+    files = request.files.getlist("file") or ([request.files["file"]] if "file" in request.files else [])
+    if not files or not files[0].filename:
+        return jsonify({"error": "请上传 AKTA Unicorn zip 文件（可多选）"}), 400
 
-    channels = parsed.get("channels", {})
-    if not channels:
-        return jsonify({"error": "zip 中未解析出任何通道数据"}), 400
+    from akta import parse_akta_zip, find_uv_channels
+    runs = []
+    for f in files:
+        if not f.filename:
+            continue
+        fd, tmp = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        f.save(tmp)
+        try:
+            parsed = parse_akta_zip(tmp)
+        except Exception as e:
+            runs.append({"name": f.filename, "error": f"解析失败: {e}"})
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            continue
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
-    sid = _akta_new_session(parsed)
-    channel_list = []
-    for name, ch in channels.items():
-        channel_list.append({
-            "name": name, "data_type": ch.data_type, "unit": ch.unit,
-            "n_points": ch.n_points(),
-            "vol_start": round(float(ch.vols[0]), 3) if len(ch.vols) else 0,
-            "vol_end": round(float(ch.vols[-1]), 3) if len(ch.vols) else 0,
-            "amp_min": round(float(np.min(ch.amps)), 3) if len(ch.amps) else 0,
-            "amp_max": round(float(np.max(ch.amps)), 3) if len(ch.amps) else 0,
+        channels = parsed.get("channels", {})
+        if not channels:
+            runs.append({"name": f.filename, "error": "zip 中未解析出任何通道数据"})
+            continue
+
+        sid = _akta_new_session(parsed)
+        channel_list = []
+        for name, ch in channels.items():
+            channel_list.append({
+                "name": name, "data_type": ch.data_type, "unit": ch.unit,
+                "n_points": ch.n_points(),
+                "vol_start": round(float(ch.vols[0]), 3) if len(ch.vols) else 0,
+                "vol_end": round(float(ch.vols[-1]), 3) if len(ch.vols) else 0,
+                "amp_min": round(float(np.min(ch.amps)), 3) if len(ch.amps) else 0,
+                "amp_max": round(float(np.max(ch.amps)), 3) if len(ch.amps) else 0,
+            })
+        events_summary = {k: len(v) for k, v in parsed.get("events", {}).items()}
+        runs.append({
+            "name": f.filename,
+            "session_id": sid,
+            "channels": channel_list,
+            "uv_channels": find_uv_channels(channels),
+            "events": events_summary,
+            "meta": parsed.get("meta", {}),
         })
-    events_summary = {k: len(v) for k, v in parsed.get("events", {}).items()}
-    return jsonify({
-        "session_id": sid,
-        "channels": channel_list,
-        "uv_channels": find_uv_channels(channels),
-        "events": events_summary,
-        "meta": parsed.get("meta", {}),
-    })
+    return jsonify({"runs": runs})
 
 
 @app.route("/api/akta/plot", methods=["POST"])
 def api_akta_plot():
     """峰检测 + 峰图 PNG（base64）。参数：session_id / channel / xmin / xmax / min_height /
-    smooth_window / show_events。返回 {image, peaks}。"""
+    smooth_window / show_events（frac 竖线，默认关）/ highlight_frac（目标峰阴影，默认开）/
+    target_peak_idx（阴影跟随第几个峰，0=主峰）。返回 {image, peaks}。"""
     body = request.get_json() or {}
     sess = _akta_get_session(body.get("session_id", ""))
     if not sess:
@@ -1425,11 +1438,17 @@ def api_akta_plot():
         xmax = float(xmax) if xmax not in (None, "") else None
         min_height = float(body.get("min_height", 5) or 5)
         smooth = int(body.get("smooth_window", 11) or 11)
-        events = sess["events"].get("Fraction", []) if body.get("show_events", True) else None
+        events = sess["events"].get("Fraction", [])
         peaks = detect_peaks(ch, xmin=xmin, xmax=xmax, min_height=min_height,
                              smooth_window=smooth)
+        try:
+            target_peak_idx = int(body.get("target_peak_idx", 0) or 0)
+        except (TypeError, ValueError):
+            target_peak_idx = 0
         png = generate_akta_png(ch, peaks, events=events, xmin=xmin, xmax=xmax,
-                                show_events=bool(body.get("show_events", True)),
+                                show_events=bool(body.get("show_events", False)),
+                                highlight_frac=bool(body.get("highlight_frac", True)),
+                                target_peak_idx=target_peak_idx,
                                 smooth_window=smooth)
         return jsonify({
             "image": f"data:image/png;base64,{base64.b64encode(png).decode()}",

@@ -92,29 +92,58 @@ models.init_db()
 from app import app
 client = app.test_client()
 
-# 5a. analyze
+# 5a. analyze（多文件批量）
 with open(ZIP_1YPI, "rb") as f:
     resp = client.post("/api/akta/analyze",
                        data={"file": (f, "1YPI_32 002.zip")},
                        content_type="multipart/form-data")
 assert resp.status_code == 200, resp.status_code
 ana = resp.get_json()
-assert ana["session_id"] and ana["uv_channels"] == ["UV"], ana
-assert any(ch["name"] == "UV" for ch in ana["channels"])
-assert ana["events"].get("Fraction") == 31, ana["events"]
-sid = ana["session_id"]
-print("akta analyze OK:", len(ana["channels"]), "channels, events:", ana["events"])
+runs = ana["runs"]
+assert len(runs) == 1, runs
+r0 = runs[0]
+assert r0["session_id"] and r0["uv_channels"] == ["UV"], r0
+assert any(ch["name"] == "UV" for ch in r0["channels"])
+assert r0["events"].get("Fraction") == 31, r0["events"]
+sid = r0["session_id"]
+print("akta analyze OK:", len(r0["channels"]), "channels, events:", r0["events"])
 
-# 5b. plot：返回 image + peaks
+# 5a2. 批量：一次上传两个 zip → 两个 run
+with open(ZIP_1YPI, "rb") as f1, open(ZIP_PD1, "rb") as f2:
+    resp = client.post("/api/akta/analyze", data={
+        "file": [(f1, "1YPI_32 002.zip"), (f2, "PD1.zip")]},
+        content_type="multipart/form-data")
+assert resp.status_code == 200, resp.status_code
+runs2 = resp.get_json()["runs"]
+assert len(runs2) == 2, runs2
+assert runs2[0]["uv_channels"] == ["UV"] and runs2[1]["uv_channels"] == ["UV 1_280", "UV 2_260", "UV 3_230"]
+print("akta batch analyze OK:", [r["name"] for r in runs2])
+
+# 5b. plot：返回 image + peaks（默认无 frac 竖线、有目标峰阴影）
 resp = client.post("/api/akta/plot", json={
     "session_id": sid, "channel": "UV", "min_height": 5, "smooth_window": 11,
-    "show_events": True})
+    "show_events": False, "highlight_frac": True, "target_peak_idx": 0})
 assert resp.status_code == 200, resp.status_code
 plot = resp.get_json()
 assert plot["image"].startswith("data:image/png;base64,"), plot["image"][:40]
 base64.b64decode(plot["image"].split(",", 1)[1])
 assert plot["peaks"], "UV 通道应检出峰"
 print("akta plot OK:", len(plot["peaks"]), "peaks")
+
+# 5b2. fraction_ranges / target_fraction_span 纯函数：1YPI 的 frac 区间与阴影三元组
+from akta import fraction_ranges, target_fraction_span
+fr = fraction_ranges(r1["events"]["Fraction"], 36.4)
+assert len(fr) == 31, f"frac 区间数 {len(fr)} != 31"
+assert fr[0][0] < fr[1][0] and fr[-1][1] == 36.4, "区间应有序且末管延伸到 xmax"
+# 主峰 23.96 mL 落在某 frac 内；其前后各一管构成阴影三元组
+span = target_fraction_span(fr, 23.96, xmin=0, xmax=36.4)
+assert span["self"] and span["prev"] and span["next"], span
+assert span["self"][0] < span["self"][1] and span["self_label"], span
+assert span["prev"][1] <= span["self"][0] and span["next"][0] >= span["self"][1], "前后 frac 应紧邻自身"
+# 无事件 / 顶点不在 frac 内 → 安全返回 None
+assert target_fraction_span([], 5)["self"] is None
+assert target_fraction_span(fr, -1)["self"] is None
+print("fraction shadow span OK:", span["self"], "±", span["prev"][0], "..", span["next"][1])
 
 # 5c. export：返回 xlsx
 resp = client.post("/api/akta/export", json={
