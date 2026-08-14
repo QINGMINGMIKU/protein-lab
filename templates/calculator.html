@@ -232,9 +232,15 @@
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px">
       <!-- 左侧：文件 × 通道列表（批量） -->
       <div class="calc-card" style="padding:12px;min-width:0">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
           <h3 style="margin:0">文件 / 通道</h3>
-          <button class="btn btn-sm btn-primary" onclick="aktaBatchPlot()">🖼 批量出图</button>
+          <div style="display:flex;gap:6px;align-items:center">
+            <select id="aktaPlotMode" style="padding:5px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+              <option value="batch">分图（每文件一张）</option>
+              <option value="overlay">总图（所有曲线叠加）</option>
+            </select>
+            <button class="btn btn-sm btn-primary" onclick="aktaBatchPlot()">🖼 出图</button>
+          </div>
         </div>
         <div id="aktaRunList"></div>
         <div style="margin-top:8px;font-size:13px;color:#555">
@@ -258,12 +264,16 @@
             <input type="number" id="aktaSmooth" value="11" min="3" step="2" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
           </label>
         </div>
-        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0">
-            <input type="checkbox" id="aktaHighlightFrac" checked> 高亮目标峰 frac 阴影
+        <!-- frac 控件 + 归一化：一行，不换行 -->
+        <div style="margin-top:10px;display:flex;gap:12px;align-items:center;flex-wrap:nowrap;white-space:nowrap">
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
+            <input type="checkbox" id="aktaHighlightFrac" checked> frac 阴影
           </label>
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0">
-            <input type="checkbox" id="aktaShowEvents"> 显示 frac 线条
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
+            <input type="checkbox" id="aktaShowEvents"> frac 线条
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
+            <input type="checkbox" id="aktaNormalize"> 归一化
           </label>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">

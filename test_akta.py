@@ -130,6 +130,30 @@ base64.b64decode(plot["image"].split(",", 1)[1])
 assert plot["peaks"], "UV 通道应检出峰"
 print("akta plot OK:", len(plot["peaks"]), "peaks")
 
+# 5b1. normalize=True 归一化图 + 总图 overlay
+resp = client.post("/api/akta/plot", json={
+    "session_id": sid, "channel": "UV", "min_height": 5, "smooth_window": 11,
+    "normalize": True})
+assert resp.status_code == 200, resp.status_code
+assert resp.get_json()["image"].startswith("data:image/png;base64,")
+print("akta plot normalize OK")
+
+# 总图：同一 zip 的 UV + Cond 两通道叠加（API 层面 <2 文件时用两通道验证路径）
+resp = client.post("/api/akta/overlay", json={
+    "runs": [{"session_id": sid, "channel": "UV"},
+             {"session_id": sid, "channel": "Cond"}],
+    "min_height": 5, "smooth_window": 11, "normalize": True})
+assert resp.status_code == 200, (resp.status_code, resp.get_json())
+ov = resp.get_json()
+assert ov["image"].startswith("data:image/png;base64,"), ov["image"][:40]
+print("akta overlay OK:", len(ov["image"]) // 100, "xx base64")
+
+# 总图：单通道 → 400（至少 2 个文件/通道）
+resp = client.post("/api/akta/overlay", json={
+    "runs": [{"session_id": sid, "channel": "UV"}]})
+assert resp.status_code == 400
+print("akta overlay guard OK")
+
 # 5b2. fraction_ranges / target_fraction_span 纯函数：1YPI 的 frac 区间与阴影三元组
 from akta import fraction_ranges, target_fraction_span
 fr = fraction_ranges(r1["events"]["Fraction"], 36.4)

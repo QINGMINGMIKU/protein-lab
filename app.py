@@ -1438,7 +1438,8 @@ def api_akta_analyze():
 def api_akta_plot():
     """峰检测 + 峰图 PNG（base64）。参数：session_id / channel / xmin / xmax / min_height /
     smooth_window / show_events（frac 竖线，默认关）/ highlight_frac（目标峰阴影，默认开）/
-    target_peak_idx（阴影跟随第几个峰，0=主峰）。返回 {image, peaks}。"""
+    target_peak_idx（阴影跟随第几个峰，0=主峰）/ normalize（min-max 归一化，默认关）。
+    返回 {image, peaks}。"""
     body = request.get_json() or {}
     sess = _akta_get_session(body.get("session_id", ""))
     if not sess:
@@ -1455,6 +1456,7 @@ def api_akta_plot():
         xmax = float(xmax) if xmax not in (None, "") else None
         min_height = float(body.get("min_height", 5) or 5)
         smooth = int(body.get("smooth_window", 11) or 11)
+        normalize = bool(body.get("normalize", False))
         events = sess["events"].get("Fraction", [])
         peaks = detect_peaks(ch, xmin=xmin, xmax=xmax, min_height=min_height,
                              smooth_window=smooth)
@@ -1472,6 +1474,7 @@ def api_akta_plot():
                                 highlight_frac=bool(body.get("highlight_frac", True)),
                                 target_peak_idx=target_peak_idx,
                                 smooth_window=smooth,
+                                normalize=normalize,
                                 sample_name=sample_name)
         return jsonify({
             "image": f"data:image/png;base64,{base64.b64encode(png).decode()}",
@@ -1479,6 +1482,52 @@ def api_akta_plot():
         })
     except Exception as e:
         return jsonify({"error": f"峰图生成失败: {e}"}), 400
+
+
+@app.route("/api/akta/overlay", methods=["POST"])
+def api_akta_overlay():
+    """总图：把多个 session（zip）的指定通道平滑曲线叠在一张图。
+    参数：runs: [{session_id, channel}], xmin/xmax/smooth_window/normalize/show_events。
+    返回 {image}。"""
+    body = request.get_json() or {}
+    runs_spec = body.get("runs") or []
+    if not runs_spec:
+        return jsonify({"error": "请选择至少一个文件"}), 400
+    try:
+        import base64
+        from akta import generate_akta_overlay_png
+        xmin = float(body.get("xmin", 0) or 0)
+        xmax = body.get("xmax")
+        xmax = float(xmax) if xmax not in (None, "") else None
+        smooth = int(body.get("smooth_window", 11) or 11)
+        normalize = bool(body.get("normalize", False))
+        show_events = bool(body.get("show_events", False))
+
+        channels, labels, events_union = [], [], []
+        for spec in runs_spec:
+            sess = _akta_get_session(spec.get("session_id", ""))
+            if not sess:
+                continue
+            ch = sess["channels"].get(spec.get("channel", ""))
+            if ch is None:
+                continue
+            channels.append(ch)
+            src = sess.get("source_name") or ""
+            labels.append(os.path.splitext(os.path.basename(src))[0] if src else ch.name)
+            events_union.extend(sess["events"].get("Fraction", []))
+        if not channels:
+            return jsonify({"error": "所选文件/通道均无效"}), 400
+        if len(channels) < 2:
+            return jsonify({"error": "总图至少需要 2 个文件的曲线"}), 400
+
+        png = generate_akta_overlay_png(
+            channels, events=events_union if show_events else None,
+            xmin=xmin, xmax=xmax, show_events=show_events,
+            smooth_window=smooth, normalize=normalize, labels=labels,
+            title="Overlay (%d runs)" % len(channels))
+        return jsonify({"image": f"data:image/png;base64,{base64.b64encode(png).decode()}"})
+    except Exception as e:
+        return jsonify({"error": f"总图生成失败: {e}"}), 400
 
 
 @app.route("/api/akta/export", methods=["POST"])

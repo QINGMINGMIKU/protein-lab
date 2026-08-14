@@ -374,6 +374,21 @@ def target_fraction_span(fractions: List[Tuple[float, float, str]], apex_vol: fl
 #  绘图
 # ═══════════════════════════════════════════════════════════
 
+def _normalize_amps(amps, vols, xmin, xmax, normalize):
+    """可选 min-max 归一化到 [0,1]（对齐 REF 脚本 --no-normalize 默认行为）。
+    normalize=False → 原样返回。"""
+    if not normalize:
+        return amps
+    mask = (vols >= xmin) & (vols <= xmax)
+    seg = amps[mask]
+    if len(seg) == 0:
+        return amps
+    lo, hi = float(np.min(seg)), float(np.max(seg))
+    if hi - lo < 1e-12:
+        return np.zeros_like(amps)
+    return (amps - lo) / (hi - lo)
+
+
 def generate_akta_png(channel: Channel, peaks: List[Peak], *,
                       events: Optional[List[Tuple[float, str]]] = None,
                       xmin: float = 0.0, xmax: Optional[float] = None,
@@ -381,6 +396,7 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
                       highlight_frac: bool = True,    # 目标峰 frac 矩形阴影（默认开）
                       target_peak_idx: int = 0,       # 阴影跟随哪个峰（默认主峰/第一个）
                       smooth_window: int = 11,
+                      normalize: bool = False,        # min-max 归一化到 [0,1]（区间内）
                       sample_name: str = "",          # 图例 smooth 条目名 + 图标题（默认 = 压缩包名）
                       dpi: int = 200) -> bytes:
     """生成峰图 PNG：UV 轨迹（平滑叠加）+ 基线 + 峰标注。
@@ -388,6 +404,7 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
     - highlight_frac=True：目标峰自身 frac + 前后各 1 个 frac 画矩形背景阴影
       （中间深、两边浅；目标峰 = peaks[target_peak_idx]）
     - show_events=True：画 Fraction 事件竖线（默认关闭）
+    - normalize=True：区间内 min-max 归一化到 [0,1]（对齐 REF 脚本默认归一化行为）
     - sample_name：图例只保留 smooth 一条（raw 灰线为背景不占图例），
       条目名与图标题都用它；缺省回退通道名。
     """
@@ -402,7 +419,9 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
     name = (sample_name or "").strip() or channel.name or ""
 
     vols = np.asarray(channel.vols, dtype=float)
-    amps = np.asarray(channel.amps, dtype=float)
+    amps = _normalize_amps(np.asarray(channel.amps, dtype=float), vols, xmin,
+                           xmax if xmax is not None else float(vols[-1]) if len(vols) else 0,
+                           normalize)
     if xmax is None:
         xmax = float(vols[-1]) if len(vols) else 0.0
 
@@ -464,6 +483,65 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
         ax.set_xlabel(f"Volume (mL)" + (f" — {channel.name}" if channel.name else ""))
         ax.set_ylabel(f"Signal ({channel.unit})" if channel.unit else "Signal")
         ax.set_title(name, fontweight="bold")
+        ax.legend(loc="upper right", fontsize=9)
+        ax.grid(True, alpha=0.15)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        return buf.getvalue()
+
+
+def generate_akta_overlay_png(channels: List[Channel], *,
+                              events: Optional[List[Tuple[float, str]]] = None,
+                              xmin: float = 0.0, xmax: Optional[float] = None,
+                              show_events: bool = False,
+                              smooth_window: int = 11,
+                              normalize: bool = False,
+                              labels: Optional[List[str]] = None,
+                              title: str = "",
+                              dpi: int = 200) -> bytes:
+    """总图：把多个通道（通常来自不同 zip 的同名 UV 通道）的平滑曲线叠在一张图上。
+
+    - 每个通道一条线，label 取 labels[i]（缺省用通道名），图例多条目
+    - normalize=True：各通道各自区间内 min-max 归一化到 [0,1] 再叠加（可跨文件对比）
+    - 峰不单独标注（重叠后无法区分）；frac 阴影不适用（多曲线共享），仅可选竖线
+    """
+    from fonts import setup_matplotlib_cjk
+    setup_matplotlib_cjk()
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from bli import COLORS, PLOT_STYLE
+
+    if not channels:
+        raise ValueError("无通道可叠加")
+    if xmax is None:
+        xmax = max(float(np.max(c.vols)) if len(c.vols) else 0 for c in channels)
+
+    with plt.rc_context(PLOT_STYLE):
+        fig, ax = plt.subplots(figsize=(11, 6.5))
+        for i, ch in enumerate(channels):
+            vols = np.asarray(ch.vols, dtype=float)
+            amps = _normalize_amps(np.asarray(ch.amps, dtype=float), vols, xmin, xmax, normalize)
+            mask = (vols >= xmin) & (vols <= xmax)
+            v, a = vols[mask], amps[mask]
+            if len(v) < 2:
+                continue
+            lbl = (labels[i] if labels and i < len(labels) else "") or ch.name
+            ax.plot(v, _smooth(a, smooth_window), color=COLORS[i % len(COLORS)],
+                    linewidth=2.2, alpha=0.92, label=lbl)
+
+        if show_events and events:
+            for vol, txt in events:
+                if xmin <= vol <= xmax:
+                    ax.axvline(vol, color="#5aae61", linestyle="--", linewidth=1.0, alpha=0.6)
+
+        ax.set_xlim(xmin, xmax)
+        ax.set_xlabel("Volume (mL)")
+        ax.set_ylabel("Signal (normalized)" if normalize else "Signal (mAU)")
+        ax.set_title(title or "Overlay", fontweight="bold")
         ax.legend(loc="upper right", fontsize=9)
         ax.grid(True, alpha=0.15)
 

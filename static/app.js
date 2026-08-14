@@ -2639,6 +2639,7 @@ function aktaParams(run) {
     smooth_window: parseInt(document.getElementById("aktaSmooth").value || "11", 10),
     show_events: document.getElementById("aktaShowEvents").checked,
     highlight_frac: document.getElementById("aktaHighlightFrac").checked,
+    normalize: document.getElementById("aktaNormalize").checked,
     target_peak_idx: run.target_peak || 0,
   };
 }
@@ -2657,11 +2658,35 @@ async function aktaPlot() {
   } catch (err) { toast(err.message, true); }
 }
 
-// 批量出图：所有成功 run 逐一出图，纵向排列
+// 出图入口：分图模式 = 每文件一张；总图模式 = 所有曲线叠一张
 async function aktaBatchPlot() {
   const okRuns = aktaRuns.filter(r => !r.error && r.channel);
   if (!okRuns.length) { toast("没有可出图的文件", true); return; }
+  const mode = document.getElementById("aktaPlotMode").value;
   const area = document.getElementById("aktaPlotArea");
+  const normOn = document.getElementById("aktaNormalize").checked;
+
+  if (mode === "overlay") {
+    if (okRuns.length < 2) { toast("总图至少需要 2 个文件", true); return; }
+    area.innerHTML = `<p style="color:#888;font-size:13px">正在生成总图（${okRuns.length} 个文件）...</p>`;
+    try {
+      const r = await API.post("/api/akta/overlay", {
+        runs: okRuns.map(run => ({ session_id: run.session_id, channel: run.channel })),
+        xmin: parseFloat(document.getElementById("aktaXmin").value || "0"),
+        xmax: document.getElementById("aktaXmax").value,
+        smooth_window: parseInt(document.getElementById("aktaSmooth").value || "11", 10),
+        normalize: normOn,
+        show_events: document.getElementById("aktaShowEvents").checked,
+      });
+      area.innerHTML = `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+        <div style="font-weight:600;margin-bottom:6px;font-size:14px">总图（${okRuns.length} 个文件${normOn ? " · 归一化" : ""}）</div>
+        <img src="${r.image}" style="max-width:100%" alt="AKTA 总图">
+      </div>`;
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+
+  // 分图模式
   area.innerHTML = `<p style="color:#888;font-size:13px">正在批量生成 ${okRuns.length} 张图...</p>`;
   let html = "";
   for (const run of okRuns) {
