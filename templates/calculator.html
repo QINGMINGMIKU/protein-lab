@@ -189,29 +189,29 @@
             <input type="checkbox" id="bliNoCutoff"> 不过滤死曲线
           </label>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
-          <button class="btn btn-primary" onclick="bliPlot()">📈 传感器图</button>
-          <button class="btn btn-outline" onclick="bliPlotSeparate()">📈 每样本出图</button>
-        </div>
       </div>
     </div>
 
+    <!-- 动作栏：出图 / 拟合（统一 tab-actions，对齐酶活 tab 主线操作流） -->
+    <div class="tab-actions">
+      <button class="btn btn-primary" onclick="bliPlot()">📈 传感器图</button>
+      <button class="btn btn-outline" onclick="bliPlotSeparate()">📈 每样本出图</button>
+      <button class="btn btn-outline" onclick="bliFitSelected()">🧪 拟合选中样本</button>
+    </div>
+
     <!-- KD 拟合结果表 -->
-    <div style="margin-top:12px" class="hidden" id="bliKdWrap">
+    <div style="margin-top:16px" class="hidden" id="bliKdWrap">
       <div class="calc-card" style="padding:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <h3 style="margin:0">KD 拟合结果（5 方法）</h3>
-          <button class="btn btn-primary btn-sm" onclick="bliFitSelected()">🧪 拟合选中样本</button>
-        </div>
+        <h3 style="margin:0 0 8px">KD 拟合结果（5 方法）</h3>
         <div id="bliKdTables"></div>
       </div>
     </div>
 
     <!-- 传感器图 -->
-    <div id="bliPlotArea" style="margin-top:12px"></div>
+    <div id="bliPlotArea" style="margin-top:16px"></div>
 
     <!-- 保存 -->
-    <div class="tab-actions" style="margin-top:12px">
+    <div class="tab-actions">
       <input type="text" id="bliAnaExpName" placeholder="实验名称（可选）" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
       <button class="btn btn-outline" onclick="bliSaveExp()">💾 保存为实验（含原始曲线）</button>
     </div>
@@ -232,16 +232,7 @@
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px">
       <!-- 左侧：文件 × 通道列表（批量） -->
       <div class="calc-card" style="padding:12px;min-width:0">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
-          <h3 style="margin:0">文件 / 通道</h3>
-          <div style="display:flex;gap:6px;align-items:center">
-            <select id="aktaPlotMode" style="padding:5px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
-              <option value="batch">分图（每文件一张）</option>
-              <option value="overlay">总图（所有曲线叠加）</option>
-            </select>
-            <button class="btn btn-sm btn-primary" onclick="aktaBatchPlot()">🖼 出图</button>
-          </div>
-        </div>
+        <h3 style="margin:0 0 8px">文件 / 通道</h3>
         <div id="aktaRunList"></div>
         <div style="margin-top:8px;font-size:13px;color:#555">
           <span id="aktaEventsInfo"></span>
@@ -276,15 +267,22 @@
             <input type="checkbox" id="aktaNormalize"> 归一化
           </label>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
-          <button class="btn btn-primary" onclick="aktaPlot()">📈 峰图</button>
-          <button class="btn btn-outline" onclick="aktaExport()">📊 导出峰表</button>
-        </div>
       </div>
     </div>
 
+    <!-- 动作栏：出图模式 + 出图 / 峰图 / 导出（统一 tab-actions，对齐酶活 tab 主线操作流） -->
+    <div class="tab-actions">
+      <select id="aktaPlotMode" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+        <option value="batch">分图（每文件一张）</option>
+        <option value="overlay">总图（所有曲线叠加）</option>
+      </select>
+      <button class="btn btn-primary" onclick="aktaBatchPlot()">🖼 出图</button>
+      <button class="btn btn-outline" onclick="aktaPlot()">📈 峰图</button>
+      <button class="btn btn-outline" onclick="aktaExport()">📊 导出峰表</button>
+    </div>
+
     <!-- 峰表 -->
-    <div id="aktaPeakTableWrap" class="hidden" style="margin-top:12px">
+    <div id="aktaPeakTableWrap" class="hidden" style="margin-top:16px">
       <div class="calc-card" style="padding:12px">
         <h3 style="margin-bottom:8px">检测到的峰（点「目标」切换阴影跟随的峰）</h3>
         <div class="table-scroll">
@@ -300,10 +298,10 @@
     </div>
 
     <!-- 峰图 -->
-    <div id="aktaPlotArea" style="margin-top:12px"></div>
+    <div id="aktaPlotArea" style="margin-top:16px"></div>
 
     <!-- 保存 -->
-    <div class="tab-actions" style="margin-top:12px">
+    <div class="tab-actions">
       <input type="text" id="aktaExpName" placeholder="实验名称（可选）" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
       <button class="btn btn-outline" onclick="aktaSaveExp()">💾 保存为实验（含原始曲线）</button>
     </div>
