@@ -28,6 +28,21 @@ app = Flask(__name__,
             template_folder=paths.resource_path("templates"),
             static_folder=paths.resource_path("static"))
 
+
+# ── 静态资源版本号（缓存破坏）───────────────────────────────
+# 取 app.js / style.css 的修改时间戳做 ?v= 参数：改前端代码后浏览器自动拉新文件，
+# 不再被旧缓存坑（新增 tab 的按钮调新函数，旧 JS 缓存里没有 → 点击无效）。
+@app.context_processor
+def inject_static_version():
+    import time as _time
+    try:
+        app_js = os.path.getmtime(os.path.join(app.static_folder, "app.js"))
+        style_css = os.path.getmtime(os.path.join(app.static_folder, "style.css"))
+        version = str(int(max(app_js, style_css)))
+    except OSError:
+        version = "0"
+    return {"static_version": version}
+
 # ── Undo 栈（内存中，最多 20 条）──────────────────────────
 _undo_stack = []
 
@@ -1261,7 +1276,7 @@ def api_bli_save():
     params = {
         "source": body.get("source", ""),
         "smooth_window": int(body.get("smooth_window", 31) or 0),
-        "fit_overlay": bool(body.get("fit_overlay")),
+        "fit_overlay": bool(body.get("fit_overlay") or body.get("fit")),
         "t_assoc": _bli_opt_float(body.get("t_assoc")),
         "t_dissoc": _bli_opt_float(body.get("t_dissoc")),
         "n_concs": int(body.get("n_concs", 8) or 8),

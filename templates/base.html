@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Protein Lab</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
 </head>
 <body>
 <nav class="topbar">
@@ -18,6 +18,6 @@
 <main>
 {% block content %}{% endblock %}
 </main>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ static_version }}"></script>
 </body>
 </html>

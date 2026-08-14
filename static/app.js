@@ -523,14 +523,18 @@ document.addEventListener("click", function (e) {
   if (tab.dataset.tab === "dilution") loadBliImportExps();
   if (tab.dataset.tab === "weblogo") { loadWeblogoProteins(); restoreWeblogo(); }
   if (tab.dataset.tab === "enzyme") loadEnzymeProteinList();
-  if (tab.dataset.tab === "bli") refreshBliPlaceholder();
-  if (tab.dataset.tab === "akta") refreshAktaPlaceholder();
   refreshAutoNamePlaceholders();
 });
 
 // 自动命名占位提示：输入框显示系统默认名（留空即用它）
 async function refreshAutoNamePlaceholders() {
-  const targets = { concExpName: "浓度测定", bliExpName: "BLI", weblogoExpName: "Weblogo" };
+  const targets = {
+    concExpName: "浓度测定",
+    bliExpName: "BLI",        // BLI 浓度梯度 tab
+    bliAnaExpName: "BLI",     // BLI 分析 tab（v0.0.8）
+    aktaExpName: "AKTA",      // AKTA 峰图 tab（v0.0.9）
+    weblogoExpName: "Weblogo",
+  };
   for (const [id, type] of Object.entries(targets)) {
     const el = document.getElementById(id);
     if (!el) continue;
@@ -2407,9 +2411,16 @@ function renderBliSamples() {
       <td><strong>${esc(s.sample)}</strong></td>
       <td>${s.n_curves}</td>
       <td style="font-size:12px;color:#666">${(s.concs || []).map(c => formatConc(c, "nM")).join(" / ")}</td>
-      <td><button class="btn btn-sm btn-outline" onclick="bliSelectSample('${esc(s.sample)}')">${bliSelectedSample === s.sample ? "✓ 选中" : "拟合"}</button></td>
+      <td><button class="btn btn-sm btn-outline bli-pick" data-sample="${escAttr(s.sample)}">${bliSelectedSample === s.sample ? "✓ 选中" : "拟合"}</button></td>
     </tr>`).join("");
 }
+
+// 样本按钮事件委托：用 data-sample 传参（onclick 内联字符串对含引号样本名不安全）
+document.getElementById("bliSampleList").addEventListener("click", (e) => {
+  const btn = e.target.closest(".bli-pick");
+  if (!btn) return;
+  bliSelectSample(btn.dataset.sample);
+});
 
 function bliSelectSample(sid) {
   bliSelectedSample = sid;
@@ -2504,13 +2515,9 @@ async function bliSaveExp() {
   } catch (err) { toast(err.message, true); }
 }
 
-function refreshBliPlaceholder() {
-  const el = document.getElementById("bliAnaExpName");
-  if (!el) return;
-  getAutoName("BLI").then(auto => {
-    el.placeholder = auto ? `实验名称（默认 ${auto}）` : "实验名称（可选）";
-  });
-}
+// 兼容入口：BLI/AKTA 上传后刷新各自输入框占位（统一走 refreshAutoNamePlaceholders）
+function refreshBliPlaceholder() { refreshAutoNamePlaceholders(); }
+function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
 
 // ═════════════════════════════════════════════════════
 //  Tab: AKTA 峰图整理（v0.0.9）
@@ -2555,9 +2562,16 @@ function renderAktaChannels() {
       <td>${esc(ch.data_type)}</td>
       <td>${esc(ch.unit)}</td>
       <td>${ch.n_points}</td>
-      <td><button class="btn btn-sm btn-outline" onclick="aktaSelectChannel('${esc(ch.name)}')">${aktaSelectedChannel === ch.name ? "✓ 选中" : "分析"}</button></td>
+      <td><button class="btn btn-sm btn-outline akta-pick" data-channel="${escAttr(ch.name)}">${aktaSelectedChannel === ch.name ? "✓ 选中" : "分析"}</button></td>
     </tr>`).join("");
 }
+
+// 通道按钮事件委托：用 data-channel 传参（onclick 内联字符串对含引号通道名不安全）
+document.getElementById("aktaChannelList").addEventListener("click", (e) => {
+  const btn = e.target.closest(".akta-pick");
+  if (!btn) return;
+  aktaSelectChannel(btn.dataset.channel);
+});
 
 function aktaSelectChannel(name) {
   aktaSelectedChannel = name;
@@ -2651,13 +2665,7 @@ async function aktaSaveExp() {
   } catch (err) { toast(err.message, true); }
 }
 
-function refreshAktaPlaceholder() {
-  const el = document.getElementById("aktaExpName");
-  if (!el) return;
-  getAutoName("AKTA").then(auto => {
-    el.placeholder = auto ? `实验名称（默认 ${auto}）` : "实验名称（可选）";
-  });
-}
+function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
 
 // ═════════════════════════════════════════════════════
 //  Init
