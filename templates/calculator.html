@@ -151,13 +151,28 @@
   <!-- 解析后：样本列表 + 参数面板 -->
   <div id="bliAnalyzed" class="hidden" style="margin-top:12px">
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px">
-      <!-- 左侧：样本曲线摘要 -->
+      <!-- 左侧：样本曲线摘要 + 曲线勾选（勾选决定哪些曲线进入数据/拟合/导出） -->
       <div class="calc-card" style="padding:12px;min-width:0">
         <h3 style="margin-bottom:8px">样本</h3>
-        <div class="table-scroll" style="max-height:300px;overflow-y:auto">
+        <div class="table-scroll" style="max-height:150px;overflow-y:auto">
           <table class="calc-table">
             <thead><tr><th>Sample</th><th>曲线数</th><th>浓度 (nM)</th><th></th></tr></thead>
             <tbody id="bliSampleList"></tbody>
+          </table>
+        </div>
+        <h3 style="margin:10px 0 6px">
+          进入数据的曲线
+          <span id="bliCurveStats" style="font-weight:normal;font-size:12px;color:#888"></span>
+        </h3>
+        <div style="margin-bottom:6px;font-size:13px">
+          <label style="display:inline-flex;align-items:center;gap:4px;margin:0">
+            <input type="checkbox" id="bliCurveSelectAll"> 全选 / 清空
+          </label>
+        </div>
+        <div class="table-scroll" style="max-height:200px;overflow-y:auto">
+          <table class="calc-table">
+            <thead><tr><th style="width:28px"></th><th>曲线</th><th>样品</th><th>浓度 (nM)</th></tr></thead>
+            <tbody id="bliCurveList"></tbody>
           </table>
         </div>
       </div>
@@ -181,28 +196,36 @@
             <input type="text" id="bliNsSensor" placeholder="如 F8（非特异对照，留空不扣）" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
           </label>
         </div>
-        <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap">
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0">
+        <div style="margin-top:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;white-space:nowrap">
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
             <input type="checkbox" id="bliFit" checked> 叠加拟合虚线
           </label>
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:5px;margin:0">
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
             <input type="checkbox" id="bliNoCutoff"> 不过滤死曲线
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0" title="上传后自动截去结合起点（t_assoc）之前的基线区，默认开启">
+            <input type="checkbox" id="bliTrimStart" checked> 截去结合起点前基线
           </label>
         </div>
       </div>
     </div>
 
-    <!-- 动作栏：出图 / 拟合（统一 tab-actions，对齐酶活 tab 主线操作流） -->
+    <!-- 动作栏：出图模式 + 出图 / 拟合 / 导出（统一 tab-actions，对齐 AKTA 批量操作流） -->
     <div class="tab-actions">
-      <button class="btn btn-primary" onclick="bliPlot()">📈 传感器图</button>
-      <button class="btn btn-outline" onclick="bliPlotSeparate()">📈 每样本出图</button>
+      <select id="bliPlotMode" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+        <option value="overlay">总图（所有曲线叠加）</option>
+        <option value="separate">分图（每样本一图）</option>
+      </select>
+      <button class="btn btn-primary" onclick="bliPlot()">🖼 出图</button>
       <button class="btn btn-outline" onclick="bliFitSelected()">🧪 拟合选中样本</button>
+      <button class="btn btn-outline" onclick="bliExport()">📊 导出 Excel</button>
+      <button class="btn btn-outline" onclick="downloadBliPlot()">📥 下载 PNG</button>
     </div>
 
     <!-- KD 拟合结果表 -->
     <div style="margin-top:16px" class="hidden" id="bliKdWrap">
       <div class="calc-card" style="padding:12px">
-        <h3 style="margin:0 0 8px">KD 拟合结果（5 方法）</h3>
+        <h3 style="margin:0 0 8px">KD 拟合结果（5 方法 · 点样本行可单独重拟合）</h3>
         <div id="bliKdTables"></div>
       </div>
     </div>
@@ -284,6 +307,7 @@
       </select>
       <button class="btn btn-primary" onclick="aktaBatchPlot()">🖼 出图</button>
       <button class="btn btn-outline" onclick="aktaExport()">📊 导出峰表</button>
+      <button class="btn btn-outline" onclick="downloadAktaPlot()">📥 下载 PNG</button>
     </div>
 
     <!-- 峰表 -->

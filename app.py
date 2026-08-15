@@ -1180,6 +1180,26 @@ def _bli_get_session(session_id: str):
         return s["curves"] if s else None
 
 
+def _bli_filter_curves(curves, active):
+    """按曲线 label 过滤（前端勾选「进入数据」的曲线）。active=None → 全保留；
+    active=[] → 一条不剩（明确清空）。"""
+    if active is None:
+        return curves
+    active_set = {str(a).strip() for a in active if str(a).strip()}
+    return [d for d in curves if d.get("label") in active_set]
+
+
+def _bli_trim_curves(curves, t_assoc):
+    """截去结合起点（t_assoc）之前的数据——默认去掉基线区。返回新 dict 列表。"""
+    out = []
+    for d in curves:
+        t = np.asarray(d["time"], float)
+        y = np.asarray(d["response"], float)
+        m = t >= t_assoc
+        out.append({**d, "time": t[m].tolist(), "response": y[m].tolist()})
+    return out
+
+
 def _bli_opt_float(v):
     if v in (None, ""):
         return None
@@ -1220,6 +1240,31 @@ def api_bli_analyze():
     return jsonify({"session_id": sid, "samples": samples, "n_sensors": len(curves)})
 
 
+@app.route("/api/bli/restore", methods=["POST"])
+def api_bli_restore():
+    """从实验原始快照重建 BLI 会话（供「从实验复制」把历史实验载回 BLI 分析 tab 再出图/拟合）。
+
+    body: {"payload": {curves: [{label, sample_id, conc_nM, time, response}]}}
+    返回形状与 /api/bli/analyze 一致（session_id + samples + n_sensors），前端可直接复用上传路径。
+    """
+    body = request.get_json() or {}
+    curves_raw = (body.get("payload") or {}).get("curves") or []
+    if not curves_raw:
+        return jsonify({"error": "快照缺少曲线数据"}), 400
+    from bli import group_by_sample
+    curves = [_bli_dict_to_curve(d) for d in curves_raw]
+    sid = _bli_new_session(curves)
+    samples = []
+    for s_name, s_curves in group_by_sample(curves).items():
+        samples.append({
+            "sample": s_name,
+            "n_curves": len(s_curves),
+            "concs": [round(c.conc_nM, 4) for c in s_curves],
+            "labels": [c.label for c in s_curves],
+        })
+    return jsonify({"session_id": sid, "samples": samples, "n_sensors": len(curves)})
+
+
 @app.route("/api/bli/plot", methods=["POST"])
 def api_bli_plot():
     """生成传感器图 PNG（base64）。参数：session_id / smooth_window / fit / t_assoc / t_dissoc /
@@ -1228,16 +1273,27 @@ def api_bli_plot():
     curves = _bli_get_session(body.get("session_id", ""))
     if not curves:
         return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
+    curves = _bli_filter_curves(curves, body.get("active_curves"))
+    if not curves:
+        return jsonify({"error": "勾选的曲线为空，请重新选择"}), 400
+    ta = _bli_opt_float(body.get("t_assoc"))
+    td = _bli_opt_float(body.get("t_dissoc"))
     try:
         import base64
-        from bli import generate_sensorgram_png
-        curves = [_bli_dict_to_curve(d) for d in curves]
+        from bli import generate_sensorgram_png, _detect_phases
+        # 默认截去结合起点前的基线区（相界在原始曲线上检测，trim 后再出图/叠加拟合）
+        if body.get("trim_start", True) is not False:
+            if ta is None or td is None:
+                a, d = _detect_phases([_bli_dict_to_curve(c) for c in curves])
+                ta = ta if ta is not None else a
+                td = td if td is not None else d
+            curves = _bli_trim_curves(curves, ta)
+        curve_objs = [_bli_dict_to_curve(c) for c in curves]
         png = generate_sensorgram_png(
-            curves,
+            curve_objs,
             smooth_window=int(body.get("smooth_window", 31) or 0),
             fit=bool(body.get("fit")),
-            t_assoc=_bli_opt_float(body.get("t_assoc")),
-            t_dissoc=_bli_opt_float(body.get("t_dissoc")),
+            t_assoc=ta, t_dissoc=td,
             separate=bool(body.get("separate")),
             mask=tuple(body.get("mask") or ()),
             view=tuple(body.get("view") or ()),
@@ -1259,10 +1315,11 @@ def api_bli_fit():
     curves = _bli_get_session(body.get("session_id", ""))
     if not curves:
         return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
+    curves = _bli_filter_curves(curves, body.get("active_curves"))
     sample = body.get("sample", "")
     s_curves = [c for c in (_bli_dict_to_curve(d) for d in curves) if c.sample_id == sample]
     if not s_curves:
-        return jsonify({"error": f"找不到样本 {sample}"}), 400
+        return jsonify({"error": f"找不到样本 {sample}（或该样本曲线已全部取消勾选）"}), 400
     try:
         from bli import fit_kd
         res = fit_kd(
@@ -1286,34 +1343,50 @@ def api_bli_save():
     - 原始曲线落 experiment_raw（data_type=bli_curves，只写一次）
     - 拟合结果由后端按提交参数重算，与用户看到的图/表一致。"""
     body = request.get_json() or {}
-    curves = _bli_get_session(body.get("session_id", ""))
-    if not curves:
+    all_curves = _bli_get_session(body.get("session_id", ""))
+    if not all_curves:
         return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
-    curves = [_bli_dict_to_curve(d) for d in curves]
+    curves = _bli_filter_curves(all_curves, body.get("active_curves"))
+    if not curves:
+        return jsonify({"error": "勾选的曲线为空，无法保存"}), 400
+    curve_objs = [_bli_dict_to_curve(d) for d in curves]
     try:
-        from bli import fit_kd, group_by_sample, BLI_ANALYSIS_VERSION
+        from bli import fit_kd, group_by_sample, BLI_ANALYSIS_VERSION, _detect_phases
     except Exception as e:
         return jsonify({"error": f"BLI 内核加载失败: {e}"}), 500
 
+    # 相界：trim_start（默认开）时若未显式传，用原始曲线自动检测并落绝对时间，
+    # 保证存档结果与用户看到的（已截基线）分析一致
+    ta = _bli_opt_float(body.get("t_assoc"))
+    td = _bli_opt_float(body.get("t_dissoc"))
+    trim_start = bool(body.get("trim_start", True))
+    if trim_start and (ta is None or td is None):
+        a, d = _detect_phases(curve_objs)
+        ta = ta if ta is not None else a
+        td = td if td is not None else d
+
     params = {
+        "calc_type": "bli_fit",   # 判别字段：详情页渲染 / 从实验复制 / 导出横切依赖（AKTA 同款约定）
         "source": body.get("source", ""),
         "smooth_window": int(body.get("smooth_window", 31) or 0),
         "fit_overlay": bool(body.get("fit_overlay") or body.get("fit")),
-        "t_assoc": _bli_opt_float(body.get("t_assoc")),
-        "t_dissoc": _bli_opt_float(body.get("t_dissoc")),
+        "t_assoc": ta,
+        "t_dissoc": td,
         "n_concs": int(body.get("n_concs", 8) or 8),
         "no_cutoff": bool(body.get("no_cutoff")),
         "ns_sensor": body.get("ns_sensor") or None,
         "ns_subtract": body.get("ns_subtract", "proportional"),
+        "active_curves": body.get("active_curves") or None,  # 勾选进入数据的曲线 label
+        "trim_start": trim_start,                            # 是否截去结合起点前基线
     }
 
     # 拟合：逐 sample 重算，与前端展示一致
     samples_result = {}
-    for s_name, s_curves in group_by_sample(curves).items():
+    for s_name, s_curves in group_by_sample(curve_objs).items():
         try:
             r = fit_kd(
                 s_curves,
-                t_assoc=params["t_assoc"], t_dissoc=params["t_dissoc"],
+                t_assoc=ta, t_dissoc=td,
                 n_concs=params["n_concs"], no_cutoff=params["no_cutoff"],
                 ns_sensor=params["ns_sensor"], ns_subtract=params["ns_subtract"],
             )
@@ -1329,11 +1402,12 @@ def api_bli_save():
 
     # 原始曲线快照（只写一次，规则 #2/#8）：与实验同事务原子落库（services 统一写入入口），
     # 避免「先建实验再单独 save raw」的部分写入——raw 落库失败不再留孤儿实验。
+    # 注意 raw 存**全量**曲线（含未勾选/未截的），active_curves/trim_start 已入 params 可复现。
     # _json_safe 先清 NaN/Inf（float 曲线值），否则 json.dumps 产出非法 JSON 文本。
     raw_payload = _json_safe({
         "analysis_version": BLI_ANALYSIS_VERSION,
         "params": params,
-        "curves": [_bli_curve_to_dict(c) for c in curves],
+        "curves": list(all_curves),
     })
     try:
         exp = services.create_experiment(
@@ -1349,6 +1423,109 @@ def api_bli_save():
     except ValueError as err:
         return jsonify({"error": str(err)}), 400
     return jsonify(exp), 201
+
+
+@app.route("/api/bli/export", methods=["POST"])
+def api_bli_export():
+    """导出 BLI 分析为 Excel（对标 AKTA 导出）：
+    - Sheet1「KD 汇总」：每样品一行 × 5 方法 KD（含备注）
+    - Sheet2「作图数据」：每条传感器曲线 = 时间+响应两列，Prism 可直接画传感器图"""
+    body = request.get_json() or {}
+    curves = _bli_get_session(body.get("session_id", ""))
+    if not curves:
+        return jsonify({"error": "会话不存在或已过期，请重新上传"}), 400
+    curves = _bli_filter_curves(curves, body.get("active_curves"))
+    if not curves:
+        return jsonify({"error": "勾选的曲线为空，无法导出"}), 400
+    try:
+        from bli import fit_kd, group_by_sample, _detect_phases
+    except Exception as e:
+        return jsonify({"error": f"BLI 内核加载失败: {e}"}), 500
+    # 默认截去结合起点前基线（相界在原始曲线上检测），作图数据/KD 汇总都基于截后数据
+    ta = _bli_opt_float(body.get("t_assoc"))
+    td = _bli_opt_float(body.get("t_dissoc"))
+    if body.get("trim_start", True) is not False:
+        if ta is None or td is None:
+            a, d = _detect_phases([_bli_dict_to_curve(c) for c in curves])
+            ta = ta if ta is not None else a
+            td = td if td is not None else d
+        curves = _bli_trim_curves(curves, ta)
+    curve_objs = [_bli_dict_to_curve(d) for d in curves]
+    fit_params = dict(
+        t_assoc=ta, t_dissoc=td,
+        n_concs=int(body.get("n_concs", 8) or 8),
+        no_cutoff=bool(body.get("no_cutoff")),
+        ns_sensor=body.get("ns_sensor") or None,
+        ns_subtract=body.get("ns_subtract", "proportional"),
+    )
+
+    wb = Workbook()
+    # Sheet1 KD 汇总（mixed 无单值 kd，沿用面板约定：稳态优先，否则动力学）
+    ws = wb.active
+    ws.title = "KD 汇总"
+    headers = ["样品", "standard", "split", "joint", "steady", "mixed", "备注"]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    for s_name, s_curves in group_by_sample(curve_objs).items():
+        try:
+            res = fit_kd(s_curves, **fit_params)
+        except Exception:
+            ws.append([s_name, "—", "—", "—", "—", "—", "拟合失败"])
+            continue
+        row = [s_name]
+        notes = []
+        for m in ("standard", "split", "joint", "steady", "mixed"):
+            v = res.get(m) or {}
+            if v.get("error"):
+                row.append("—")
+                notes.append(f"{m} 拟合失败")
+                continue
+            if m == "mixed":
+                if v.get("kd_steady_mixed") is not None:
+                    row.append(round(float(v["kd_steady_mixed"]), 2))
+                    notes.append("mixed=稳态")
+                elif v.get("kd_kinetic_mixed") is not None:
+                    row.append(round(float(v["kd_kinetic_mixed"]), 2))
+                    notes.append("mixed=动力学")
+                else:
+                    row.append("—")
+            else:
+                kd = v.get("kd")
+                row.append(round(float(kd), 2) if kd is not None else "—")
+        ws.append(row + ["；".join(notes)])
+
+    # Sheet2 作图数据：每条曲线两列（时间 + 响应），label 撞名时拼 sample_id 去重
+    from openpyxl.utils import get_column_letter
+    ws2 = wb.create_sheet("作图数据")
+    col_labels = []
+    seen = set()
+    for c in curve_objs:
+        lbl = c.label
+        if lbl in seen:
+            lbl = f"{lbl}·{c.sample_id}"
+        seen.add(lbl)
+        col_labels.append(lbl)
+    header = []
+    for lbl in col_labels:
+        header += [f"{lbl} 时间 (s)", f"{lbl} 响应 (nm)"]
+    ws2.append(header)
+    for c in range(1, len(header) + 1):
+        ws2.cell(row=1, column=c).font = Font(bold=True)
+        ws2.column_dimensions[get_column_letter(c)].width = 15
+    for ci, c in enumerate(curve_objs):
+        base = ci * 2 + 1
+        for r, (t, y) in enumerate(zip(c.time, c.response), 2):
+            ws2.cell(row=r, column=base).value = float(t)
+            ws2.cell(row=r, column=base + 1).value = float(y)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True,
+                     download_name=f"bli_kd_{body.get('session_id', '')[:8]}.xlsx")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1636,7 +1813,11 @@ def api_akta_overlay():
 
 @app.route("/api/akta/export", methods=["POST"])
 def api_akta_export():
-    """导出峰表 Excel：Sheet1 峰表，Sheet2 峰-体积曲线数据（作图友好）。"""
+    """导出峰表 Excel：
+    - Sheet1 峰表（当前 run 的峰）
+    - Sheet2 曲线-{channel}（当前 run 单通道 Volume/Signal，保留现状）
+    - Sheet3 作图数据（新增）：每个样品（勾选的 run）占两列——体积 + 信号，
+      直接可选列作图 / 导入 Prism 对比多条色谱。"""
     body = request.get_json() or {}
     sess = _akta_get_session(body.get("session_id", ""))
     if not sess:
@@ -1657,6 +1838,9 @@ def api_akta_export():
     except Exception as e:
         return jsonify({"error": f"峰检测失败: {e}"}), 400
 
+    def _range(v):
+        return xmin <= v <= (xmax if xmax is not None else float("inf"))
+
     wb = Workbook()
     ws = wb.active
     ws.title = "峰表"
@@ -1669,8 +1853,39 @@ def api_akta_export():
     ws2 = wb.create_sheet(f"曲线-{ch_name[:20]}")
     ws2.append(["Volume (mL)", "Signal (%s)" % (ch.unit or "")])
     for v, a in zip(ch.vols, ch.amps):
-        if xmin <= v <= (xmax if xmax is not None else float("inf")):
+        if _range(v):
             ws2.append([float(v), float(a)])
+
+    # Sheet3 作图数据：每个样品两列（体积 + 信号），跨 run 并列，直接可作图
+    runs = body.get("runs") or [{"session_id": body.get("session_id"), "channel": ch_name}]
+    samples = []   # [(label, Channel)]
+    for rs in runs:
+        rsess = _akta_get_session(rs.get("session_id", ""))
+        if not rsess:
+            continue
+        rch = (rsess.get("channels") or {}).get(rs.get("channel", ""))
+        if rch is None:
+            continue
+        label = str(rs.get("name") or rch.name)
+        samples.append((label, rch))
+    if samples:
+        from openpyxl.utils import get_column_letter
+        ws3 = wb.create_sheet("作图数据")
+        header = []
+        for label, rch in samples:
+            header += [f"{label} 体积 (mL)", f"{label} 信号 ({rch.unit or ''})"]
+        ws3.append(header)
+        for c in range(1, len(header) + 1):
+            ws3.cell(row=1, column=c).font = Font(bold=True)
+            ws3.column_dimensions[get_column_letter(c)].width = 15
+        for si, (label, rch) in enumerate(samples):
+            base = si * 2 + 1
+            r = 2
+            for v, a in zip(rch.vols, rch.amps):
+                if _range(v):
+                    ws3.cell(row=r, column=base).value = float(v)
+                    ws3.cell(row=r, column=base + 1).value = float(a)
+                    r += 1
 
     buf = BytesIO()
     wb.save(buf)

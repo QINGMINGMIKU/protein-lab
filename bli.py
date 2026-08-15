@@ -557,9 +557,13 @@ def filter_dead_curves(t_list, y_list, conc_list, t_dissoc, cutoff=None):
 
 
 def _detect_phases(curves: List[Curve]) -> Tuple[float, float]:
-    """自动检测结合/解离相界（最高浓度曲线）。REF 脚本靠 CLI 显式传相界，
-    这里做启发式兜底：t_dissoc 用平滑后「最后一个局部极大」——原始 argmax 对
-    饱和平台噪声敏感（平台期响应平，噪声峰会被误判为解离起点）。
+    """自动检测结合/解离相界（最高浓度曲线）。
+
+    对齐 REF 脚本（generate_BLI_figure.py / fit_KD.py）：
+    - t_dissoc = 最高浓度曲线「全局极大」处（REF 用原始 argmax；这里在 SG 平滑后取
+      argmax，平台噪声下更稳、语义一致——解离起点在信号峰值/平台肩部）。
+    - t_assoc = 平滑曲线首超 基线+5σ 处（REF 默认数据起点；这里检测真实结合起点，
+      以便默认截去结合起点前的基线区，见 trim_start 逻辑）。
     """
     ref = max(curves, key=lambda c: c.conc_nM)
     m = ~np.isnan(ref.response)
@@ -575,10 +579,8 @@ def _detect_phases(curves: List[Curve]) -> Tuple[float, float]:
     noise = np.std(y_s[:n_b]) or 1e-3
     rising = np.flatnonzero(y_s > base + 5 * noise)
     t_assoc = float(t_ref[rising[0]]) if rising.size else float(t_ref[0])
-    # 解离起点：最后一个局部极大（衰减段单调下降，无局部极大 → 落在平台肩部）
-    local_max = [i for i in range(1, len(y_s) - 1)
-                 if y_s[i] >= y_s[i - 1] and y_s[i] > y_s[i + 1]]
-    idx_d = local_max[-1] if local_max else int(np.argmax(y_s))
+    # 解离起点：平滑曲线全局极大（REF 的 argmax 方法，替代原「最后一个局部极大」）
+    idx_d = int(np.argmax(y_s))
     t_dissoc = max(float(t_ref[idx_d]), t_assoc + 1.0)
     return t_assoc, t_dissoc
 

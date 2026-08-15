@@ -312,6 +312,55 @@ resp = client.post("/api/bli/plot", json={"session_id": "nope"})
 assert resp.status_code == 400
 print("bli session guard OK")
 
+# 7f. export：KD 汇总 + 作图数据两 sheet（对标 AKTA 导出）。
+#     trim_start 默认开 + 显式 t_assoc=100 → 作图数据应从结合起点起、行数减少
+import io
+from openpyxl import load_workbook
+
+def _load_export(j):
+    r = client.post("/api/bli/export", json=j)
+    assert r.status_code == 200, (r.status_code, r.data[:200])
+    assert r.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return load_workbook(io.BytesIO(r.data))
+
+wb = _load_export({"session_id": sid, "t_assoc": 100, "t_dissoc": 400, "n_concs": 5})
+assert wb.sheetnames == ["KD 汇总", "作图数据"], wb.sheetnames
+ws = wb["KD 汇总"]
+assert [c.value for c in ws[1]] == ["样品", "standard", "split", "joint", "steady", "mixed", "备注"]
+assert {ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)} == {"WT", "MUT"}
+kd_wt = ws.cell(row=2, column=2).value
+assert isinstance(kd_wt, (int, float)) and 10 < kd_wt < 1000, f"导出 KD={kd_wt}"
+ws2 = wb["作图数据"]
+hdr2 = [c.value for c in ws2[1]]
+assert len(hdr2) == len(samples) * 2, f"作图数据列数 {len(hdr2)} != 曲线数×2"
+assert hdr2[0] == "A1 时间 (s)" and hdr2[1] == "A1 响应 (nm)"
+# trim_start 默认开：时间从结合起点（100s）起，行数 300（满长 350 − 起点前 50 点）
+t_first = ws2.cell(row=2, column=1).value
+assert t_first >= 100, f"trim 后首点应 ≥ 100s，实为 {t_first}"
+assert ws2.max_row == 1 + 300, f"trim 后应 300 行数据，实为 {ws2.max_row - 1}"
+print(f"bli export OK: sheets={wb.sheetnames}, KD={kd_wt:.1f} nM, 作图数据 {len(hdr2)} 列 @ t≥{t_first:.0f}s")
+
+# 7g. active_curves 子集：只勾选 WT 的曲线 → 作图数据列数 = WT 曲线数×2
+wt_labels = next(s["labels"] for s in ana["samples"] if s["sample"] == "WT")
+wb = _load_export({"session_id": sid, "t_assoc": 100, "t_dissoc": 400, "active_curves": wt_labels})
+ws2 = wb["作图数据"]
+hdr2 = [c.value for c in ws2[1]]
+assert len(hdr2) == len(wt_labels) * 2, f"子集列数 {len(hdr2)} != {len(wt_labels)}×2"
+assert all(f"{l} 时间 (s)" in hdr2 for l in wt_labels), "子集列应为 WT 曲线"
+assert not any(h.startswith("B") for h in hdr2), "MUT 曲线不应出现"
+# 空勾选 → 400
+r = client.post("/api/bli/export", json={"session_id": sid, "active_curves": []})
+assert r.status_code == 400, r.status_code
+print(f"bli export active_curves OK: {len(wt_labels)} 曲线 → {len(hdr2)} 列，空勾选 400")
+
+# 7h. trim_start=false：保留全部数据 → 时间从 0 起、满长 350
+wb = _load_export({"session_id": sid, "trim_start": False, "n_concs": 5})
+ws2 = wb["作图数据"]
+t0 = ws2.cell(row=2, column=1).value
+assert t0 == 0.0, f"trim 关应保留首点 0s，实为 {t0}"
+assert ws2.max_row == 1 + 350, f"trim 关应 350 行，实为 {ws2.max_row - 1}"
+print(f"bli export trim_start=false OK: 首点 {t0}s / {ws2.max_row - 1} 行")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")

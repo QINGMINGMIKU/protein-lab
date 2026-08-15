@@ -103,6 +103,21 @@ function downloadDataUrl(dataUrl, filename) {
   document.body.removeChild(a);
 }
 
+// 下载出图区域的全部图片（单图/分图/总图通用）：多图按 alt 逐张命名保存
+async function downloadAreaImages(areaId, type) {
+  const imgs = [...document.querySelectorAll(`#${areaId} img`)];
+  if (!imgs.length) { toast("请先出图", true); return; }
+  const auto = (await getAutoName(type)) || type;
+  const safe = s => (s || "plot").replace(/[\\/:*?"<>|]/g, "_").trim() || "plot";
+  imgs.forEach((img, i) => {
+    const alt = safe(img.alt);
+    const fname = imgs.length > 1 ? `${auto}_${alt}_${i + 1}.png` : `${auto}_${alt}.png`;
+    downloadDataUrl(img.src, fname);
+  });
+}
+async function downloadBliPlot() { await downloadAreaImages("bliPlotArea", "BLI"); }
+async function downloadAktaPlot() { await downloadAreaImages("aktaPlotArea", "AKTA"); }
+
 // ── Safe HTML escaping ──────────────────────────────
 function esc(s) {
   return String(s)
@@ -1129,6 +1144,7 @@ let copyTypeFilter = "all";
 const COPY_TYPE_META = {
   "浓度测定": { icon: "🧪", css: "conc", label: "浓度" },
   "BLI 浓度梯度": { icon: "📊", css: "dilution", label: "BLI" },
+  "BLI 分析": { icon: "🧫", css: "bli", label: "BLI 分析" },
   "酶活测定": { icon: "⚡", css: "enzyme", label: "酶活" },
   "Weblogo": { icon: "🧬", css: "weblogo", label: "Logo" },
   "AKTA": { icon: "📈", css: "akta", label: "AKTA" },
@@ -1142,6 +1158,10 @@ function copyExpTypeInfo(e) {
   if (calcType === "enzyme") return COPY_TYPE_META["酶活测定"];
   if (calcType === "weblogo") return COPY_TYPE_META["Weblogo"];
   if (calcType === "akta") return COPY_TYPE_META["AKTA"];
+  if (calcType === "bli_fit") return COPY_TYPE_META["BLI 分析"];
+  // fallback: 旧存档（v0.0.8 无 calc_type）——BLI 分析靠 exp_type=="BLI" + results.samples 判别，
+  // 与 BLI 浓度梯度（calc_type=dilution，恒有 calc_type）区分开
+  if (isBliExp(e)) return COPY_TYPE_META["BLI 分析"];
   // fallback: match exp_type
   for (const [key, meta] of Object.entries(COPY_TYPE_META)) {
     if ((e.exp_type || "").includes(key.replace("测定", "").replace("浓度梯度", "")))
@@ -1154,6 +1174,19 @@ function copyExpTypeInfo(e) {
 function isAktaExp(e) {
   const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
   return params.calc_type === "akta" || (e.exp_type || "").indexOf("AKTA") >= 0;
+}
+
+// BLI 分析判定：新存档靠 params.calc_type=="bli_fit"；旧存档（v0.0.8 无 calc_type）
+// 靠 exp_type=="BLI" + results.samples 判别（排除 calc_type=dilution 的浓度梯度）
+function isBliExp(e) {
+  const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
+  if (params.calc_type === "bli_fit") return true;
+  if (params.calc_type === "dilution") return false;
+  if ((e.exp_type || "").indexOf("BLI") >= 0) {
+    const results = typeof e.results === "string" ? safeJson(e.results) : e.results || {};
+    return !!(results && results.samples);
+  }
+  return false;
 }
 
 async function loadCopyExpList() {
@@ -1175,6 +1208,7 @@ function renderCopyTypeTags() {
     { key: "all", label: "全部", icon: "📋" },
     { key: "conc", label: "浓度", icon: "🧪" },
     { key: "dilution", label: "BLI", icon: "📊" },
+    { key: "bli", label: "BLI 分析", icon: "🧫" },
     { key: "enzyme", label: "酶活", icon: "⚡" },
     { key: "weblogo", label: "Logo", icon: "🧬" },
     { key: "akta", label: "AKTA", icon: "📈" },
@@ -1214,6 +1248,10 @@ function renderCopyExpList() {
       detail = `${Object.keys(wells).length} 孔 | ${params.meta?.sample || ""}`;
     } else if (isAktaExp(e)) {
       detail = `通道 ${params.channel || "?"} | ${params.source || "已存档"}`;
+    } else if (isBliExp(e)) {
+      const results = typeof e.results === "string" ? safeJson(e.results) : e.results || {};
+      const nSamples = results.samples ? Object.keys(results.samples).length : 0;
+      detail = `${nSamples} 样本 | ${params.source || "已存档"}`;
     } else if (proteins.length) {
       detail = `${proteins.length} 蛋白 | ${proteins.map(p => p.name).join(", ")}`;
     } else {
@@ -1260,11 +1298,17 @@ async function selectCopyExp(eid) {
       detailHtml = `<b>通道 ${esc(params.channel || "?")}</b>` +
         (params.source ? ` | 源文件 ${esc(params.source)}` : "") +
         (params.xmin || params.xmax ? ` | 体积 ${params.xmin ?? 0}–${params.xmax ?? "∞"} mL` : "");
+    } else if (isBliExp(e)) {
+      const results = typeof e.results === "string" ? safeJson(e.results) : e.results || {};
+      const nSamples = results.samples ? Object.keys(results.samples).length : 0;
+      detailHtml = `<b>${nSamples} 样本</b>` +
+        (params.source ? ` | 源文件 ${esc(params.source)}` : "") +
+        (params.smooth_window ? ` | 平滑 ${params.smooth_window}` : "");
     } else {
       detailHtml = `${e.protein_names || "无蛋白"} | ${e.notes || "无额外信息"}`;
     }
 
-    const targetLabel = calcType === "enzyme" ? "酶活计算" : calcType === "dilution" ? "BLI 浓度梯度" : calcType === "weblogo" ? "Weblogo" : isAktaExp(e) ? "AKTA 峰图" : "蛋白浓度";
+    const targetLabel = calcType === "enzyme" ? "酶活计算" : calcType === "dilution" ? "BLI 浓度梯度" : calcType === "weblogo" ? "Weblogo" : isAktaExp(e) ? "AKTA 峰图" : isBliExp(e) ? "BLI 分析" : "蛋白浓度";
 
     document.getElementById("copyPreviewTitle").textContent = e.title;
     document.getElementById("copyPreviewMeta").innerHTML = `<span class="copy-type-tag ${ti.css}">${ti.icon} ${ti.label}</span> ${e.date || ""} → <b>${targetLabel}</b>`;
@@ -1344,6 +1388,39 @@ async function applyCopyAndSwitch() {
     return;
   }
 
+  if (isBliExp(copyCache)) {
+    // 复制到 BLI 分析 Tab — 从实验原始快照重建会话（曲线数据在 experiment_raw，规则 #8 可复现）
+    const rid = (copyCache._raw_ids || [])[0];
+    if (!rid) { toast("该实验无原始快照可复制", true); return; }
+    try {
+      const raw = await API.get(`/api/experiments/${copyCache.id}/raw/${rid}`);
+      const data = await API.post("/api/bli/restore", {
+        payload: raw.payload,
+        name: copyCache.title || params.source || "restored",
+      });
+      bliSession = data.session_id;
+      bliSamples = data.samples || [];
+      bliSelectedSample = bliSamples[0]?.sample || "";
+      bliLastPlot = null;
+      bliKdResult = null;
+      bliActiveCurves = new Set(bliSamples.flatMap(s => s.labels || []));  // 默认全选，下面按存档子集回填
+      bliBackfillParams(raw.payload.params);   // 回填存档参数（含 active_curves/trim_start），出图/拟合按同参数复现
+      renderBliSamples();
+      renderBliCurves();
+      // 揭示分析结果区（与上传路径一致：bliSampleList 在 #bliAnalyzed 内，默认 hidden）
+      document.getElementById("bliMeta").textContent =
+        `${copyCache.title || "已存档"} | ${data.n_sensors} 传感器 | ${bliSamples.length} 样本（快照）`;
+      document.getElementById("bliAnalyzed").classList.remove("hidden");
+      document.getElementById("bliKdWrap").classList.add("hidden");
+      document.getElementById("bliPlotArea").innerHTML = "";
+      refreshBliPlaceholder();
+      document.querySelector(".tab-btn[data-tab='bli']").click();
+      bliPlot();
+      toast(`已载入 ${bliSamples.length} 个样本（来自快照）`);
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+
   if (isAktaExp(copyCache)) {
     // 复制到 AKTA Tab — 从实验原始快照重建会话（曲线数据在 experiment_raw）
     const rid = (copyCache._raw_ids || [])[0];
@@ -1362,6 +1439,7 @@ async function applyCopyAndSwitch() {
         checked: true,
       }];
       aktaCurrentRun = 0;
+      aktaBackfillParams(raw.payload.params);   // 回填存档峰检测参数
       renderAktaRuns();
       // 揭示分析结果区（与上传路径一致：aktaRunList 在 #aktaAnalyzed 内，默认 hidden）
       document.getElementById("aktaMeta").textContent =
@@ -2428,6 +2506,8 @@ let bliSession = null;       // /api/bli/analyze 返回的 session_id
 let bliSamples = [];         // [{sample, n_curves, concs, labels}]
 let bliSelectedSample = "";  // KD 拟合选中的样本
 let bliLastPlot = null;      // 最近一次传感器图 dataURL（切页回来可刷新）
+let bliActiveCurves = new Set();  // 勾选「进入数据」的曲线 label（出图/拟合/导出/存档共用）
+let bliKdResult = null;      // 最近一次单样本 5 方法 KD 拟合结果（点样本行重拟合更新）
 
 async function uploadBliFile() {
   const file = document.getElementById("bliFile").files[0];
@@ -2442,7 +2522,10 @@ async function uploadBliFile() {
     bliSamples = data.samples || [];
     bliSelectedSample = bliSamples[0]?.sample || "";
     bliLastPlot = null;
+    bliKdResult = null;
+    bliActiveCurves = new Set(bliSamples.flatMap(s => s.labels || []));  // 默认全选进入数据
     renderBliSamples();
+    renderBliCurves();
     document.getElementById("bliMeta").textContent =
       `${file.name} | ${data.n_sensors} 传感器 | ${bliSamples.length} 样本`;
     document.getElementById("bliAnalyzed").classList.remove("hidden");
@@ -2464,6 +2547,61 @@ function renderBliSamples() {
     </tr>`).join("");
 }
 
+// ══ 曲线勾选（进入数据）：每条曲线一行复选框，勾选 = 出图/拟合/导出/存档都纳入 ══
+
+// 摊平为曲线行：{label, sample, conc}
+function bliAllCurveRows() {
+  const rows = [];
+  for (const s of bliSamples) {
+    (s.labels || []).forEach((lbl, i) => rows.push({ label: lbl, sample: s.sample, conc: s.concs?.[i] ?? 0 }));
+  }
+  return rows;
+}
+
+function renderBliCurves() {
+  const tbody = document.getElementById("bliCurveList");
+  if (!tbody) return;
+  tbody.innerHTML = bliAllCurveRows().map(r => `
+    <tr>
+      <td><input type="checkbox" class="bli-curve-cb" data-label="${escAttr(r.label)}" ${bliActiveCurves.has(r.label) ? "checked" : ""}></td>
+      <td style="font-size:12px">${esc(r.label)}</td>
+      <td style="font-size:12px;color:#666">${esc(r.sample)}</td>
+      <td style="font-size:12px;color:#666">${formatConc(r.conc, "nM")} nM</td>
+    </tr>`).join("");
+  updateBliCurveMaster();
+}
+
+// 总复选框三态：全选 / 半选（indeterminate）/ 全不选；同步「已选 X/Y」
+function updateBliCurveMaster() {
+  const all = bliAllCurveRows();
+  const master = document.getElementById("bliCurveSelectAll");
+  const stats = document.getElementById("bliCurveStats");
+  if (!master || !all.length) return;
+  const nOn = all.filter(r => bliActiveCurves.has(r.label)).length;
+  master.checked = nOn === all.length;
+  master.indeterminate = nOn > 0 && nOn < all.length;
+  if (stats) stats.textContent = `已选 ${nOn}/${all.length}`;
+}
+
+function bliToggleAllCurves() {
+  const all = bliAllCurveRows();
+  bliActiveCurves = document.getElementById("bliCurveSelectAll").checked
+    ? new Set(all.map(r => r.label)) : new Set();
+  renderBliCurves();
+}
+
+// 曲线勾选 + 总复选框事件委托（document 级，calc 页外缺省元素不报错）
+document.addEventListener("change", function (e) {
+  const cb = e.target.closest(".bli-curve-cb");
+  if (cb) {
+    const lbl = cb.dataset.label;
+    if (cb.checked) bliActiveCurves.add(lbl); else bliActiveCurves.delete(lbl);
+    updateBliCurveMaster();
+    return;
+  }
+  if (e.target.closest("#bliCurveSelectAll")) bliToggleAllCurves();
+});
+
 // 样本按钮事件委托：用 data-sample 传参（onclick 内联字符串对含引号样本名不安全）。
 // ⚠ 必须在元素存在时绑定——app.js 被所有页面共享，calc 页外该元素为 null。
 // 用可选链 + 顶层防错：只在 calculator 页面注册一次。
@@ -2479,6 +2617,31 @@ function bliSelectSample(sid) {
   bliFitSelected();
 }
 
+// 回填存档时的分析参数到 UI 控件（规则 #8：复制后按同参数复现分析）。
+// t_assoc/t_dissoc 为 null（自动检测）→ 置空走占位符「自动」；ns_subtract 无控件，不在此列。
+function bliBackfillParams(p) {
+  if (!p) return;
+  const setVal = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = (v == null || v === "") ? "" : v;
+  };
+  setVal("bliSmooth", p.smooth_window);
+  setVal("bliNConcs", p.n_concs);
+  setVal("bliTAssoc", p.t_assoc);
+  setVal("bliTDissoc", p.t_dissoc);
+  setVal("bliNsSensor", p.ns_sensor);
+  const fitEl = document.getElementById("bliFit");
+  if (fitEl) fitEl.checked = !!p.fit_overlay;
+  const ncEl = document.getElementById("bliNoCutoff");
+  if (ncEl) ncEl.checked = !!p.no_cutoff;
+  const trimEl = document.getElementById("bliTrimStart");
+  if (trimEl) trimEl.checked = p.trim_start !== false;
+  // 曲线勾选子集：存档的 active_curves 记录当时进入数据的曲线，复制后默认也排除未勾选的
+  if (Array.isArray(p.active_curves)) {
+    bliActiveCurves = new Set(p.active_curves.map(String).filter(Boolean));
+  }
+}
+
 function bliParams() {
   return {
     session_id: bliSession,
@@ -2489,32 +2652,31 @@ function bliParams() {
     n_concs: parseInt(document.getElementById("bliNConcs").value || "8", 10),
     ns_sensor: document.getElementById("bliNsSensor").value.trim(),
     no_cutoff: document.getElementById("bliNoCutoff").checked,
+    active_curves: [...bliActiveCurves],
+    trim_start: document.getElementById("bliTrimStart").checked,
   };
 }
 
 async function bliPlot() {
   if (!bliSession) { toast("请先上传数据", true); return; }
+  const mode = (document.getElementById("bliPlotMode") || {}).value || "overlay";
   try {
-    const r = await API.post("/api/bli/plot", bliParams());
-    document.getElementById("bliPlotArea").innerHTML =
-      `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-        <img src="${r.image}" style="max-width:100%" alt="传感器图">
-      </div>`;
-    bliLastPlot = r.image;
-  } catch (err) { toast(err.message, true); }
-}
-
-async function bliPlotSeparate() {
-  if (!bliSession) { toast("请先上传数据", true); return; }
-  try {
-    const r = await API.post("/api/bli/plot", { ...bliParams(), separate: true });
-    const html = Object.entries(r.images || {}).map(([sid, img]) =>
-      `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px">
-        <div style="font-weight:600;margin-bottom:6px">${esc(sid)}</div>
-        <img src="${img}" style="max-width:100%" alt="${esc(sid)}">
-      </div>`).join("");
-    document.getElementById("bliPlotArea").innerHTML = html;
-    bliLastPlot = null;
+    const r = await API.post("/api/bli/plot", { ...bliParams(), separate: mode === "separate" });
+    const area = document.getElementById("bliPlotArea");
+    if (mode === "separate" && r.images) {
+      area.innerHTML = Object.entries(r.images).map(([sid, img]) =>
+        `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px">
+          <div style="font-weight:600;margin-bottom:6px">${esc(sid)}</div>
+          <img src="${img}" style="max-width:100%" alt="${esc(sid)}">
+        </div>`).join("");
+      bliLastPlot = null;
+    } else {
+      area.innerHTML =
+        `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+          <img src="${r.image}" style="max-width:100%" alt="传感器图">
+        </div>`;
+      bliLastPlot = r.image;
+    }
   } catch (err) { toast(err.message, true); }
 }
 
@@ -2522,12 +2684,20 @@ async function bliFitSelected() {
   if (!bliSession || !bliSelectedSample) { toast("请先选择样本", true); return; }
   try {
     const r = await API.post("/api/bli/fit", { ...bliParams(), sample: bliSelectedSample });
+    bliKdResult = r;
     document.getElementById("bliKdWrap").classList.remove("hidden");
     renderBliKd(bliSelectedSample, r);
   } catch (err) { toast(err.message, true); }
 }
 
+// 单样本 KD 结果渲染（点样本行重拟合 → 更新这张卡片；拟合失败显示错误卡）
 function renderBliKd(sample, res) {
+  if (!res || res.error) {
+    return `<div class="calc-card" style="padding:12px;margin-bottom:10px">
+      <div style="font-weight:600;margin-bottom:4px">${esc(sample)}</div>
+      <div style="color:#c00;font-size:13px">拟合失败：${esc(res.error || "未知错误")}</div>
+    </div>`;
+  }
   const phase = res.phase || {};
   const methods = ["standard", "split", "joint", "steady", "mixed"];
   const rows = methods.map(m => {
@@ -2540,14 +2710,15 @@ function renderBliKd(sample, res) {
                  (v.kd_kinetic_mixed != null ? `KD(动力学) ${formatConc(v.kd_kinetic_mixed, "nM")}` : "");
     return `<tr><td><strong>${m}</strong></td><td>${kd}</td><td>${kon}</td><td>${koff}</td><td>${extra}</td></tr>`;
   }).join("");
-  document.getElementById("bliKdTables").innerHTML = `
+  return `<div class="calc-card" style="padding:12px;margin-bottom:10px">
     <div style="font-size:13px;color:#555;margin-bottom:6px">
       样本 <strong>${esc(sample)}</strong> · 相界 assoc ${phase.t_assoc?.toFixed(1)} s → dissoc ${phase.t_dissoc?.toFixed(1)} s
     </div>
     <table class="calc-table">
       <thead><tr><th>方法</th><th>KD</th><th>kon (1/M·s)</th><th>koff (1/s)</th><th>备注</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>`;
+    </table>
+  </div>`;
 }
 
 async function bliSaveExp() {
@@ -2563,6 +2734,33 @@ async function bliSaveExp() {
       source: document.getElementById("bliFile").files[0]?.name || "",
     });
     toast("已保存为实验记录（含原始曲线快照）");
+  } catch (err) { toast(err.message, true); }
+}
+
+async function bliExport() {
+  if (!bliSession) { toast("请先上传数据", true); return; }
+  try {
+    const r = await fetch("/api/bli/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bliParams()),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || `导出失败 (${r.status})`);
+    }
+    const blob = await r.blob();
+    const fname = prompt("导出文件名:", "BLI_KD汇总.xlsx");
+    if (!fname) return;
+    const fn = /\.xlsx$/i.test(fname) ? fname : fname + ".xlsx";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = fn;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    toast("已导出 BLI 分析 Excel");
   } catch (err) { toast(err.message, true); }
 }
 
@@ -2678,6 +2876,20 @@ function aktaSelectChannel(name) {
   if (run) run.channel = name;
   renderAktaRuns();
   aktaPlot();
+}
+
+// 回填存档时的峰检测参数到 UI 控件（规则 #8）。save 只落 xmin/xmax/min_height/smooth_window，
+// 显示类开关（frac 阴影/峰阴影/归一化等）不在 params 内，保持当前 UI 值。
+function aktaBackfillParams(p) {
+  if (!p) return;
+  const setVal = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = (v == null || v === "") ? "" : v;
+  };
+  setVal("aktaXmin", p.xmin);
+  setVal("aktaXmax", p.xmax);       // null → "" → 占位符「自动」
+  setVal("aktaMinHeight", p.min_height);
+  setVal("aktaSmooth", p.smooth_window);
 }
 
 function aktaParams(run) {
@@ -2802,11 +3014,20 @@ document.addEventListener("click", function (e) {
 async function aktaExport() {
   const run = aktaRuns[aktaCurrentRun];
   if (!run || run.error || !run.channel) { toast("请先选择文件/通道", true); return; }
+  // 作图数据覆盖全部勾选的 run（每个样品两列），峰表/曲线 sheet 仍用当前 run
+  const okRuns = aktaRuns.filter(r => !r.error && r.channel && r.checked !== false);
   try {
     const r = await fetch("/api/akta/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(aktaParams(run)),
+      body: JSON.stringify({
+        ...aktaParams(run),
+        runs: okRuns.map(x => ({
+          session_id: x.session_id,
+          channel: x.channel,
+          name: (x.name || x.channel || "sample").replace(/\.zip$/i, ""),
+        })),
+      }),
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
@@ -2825,7 +3046,7 @@ async function aktaExport() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-    toast("已导出峰表 Excel");
+    toast(`已导出峰表 Excel（${okRuns.length} 个样品作图数据）`);
   } catch (err) { toast(err.message, true); }
 }
 

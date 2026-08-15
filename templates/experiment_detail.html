@@ -250,8 +250,8 @@
 <!-- ═══════════════════════════════════════════════ -->
 <!--  其他实验：显示原始 JSON                         -->
 <!-- ═══════════════════════════════════════════════ -->
-{# 兜底：仅当类型无法识别（或浓度/BLI 缺蛋白数据无法渲染表格）时才显示原始 JSON；酶活/Weblogo/AKTA 各自渲染，不在此列 #}
-{% set known = calc_type in ["concentration", "dilution", "enzyme", "weblogo", "akta"] or exp.exp_type == "AKTA" %}
+{# 兜底：仅当类型无法识别（或浓度/BLI 缺蛋白数据无法渲染表格）时才显示原始 JSON；酶活/Weblogo/AKTA/BLI 各自渲染，不在此列 #}
+{% set known = calc_type in ["concentration", "dilution", "enzyme", "weblogo", "akta", "bli_fit"] or exp.exp_type in ["AKTA", "BLI"] %}
 {% if not known or (calc_type in ["concentration", "dilution"] and not proteins) %}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
   <div class="calc-card">
