@@ -373,7 +373,18 @@ def api_exp_get(eid):
     e = models.exp_get(eid)
     if not e:
         return jsonify({"error": "实验不存在"}), 404
+    # 附原始数据快照 id（供「从实验复制」等按需拉取 payload，避免大字段常驻详情响应）
+    e["_raw_ids"] = [r["id"] for r in models.exp_raw_list(e["id"])]
     return jsonify(e)
+
+
+@app.route("/api/experiments/<int:eid>/raw/<int:rid>", methods=["GET"])
+def api_exp_raw_get(eid, rid):
+    """单条原始数据快照（含 payload）——只读，供复制重建会话等场景按需拉取。"""
+    raw = models.exp_raw_get(rid)
+    if not raw or raw.get("experiment_id") != eid:
+        return jsonify({"error": "原始快照不存在"}), 404
+    return jsonify(_json_safe(raw))
 
 
 @app.route("/api/experiments/next-name", methods=["GET"])
@@ -1446,6 +1457,53 @@ def api_akta_analyze():
     return jsonify({"runs": runs})
 
 
+@app.route("/api/akta/restore", methods=["POST"])
+def api_akta_restore():
+    """从实验原始快照重建 AKTA 会话（供「从实验复制」把历史实验载回 AKTA tab 再出图/导出）。
+
+    body: {"payload": {channel:{name,data_type,unit,vols,amps}, events, meta}, "name": 显示名}
+    返回形状与 /api/akta/analyze 的单 run 一致（含 session_id），前端可直接塞进 aktaRuns。
+    """
+    body = request.get_json() or {}
+    payload = body.get("payload") or {}
+    ch = payload.get("channel") or {}
+    vols = ch.get("vols") or []
+    if not vols:
+        return jsonify({"error": "快照缺少通道曲线数据"}), 400
+    from akta import Channel, find_uv_channels
+    ch_obj = Channel(name=ch.get("name", "UV"), data_type=ch.get("data_type", "Other"),
+                     unit=ch.get("unit", ""), vols=[float(x) for x in vols],
+                     amps=[float(x) for x in (ch.get("amps") or [])])
+    parsed = {
+        "channels": {ch_obj.name: ch_obj},
+        "events": payload.get("events") or {},
+        "meta": payload.get("meta") or {},
+    }
+    sid = _akta_new_session(parsed)
+    with _akta_lock:
+        _akta_sessions[sid]["source_name"] = body.get("name", "") or parsed["meta"].get("run_name", "")
+    channel_list = [{
+        "name": ch_obj.name, "data_type": ch_obj.data_type, "unit": ch_obj.unit,
+        "n_points": ch_obj.n_points(),
+        "vol_start": round(float(ch_obj.vols[0]), 3) if len(ch_obj.vols) else 0,
+        "vol_end": round(float(ch_obj.vols[-1]), 3) if len(ch_obj.vols) else 0,
+        "amp_min": round(float(np.min(ch_obj.amps)), 3) if len(ch_obj.amps) else 0,
+        "amp_max": round(float(np.max(ch_obj.amps)), 3) if len(ch_obj.amps) else 0,
+    }]
+    disp = body.get("name", "") or parsed["meta"].get("run_name", "") or ch_obj.name
+    return jsonify({
+        "session_id": sid,
+        "runs": [{
+            "name": disp,
+            "session_id": sid,
+            "channels": channel_list,
+            "uv_channels": find_uv_channels(parsed["channels"]),
+            "events": {k: len(v) for k, v in parsed["events"].items()},
+            "meta": parsed["meta"],
+        }],
+    })
+
+
 @app.route("/api/akta/plot", methods=["POST"])
 def api_akta_plot():
     """峰检测 + 峰图 PNG（base64）。参数：session_id / channel / xmin / xmax / min_height /
@@ -1484,6 +1542,8 @@ def api_akta_plot():
         png = generate_akta_png(ch, peaks, events=events, xmin=xmin, xmax=xmax,
                                 show_events=bool(body.get("show_events", False)),
                                 highlight_frac=bool(body.get("highlight_frac", True)),
+                                peak_fill=bool(body.get("peak_fill", True)),
+                                peak_labels=bool(body.get("peak_labels", False)),
                                 target_peak_idx=target_peak_idx,
                                 smooth_window=smooth,
                                 normalize=normalize,
@@ -1568,8 +1628,7 @@ def api_akta_overlay():
             channels, events=events_union if show_events else None,
             xmin=xmin, xmax=xmax, show_events=show_events,
             smooth_window=smooth, normalize=normalize, labels=labels,
-            frac_spans=frac_spans,
-            title="Overlay (%d runs)" % len(channels))
+            frac_spans=frac_spans)
         return jsonify({"image": f"data:image/png;base64,{base64.b64encode(png).decode()}"})
     except Exception as e:
         return jsonify({"error": f"总图生成失败: {e}"}), 400
@@ -1647,6 +1706,7 @@ def api_akta_save():
         return jsonify({"error": f"峰检测失败: {e}"}), 400
 
     params = {
+        "calc_type": "akta",
         "channel": ch_name,
         "data_type": ch.data_type,
         "unit": ch.unit,

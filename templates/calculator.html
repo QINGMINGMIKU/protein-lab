@@ -266,18 +266,23 @@
           <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
             <input type="checkbox" id="aktaNormalize"> 归一化
           </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
+            <input type="checkbox" id="aktaPeakFill" checked> 峰阴影
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
+            <input type="checkbox" id="aktaPeakLabels"> 标记峰位置
+          </label>
         </div>
       </div>
     </div>
 
-    <!-- 动作栏：出图模式 + 出图 / 峰图 / 导出（统一 tab-actions，对齐酶活 tab 主线操作流） -->
+    <!-- 动作栏：出图模式 + 出图 / 导出（统一 tab-actions，对齐酶活 tab 主线操作流） -->
     <div class="tab-actions">
       <select id="aktaPlotMode" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
         <option value="batch">分图（每文件一张）</option>
         <option value="overlay">总图（所有曲线叠加）</option>
       </select>
       <button class="btn btn-primary" onclick="aktaBatchPlot()">🖼 出图</button>
-      <button class="btn btn-outline" onclick="aktaPlot()">📈 峰图</button>
       <button class="btn btn-outline" onclick="aktaExport()">📊 导出峰表</button>
     </div>
 

@@ -254,6 +254,7 @@ label textarea { resize: vertical; }
 .copy-type-badge.dilution { background: #f3e5f5; }
 .copy-type-badge.enzyme { background: #e8f5e9; }
 .copy-type-badge.weblogo { background: #fff3e0; }
+.copy-type-badge.akta { background: #e0f7fa; }
 .copy-card-body { flex: 1; min-width: 0; }
 .copy-card-title { font-size: 14px; font-weight: 600; color: #1a1a2e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .copy-card-sub { font-size: 12px; color: #888; margin-top: 2px; }
@@ -268,6 +269,7 @@ label textarea { resize: vertical; }
 .copy-type-tag.dilution { background: #f3e5f5; color: #7b1fa2; }
 .copy-type-tag.enzyme { background: #e8f5e9; color: #2e7d32; }
 .copy-type-tag.weblogo { background: #fff3e0; color: #e65100; }
+.copy-type-tag.akta { background: #e0f7fa; color: #00695c; }
 .copy-type-tag.other { background: #f5f5f5; color: #666; }
 .copy-type-tag.active { border-color: currentColor; }
 

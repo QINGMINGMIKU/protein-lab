@@ -291,28 +291,19 @@ def detect_peaks(channel: Channel, *, xmin: float = 0.0, xmax: Optional[float] =
 
 
 def _smooth(y: np.ndarray, window: int) -> np.ndarray:
-    """Savitzky-Golay 平滑（纯 numpy 实现，避免 scipy 依赖；窗口自动补奇数）。"""
+    """Savitzky-Golay 平滑（scipy C 实现；窗口自动补奇数，短序列原样返回）。
+
+    早期版本是纯 numpy 逐点 lstsq（O(n) 次最小二乘），3 万点要 ~0.5s——
+    同文件 detect_peaks 已在用 scipy，此处无规避依赖的必要，改为 scipy.savgol_filter
+    提速 ~19 倍（BLI 侧 [bli.py] 同样用它）。
+    """
+    from scipy.signal import savgol_filter
     y = np.asarray(y, dtype=float)
     if window < 3 or len(y) < window:
         return y
     if window % 2 == 0:
         window += 1
-    half = window // 2
-    out = y.copy()
-    for i in range(len(y)):
-        lo = max(0, i - half)
-        hi = min(len(y), i + half + 1)
-        xs = np.arange(lo, hi) - i
-        ys = y[lo:hi]
-        if len(xs) >= 3:
-            # 局部二次多项式最小二乘，取中心值
-            A = np.vstack([np.ones_like(xs), xs, xs ** 2]).T
-            try:
-                coef, *_ = np.linalg.lstsq(A, ys, rcond=None)
-                out[i] = coef[0]
-            except np.linalg.LinAlgError:
-                pass
-    return out
+    return savgol_filter(y, window, polyorder=min(3, window - 1))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -402,12 +393,23 @@ def _normalize_amps(amps, vols, xmin, xmax, normalize):
     return (amps - lo) / (hi - lo)
 
 
+def _complement_color(color: str) -> str:
+    """RGB 补色（255 - 各通道），供峰阴影与曲线形成对比。"""
+    c = color.lstrip("#")
+    if len(c) != 6:
+        return color
+    r, g, b = (int(c[i:i + 2], 16) for i in (0, 2, 4))
+    return "#%02x%02x%02x" % (255 - r, 255 - g, 255 - b)
+
+
 def generate_akta_png(channel: Channel, peaks: List[Peak], *,
                       events: Optional[List[Tuple[float, str]]] = None,
                       xmin: float = 0.0, xmax: Optional[float] = None,
                       show_events: bool = False,      # frac 竖线（默认不显示，可切换）
                       highlight_frac: bool = True,    # 目标峰 frac 矩形阴影（默认开）
                       target_peak_idx: int = 0,       # 阴影跟随哪个峰（默认主峰/第一个）
+                      peak_fill: bool = True,         # 每个检测峰峰下面积填充（默认开）
+                      peak_labels: bool = False,      # 峰顶竖虚线 + P1 xx mL 标注（默认关）
                       smooth_window: int = 11,
                       normalize: bool = False,        # min-max 归一化到 [0,1]（区间内）
                       sample_name: str = "",          # 图例 smooth 条目名 + 图标题（默认 = 压缩包名）
@@ -416,6 +418,8 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
 
     - highlight_frac=True：目标峰自身 frac + 前后各 1 个 frac 画矩形背景阴影
       （中间深、两边浅；目标峰 = peaks[target_peak_idx]）
+    - peak_fill=True：每个检测峰峰下面积背景填充
+    - peak_labels=True：每个峰画峰顶竖虚线 + 「Px 峰位/高度」标注
     - show_events=True：画 Fraction 事件竖线（默认关闭）
     - normalize=True：区间内 min-max 归一化到 [0,1]（对齐 REF 脚本默认归一化行为）
     - sample_name：图例只保留 smooth 一条（raw 灰线为背景不占图例），
@@ -478,21 +482,23 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
                     ax.text(vol, ax.get_ylim()[1] * 0.97, txt, rotation=90,
                             fontsize=7, color="#3c763d", va="top", ha="right")
 
-        # 峰标注
+        # 峰标注：峰下面积填充（peak_fill，默认开）+ 峰顶竖虚线/标注（peak_labels，默认关）
         for idx, p in enumerate(peaks, 1):
-            ax.axvline(p.apex_vol, color=COLORS[1 % len(COLORS)], linestyle="--",
-                       linewidth=1.0, alpha=0.7)
-            ax.annotate(f"P{idx} {p.apex_vol:.2f} mL\n{p.height:.1f} mAU",
-                        xy=(p.apex_vol, p.apex_amp), xytext=(8, 8),
-                        textcoords="offset points", fontsize=9, color="#b2182b")
-            ax.fill_between(v, base, _smooth(a, smooth_window),
-                            where=[(p.start_vol <= x <= p.end_vol) for x in v],
-                            color=COLORS[1 % len(COLORS)], alpha=0.12)
+            if peak_labels:
+                ax.axvline(p.apex_vol, color=COLORS[1 % len(COLORS)], linestyle="--",
+                           linewidth=1.0, alpha=0.7)
+                ax.annotate(f"P{idx} {p.apex_vol:.2f} mL\n{p.height:.1f} mAU",
+                            xy=(p.apex_vol, p.apex_amp), xytext=(8, 8),
+                            textcoords="offset points", fontsize=9, color="#b2182b")
+            if peak_fill:
+                ax.fill_between(v, base, _smooth(a, smooth_window),
+                                where=[(p.start_vol <= x <= p.end_vol) for x in v],
+                                color=_complement_color(COLORS[0]), alpha=0.12)
 
         ax.set_xlim(xmin, xmax)
-        ax.set_xlabel(f"Volume (mL)" + (f" — {channel.name}" if channel.name else ""))
+        ax.set_xlabel("Volume (mL)")
         ax.set_ylabel(f"Signal ({channel.unit})" if channel.unit else "Signal")
-        ax.set_title(name, fontweight="bold")
+        # 图内不设标题（对齐 REF 原脚本无标题风格；身份由图例 + 前端卡片承担）
         ax.legend(loc="upper right", fontsize=9)
         ax.grid(True, alpha=0.15)
 
@@ -567,7 +573,7 @@ def generate_akta_overlay_png(channels: List[Channel], *,
         ax.set_xlim(xmin, xmax)
         ax.set_xlabel("Volume (mL)")
         ax.set_ylabel("Signal (normalized)" if normalize else "Signal (mAU)")
-        ax.set_title(title or "Overlay", fontweight="bold")
+        # 图内不设标题（对齐 REF 原脚本 overlay 无标题风格；身份由图例 + 前端卡片承担）
         ax.legend(loc="upper right", fontsize=9)
         ax.grid(True, alpha=0.15)
 

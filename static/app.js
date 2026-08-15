@@ -1131,6 +1131,7 @@ const COPY_TYPE_META = {
   "BLI 浓度梯度": { icon: "📊", css: "dilution", label: "BLI" },
   "酶活测定": { icon: "⚡", css: "enzyme", label: "酶活" },
   "Weblogo": { icon: "🧬", css: "weblogo", label: "Logo" },
+  "AKTA": { icon: "📈", css: "akta", label: "AKTA" },
 };
 
 function copyExpTypeInfo(e) {
@@ -1140,12 +1141,19 @@ function copyExpTypeInfo(e) {
   if (calcType === "dilution") return COPY_TYPE_META["BLI 浓度梯度"];
   if (calcType === "enzyme") return COPY_TYPE_META["酶活测定"];
   if (calcType === "weblogo") return COPY_TYPE_META["Weblogo"];
+  if (calcType === "akta") return COPY_TYPE_META["AKTA"];
   // fallback: match exp_type
   for (const [key, meta] of Object.entries(COPY_TYPE_META)) {
     if ((e.exp_type || "").includes(key.replace("测定", "").replace("浓度梯度", "")))
       return meta;
   }
   return { icon: "📋", css: "other", label: "其他" };
+}
+
+// AKTA 判定：新存档靠 params.calc_type=="akta"，旧存档（v0.0.9 早期无 calc_type）靠 exp_type 兜底
+function isAktaExp(e) {
+  const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
+  return params.calc_type === "akta" || (e.exp_type || "").indexOf("AKTA") >= 0;
 }
 
 async function loadCopyExpList() {
@@ -1169,6 +1177,7 @@ function renderCopyTypeTags() {
     { key: "dilution", label: "BLI", icon: "📊" },
     { key: "enzyme", label: "酶活", icon: "⚡" },
     { key: "weblogo", label: "Logo", icon: "🧬" },
+    { key: "akta", label: "AKTA", icon: "📈" },
     { key: "other", label: "其他", icon: "📋" },
   ].filter(t => counts[t.key]);
   document.getElementById("copyTypeTags").innerHTML = tags.map(t =>
@@ -1203,6 +1212,8 @@ function renderCopyExpList() {
     let detail = "";
     if (params.calc_type === "enzyme") {
       detail = `${Object.keys(wells).length} 孔 | ${params.meta?.sample || ""}`;
+    } else if (isAktaExp(e)) {
+      detail = `通道 ${params.channel || "?"} | ${params.source || "已存档"}`;
     } else if (proteins.length) {
       detail = `${proteins.length} 蛋白 | ${proteins.map(p => p.name).join(", ")}`;
     } else {
@@ -1245,11 +1256,15 @@ async function selectCopyExp(eid) {
       if (negWells.length) detailHtml += `<br>阴性/空白: ${negWells.map(([id]) => id).join(", ")}`;
     } else if (calcType === "weblogo") {
       detailHtml = `<b>${proteins.length} 条序列</b> | ${params.positions || "?"} 位点`;
+    } else if (isAktaExp(e)) {
+      detailHtml = `<b>通道 ${esc(params.channel || "?")}</b>` +
+        (params.source ? ` | 源文件 ${esc(params.source)}` : "") +
+        (params.xmin || params.xmax ? ` | 体积 ${params.xmin ?? 0}–${params.xmax ?? "∞"} mL` : "");
     } else {
       detailHtml = `${e.protein_names || "无蛋白"} | ${e.notes || "无额外信息"}`;
     }
 
-    const targetLabel = calcType === "enzyme" ? "酶活计算" : calcType === "dilution" ? "BLI 浓度梯度" : calcType === "weblogo" ? "Weblogo" : "蛋白浓度";
+    const targetLabel = calcType === "enzyme" ? "酶活计算" : calcType === "dilution" ? "BLI 浓度梯度" : calcType === "weblogo" ? "Weblogo" : isAktaExp(e) ? "AKTA 峰图" : "蛋白浓度";
 
     document.getElementById("copyPreviewTitle").textContent = e.title;
     document.getElementById("copyPreviewMeta").innerHTML = `<span class="copy-type-tag ${ti.css}">${ti.icon} ${ti.label}</span> ${e.date || ""} → <b>${targetLabel}</b>`;
@@ -1326,6 +1341,40 @@ async function applyCopyAndSwitch() {
     renderBliTable();
     document.querySelector(".tab-btn[data-tab='dilution']").click();
     toast(`已加载 ${proteins.length} 个蛋白`);
+    return;
+  }
+
+  if (isAktaExp(copyCache)) {
+    // 复制到 AKTA Tab — 从实验原始快照重建会话（曲线数据在 experiment_raw）
+    const rid = (copyCache._raw_ids || [])[0];
+    if (!rid) { toast("该实验无原始快照可复制", true); return; }
+    try {
+      const raw = await API.get(`/api/experiments/${copyCache.id}/raw/${rid}`);
+      const data = await API.post("/api/akta/restore", {
+        payload: raw.payload,
+        name: copyCache.title || params.source || params.channel || "restored",
+      });
+      const run = data.runs[0];
+      aktaRuns = [{
+        ...run,
+        channel: run.uv_channels[0] || run.channels[0]?.name || "",
+        target_peak: 0,
+        checked: true,
+      }];
+      aktaCurrentRun = 0;
+      renderAktaRuns();
+      // 揭示分析结果区（与上传路径一致：aktaRunList 在 #aktaAnalyzed 内，默认 hidden）
+      document.getElementById("aktaMeta").textContent =
+        `1 文件（快照） | 1 成功 | ${run.channels.length} 通道`;
+      document.getElementById("aktaEventsInfo").textContent = "";
+      document.getElementById("aktaAnalyzed").classList.remove("hidden");
+      document.getElementById("aktaPeakTableWrap").classList.add("hidden");
+      document.getElementById("aktaPlotArea").innerHTML = "";
+      refreshAktaPlaceholder();
+      document.querySelector(".tab-btn[data-tab='akta']").click();
+      aktaPlot();
+      toast(`已载入 ${run.channels.length} 个通道（来自快照）`);
+    } catch (err) { toast(err.message, true); }
     return;
   }
 
@@ -2545,6 +2594,7 @@ async function uploadAktaFile() {
         ...run,
         channel: uv || run.channels[0]?.name || "",
         target_peak: 0,   // 阴影跟随主峰（第 1 个）
+        checked: true,    // 默认参与出图（可勾选剔除）
       };
     });
     aktaCurrentRun = 0;
@@ -2578,14 +2628,17 @@ function renderAktaRuns() {
     const chOpts = run.channels.map(ch =>
       `<option value="${escAttr(ch.name)}" ${ch.name === run.channel ? "selected" : ""}>${esc(ch.name)} (${esc(ch.data_type)}${ch.unit ? " " + esc(ch.unit) : ""}, ${ch.n_points}pts)</option>`).join("");
     const evInfo = Object.entries(run.events || {}).map(([k, v]) => `${k}:${v}`).join(" ");
+    const checked = run.checked === false ? "" : "checked";
     return `<div style="border:1px solid ${aktaCurrentRun === ri ? "#4361ee" : "#e0e0e0"};border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;background:${aktaCurrentRun === ri ? "#f0f5ff" : "#fff"}" data-run="${ri}">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-        <strong style="cursor:pointer" class="akta-run-select">${esc(run.name)}</strong>
+        <div style="display:inline-flex;align-items:center;gap:6px">
+          <input type="checkbox" class="akta-run-check" data-run="${ri}" ${checked} onclick="event.stopPropagation()">
+          <strong style="cursor:pointer" class="akta-run-select">${esc(run.name)}</strong>
+        </div>
         <span style="color:#888;font-size:12px">${evInfo || "无事件"}</span>
       </div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center">
         <select class="akta-run-channel" data-run="${ri}" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:12px">${chOpts}</select>
-        <button class="btn btn-sm btn-outline akta-run-plot" data-run="${ri}">📈</button>
       </div>
     </div>`;
   }).join("");
@@ -2601,13 +2654,6 @@ document.addEventListener("click", function (e) {
     aktaPlot();
     return;
   }
-  const plotBtn = e.target.closest(".akta-run-plot");
-  if (plotBtn) {
-    const ri = parseInt(plotBtn.dataset.run, 10);
-    aktaCurrentRun = ri;
-    aktaPlot();
-    return;
-  }
   const pick = e.target.closest(".akta-pick");
   if (pick) {
     aktaSelectChannel(pick.dataset.channel);
@@ -2615,6 +2661,12 @@ document.addEventListener("click", function (e) {
   }
 });
 document.addEventListener("change", function (e) {
+  const ck = e.target.closest(".akta-run-check");
+  if (ck) {
+    const ri = parseInt(ck.dataset.run, 10);
+    if (aktaRuns[ri]) aktaRuns[ri].checked = ck.checked;
+    return;
+  }
   const sel = e.target.closest(".akta-run-channel");
   if (!sel) return;
   const ri = parseInt(sel.dataset.run, 10);
@@ -2639,6 +2691,8 @@ function aktaParams(run) {
     smooth_window: parseInt(document.getElementById("aktaSmooth").value || "11", 10),
     show_events: document.getElementById("aktaShowEvents").checked,
     highlight_frac: document.getElementById("aktaHighlightFrac").checked,
+    peak_fill: document.getElementById("aktaPeakFill").checked,
+    peak_labels: document.getElementById("aktaPeakLabels").checked,
     normalize: document.getElementById("aktaNormalize").checked,
     target_peak_idx: run.target_peak || 0,
   };
@@ -2659,9 +2713,10 @@ async function aktaPlot() {
 }
 
 // 出图入口：分图模式 = 每文件一张；总图模式 = 所有曲线叠一张
+// 只出勾选（akta-run-check）的文件
 async function aktaBatchPlot() {
-  const okRuns = aktaRuns.filter(r => !r.error && r.channel);
-  if (!okRuns.length) { toast("没有可出图的文件", true); return; }
+  const okRuns = aktaRuns.filter(r => !r.error && r.channel && r.checked !== false);
+  if (!okRuns.length) { toast("没有勾选可出图的文件", true); return; }
   const mode = document.getElementById("aktaPlotMode").value;
   const area = document.getElementById("aktaPlotArea");
   const normOn = document.getElementById("aktaNormalize").checked;
@@ -2758,9 +2813,14 @@ async function aktaExport() {
       throw new Error(j.error || `导出失败 (${r.status})`);
     }
     const blob = await r.blob();
+    // 文件名默认用 zip 包名（去 .zip），允许用户自定义
+    const zipBase = (run.name || "").replace(/\.zip$/i, "") || run.channel;
+    let fname = prompt("导出文件名:", `${zipBase}_峰表.xlsx`);
+    if (!fname) return;
+    if (!/\.xlsx$/i.test(fname)) fname += ".xlsx";
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `akta_peaks_${run.channel.replace(/[^A-Za-z0-9_]/g, "_")}.xlsx`;
+    a.download = fname;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

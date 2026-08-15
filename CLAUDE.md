@@ -131,6 +131,7 @@ protein_lab/
 - v0.1.3 — Comparison：WT vs variant 多实验横切对比 + 判断辅助（Workbench 差异化核心）
 - v0.2.0 — AI 解读层（基于证据包判断 candidate 优先级）
 - 飞书 bot（支线）— 实验室飞书消息通道 → AI（tool-use）→ protein_lab MCP；**序列脱敏硬约束**；MVP 用现有 8 工具（查蛋白/算浓度/归档），价值在 v0.1.2 证据包后显现
+- Prism / 出版数据打通（支线，暂缓）— 把 BLI/AKTA 等分析结果导出 `.pzfx`（GraphPad Prism 项目文件，本质 XML/zip），人工在 Prism 里排版出版级图；**明确不做**：无人值守直出版本（用户拍板暂不推进，仅备查）。matplotlib 定位=分析过程即时可视化 + 存档快照，非最终论文图终点。待办先决：数据流打通方案评估（哪个模块导出、如何映射 Prism 数据表）
 
 **设计原则（Workbench 定位）**：
 - 减少认知成本、不增加管理成本：拖入数据 → 自动分析 → 给结论，不做项目/批次/审批流。
