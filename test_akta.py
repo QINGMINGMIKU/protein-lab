@@ -7,9 +7,10 @@
 1. parse_akta_zip —— 两个真实样例 zip（REF/*.zip）的通道/事件解析（不依赖 pycorn，标准库原生）
 2. find_uv_channels / find_fraction_events
 3. detect_peaks —— 峰检测与真值位置同数量级（1YPI 主峰 ≈23.96 mL，PD1 主峰 ≈0.86 mL）
-4. generate_akta_png —— PNG 头校验
-5. /api/akta/analyze、/api/akta/plot、/api/akta/export、/api/akta/save（raw 落库 + version，隔离临时库）
-6. raw 不可变 + 会话守卫
+4. generate_akta_png —— PNG 头校验 + peak_labels/peak_fill/normalize 组合出图
+5. _smooth —— savgol 边界守卫（偶窗 == len 不崩；短序列原样返回）
+6. /api/akta/analyze、/api/akta/plot、/api/akta/export、/api/akta/save（raw 落库 + version，隔离临时库）
+7. raw 不可变 + 会话守卫
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
@@ -37,7 +38,7 @@ assert os.path.exists(ZIP_PD1), f"缺少样例 zip: {ZIP_PD1}"
 
 import numpy as np
 from akta import (parse_akta_zip, find_uv_channels, find_fraction_events,
-                  detect_peaks, generate_akta_png, AKTA_ANALYSIS_VERSION)
+                  detect_peaks, generate_akta_png, _smooth, AKTA_ANALYSIS_VERSION)
 
 # ── 1. 解析：1YPI（22 通道 + Fraction 31）──
 r1 = parse_akta_zip(ZIP_1YPI)
@@ -83,6 +84,28 @@ print(f"peak detection OK: 1YPI 主峰 {best1.apex_vol:.2f} mL, PD1 主峰 {best
 png = generate_akta_png(uv280, peaks2, events=frac2, show_events=True)
 assert png[:8] == b"\x89PNG\r\n\x1a\n", "PNG 头校验失败"
 print(f"akta PNG OK: {len(png)}B")
+
+# 4a. peak_labels / peak_fill / normalize 组合出图（回归：P2-4/5/6 改动路径）
+for kw in ({"peak_labels": True},
+           {"peak_fill": False},
+           {"peak_labels": True, "peak_fill": False},
+           {"peak_labels": True, "normalize": True}):
+    png_k = generate_akta_png(uv280, peaks2, **kw)
+    assert png_k[:8] == b"\x89PNG\r\n\x1a\n", f"PNG 头失败 kw={kw}"
+print("akta PNG variants OK: peak_labels / peak_fill / normalize 组合")
+
+# 4b. _smooth savgol 边界守卫（回归 P1-1：len(y)==偶窗 时 +1 后越界，savgol 抛 ValueError）
+y_even = np.arange(4, dtype=float)
+assert np.array_equal(_smooth(y_even, 4), y_even), "偶窗 == len 应原样返回（+1 后超长）"
+assert np.array_equal(_smooth(y_even, 5), y_even), "窗 > len 应原样返回"
+assert np.array_equal(_smooth(np.array([], dtype=float), 11), np.array([], dtype=float)), "空序列原样返回"
+out = _smooth(np.arange(10, dtype=float), 4)      # 偶窗 < len → +1 成 5 正常平滑
+assert out.shape == (10,) and np.isfinite(out).all()
+out_odd = _smooth(np.arange(10, dtype=float), 5)  # 奇窗 < len 常规路径
+assert out_odd.shape == (10,) and np.isfinite(out_odd).all()
+out_eq = _smooth(np.arange(5, dtype=float), 5)    # 奇窗 == len（5 <= 5 合法）
+assert out_eq.shape == (5,) and np.isfinite(out_eq).all()
+print("akta _smooth boundary OK: 偶窗==len 不崩 / 短序列原样返回 / 常规路径同长")
 
 # ── 5. API（隔离临时库）──
 import models

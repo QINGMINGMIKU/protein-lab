@@ -303,6 +303,8 @@ def _smooth(y: np.ndarray, window: int) -> np.ndarray:
         return y
     if window % 2 == 0:
         window += 1
+    if len(y) < window:      # 偶窗 +1 后可能超过序列长（len(y)==偶窗 时），savgol 要求 window_length ≤ size
+        return y
     return savgol_filter(y, window, polyorder=min(3, window - 1))
 
 
@@ -412,7 +414,7 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
                       peak_labels: bool = False,      # 峰顶竖虚线 + P1 xx mL 标注（默认关）
                       smooth_window: int = 11,
                       normalize: bool = False,        # min-max 归一化到 [0,1]（区间内）
-                      sample_name: str = "",          # 图例 smooth 条目名 + 图标题（默认 = 压缩包名）
+                      sample_name: str = "",          # 图例 smooth 条目名（默认 = 压缩包名）
                       dpi: int = 200) -> bytes:
     """生成峰图 PNG：UV 轨迹（平滑叠加）+ 基线 + 峰标注。
 
@@ -423,7 +425,7 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
     - show_events=True：画 Fraction 事件竖线（默认关闭）
     - normalize=True：区间内 min-max 归一化到 [0,1]（对齐 REF 脚本默认归一化行为）
     - sample_name：图例只保留 smooth 一条（raw 灰线为背景不占图例），
-      条目名与图标题都用它；缺省回退通道名。
+      条目名用它；缺省回退通道名。
     """
     from fonts import setup_matplotlib_cjk
     setup_matplotlib_cjk()
@@ -468,6 +470,7 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
                         color="#4361ee", ha="center", va="top", fontweight="bold")
 
         # 基线
+        base = 0.0
         if len(v) > 3:
             base = float(np.percentile(_smooth(a, smooth_window), 5))
             ax.axhline(base, color="#999999", linestyle=":", linewidth=1.2)
@@ -483,15 +486,20 @@ def generate_akta_png(channel: Channel, peaks: List[Peak], *,
                             fontsize=7, color="#3c763d", va="top", ha="right")
 
         # 峰标注：峰下面积填充（peak_fill，默认开）+ 峰顶竖虚线/标注（peak_labels，默认关）
+        # fill_smooth 与基线同一条平滑曲线，整段一次 _smooth 供所有峰复用（避免逐峰重算）
+        fill_smooth = _smooth(a, smooth_window) if (peak_fill and peaks and len(v) > 3) else None
         for idx, p in enumerate(peaks, 1):
             if peak_labels:
                 ax.axvline(p.apex_vol, color=COLORS[1 % len(COLORS)], linestyle="--",
                            linewidth=1.0, alpha=0.7)
-                ax.annotate(f"P{idx} {p.apex_vol:.2f} mL\n{p.height:.1f} mAU",
-                            xy=(p.apex_vol, p.apex_amp), xytext=(8, 8),
+                # normalize 后 y 轴是相对信号，峰值高度用插值回当前位置，不标绝对 mAU
+                ap_amp = float(np.interp(p.apex_vol, v, a)) if normalize else p.apex_amp
+                label = (f"P{idx} {p.apex_vol:.2f} mL" if normalize
+                         else f"P{idx} {p.apex_vol:.2f} mL\n{p.height:.1f} mAU")
+                ax.annotate(label, xy=(p.apex_vol, ap_amp), xytext=(8, 8),
                             textcoords="offset points", fontsize=9, color="#b2182b")
-            if peak_fill:
-                ax.fill_between(v, base, _smooth(a, smooth_window),
+            if peak_fill and fill_smooth is not None:
+                ax.fill_between(v, base, fill_smooth,
                                 where=[(p.start_vol <= x <= p.end_vol) for x in v],
                                 color=_complement_color(COLORS[0]), alpha=0.12)
 
@@ -516,7 +524,6 @@ def generate_akta_overlay_png(channels: List[Channel], *,
                               normalize: bool = False,
                               labels: Optional[List[str]] = None,
                               frac_spans: Optional[List[dict]] = None,  # 每文件目标峰阴影三元组
-                              title: str = "",
                               dpi: int = 200) -> bytes:
     """总图：把多个通道（通常来自不同 zip 的同名 UV 通道）的平滑曲线叠在一张图上。
 
