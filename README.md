@@ -146,8 +146,6 @@ protein_lab/
 | v0.0.4 | PyInstaller **onedir** 打包 / GitHub Actions 双平台构建 / macOS 兼容 / waitress / `--mcp` / `--import-db` |
 | v0.0.5 | 浓度单位管理 / 酶活增强（时间点筛选、阴性扣除、速率校正）/ BLI 模块（ForteBio 解析 + 五方法 KD） |
 | **架构升级**（2026-08） | 统一写入入口 / 计算纯函数化 / 反序列化收归 models / 校正后端单写 / 实验类型单一来源 |
-| **v0.0.7**（当前） | **数据存储地基**：schema 迁移框架 / experiment_raw 不可变快照 / 迁移前自动备份 / MCP 读写契约 / CI 测试步 |
-| **v0.0.8** | **BLI 原始数据拟合 UI**：ForteBio CSV 上传分析（传感器图 / 5 方法 KD 拟合）/ 保存为实验（raw→experiment_raw `bli_curves`，results 带 `BLI_ANALYSIS_VERSION`）|
-| **v0.0.9** | **AKTA 峰图整理**：`akta.py` 标准库原生解析 Unicorn zip（无 pycorn 依赖）/ 峰检测标注 / 峰表 Excel 导出 / 保存为实验（raw→experiment_raw `akta_traces`，results 带 `AKTA_ANALYSIS_VERSION`）|
-| **v0.0.8** | **BLI 原始数据拟合 UI**：ForteBio CSV 上传分析（传感器图 / 5 方法 KD）/ 保存为实验（raw→experiment_raw `bli_curves`，results 带 `BLI_ANALYSIS_VERSION`）/ 详情页原始快照展示 |
-| **v0.0.9** | **AKTA 峰图整理**：`akta.py` 标准库原生解析 Unicorn zip（无 pycorn 依赖）/ 峰检测标注 / 峰表 Excel 导出 / 保存为实验（raw→experiment_raw `akta_traces`，results 带 `AKTA_ANALYSIS_VERSION`） |
+| **v0.0.7** | **数据存储地基**：schema 迁移框架 / experiment_raw 不可变快照 / 迁移前自动备份 / MCP 读写契约 / CI 测试步 |
+| **v0.0.8** | **BLI 原始数据拟合 UI**：ForteBio CSV 上传分析（传感器图 / 5 方法 KD 拟合）/ 保存为实验（raw→experiment_raw `bli_curves`，results 带 `BLI_ANALYSIS_VERSION`）/ 详情页原始快照展示 |
+| **v0.0.9**（当前） | **AKTA 峰图整理**：`akta.py` 标准库原生解析 Unicorn zip（无 pycorn 依赖）/ 峰检测标注 / 峰表 Excel 导出 / 保存为实验（raw→experiment_raw `akta_traces`，results 带 `AKTA_ANALYSIS_VERSION`）；**BLI 分析增强**（曲线勾选入样 / 单样本拟合 / 默认截去结合起点前基线 / 相界对齐 REF 脚本）；**AKTA 复制恢复 + 参数回填 + Sheet3 多样品作图导出 + 峰图 PNG 下载** |
