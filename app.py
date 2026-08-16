@@ -22,6 +22,7 @@ import numpy as np
 import paths
 import models
 import services
+import research
 from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics, sub_blank, align_wells, snap_ylim, correct_slopes, aggregate_groups
 
 app = Flask(__name__,
@@ -59,7 +60,12 @@ def _push_undo(item_type: str, data: dict):
 
 @app.route("/")
 def index():
-    return render_template("proteins.html")
+    return render_template("research.html")
+
+
+@app.route("/research")
+def page_research():
+    return render_template("research.html")
 
 
 @app.route("/proteins")
@@ -89,6 +95,67 @@ def page_experiment_detail(eid):
     raws = models.exp_raw_list(eid, with_version=True)
     return render_template("experiment_detail.html", exp=e, exp_types=models.EXP_TYPES,
                            raws=raws)
+
+
+# ═══════════════════════════════════════════════════════════
+#  Research（研究脉络）API — v0.1.0
+# ═══════════════════════════════════════════════════════════
+
+@app.route("/api/research/nodes", methods=["GET"])
+def api_research_tree_list():
+    return jsonify(research.build_trees())
+
+
+@app.route("/api/research/nodes", methods=["POST"])
+def api_research_node_create():
+    data = request.get_json() or {}
+    nid, err = research.create_node(
+        node_type=data.get("node_type", ""),
+        title=data.get("title", ""),
+        detail=data.get("detail") or "",
+        parent_id=data.get("parent_id"),
+        exp_id=data.get("exp_id"),
+        tag=data.get("tag") or "",
+        free_attach=bool(data.get("free_attach", False)),
+    )
+    if err:
+        return jsonify({"error": err}), 400
+    return jsonify(research.get_node_with_subtree(nid)), 201
+
+
+@app.route("/api/research/nodes/<int:nid>", methods=["GET"])
+def api_research_node_get(nid):
+    node = research.get_node_with_subtree(nid)
+    if not node:
+        return jsonify({"error": "节点不存在"}), 404
+    node["chain"] = research.get_chain(nid)
+    return jsonify(node)
+
+
+@app.route("/api/research/nodes/<int:nid>", methods=["PUT"])
+def api_research_node_update(nid):
+    data = request.get_json() or {}
+    ok, err = research.update_node(
+        nid,
+        node_type=data.get("node_type", ""),
+        title=data.get("title", ""),
+        detail=data.get("detail") or "",
+        parent_id=data.get("parent_id"),
+        exp_id=data.get("exp_id"),
+        tag=data.get("tag") or "",
+        free_attach=bool(data.get("free_attach", False)),
+    )
+    if not ok:
+        return jsonify({"error": err}), 400
+    return jsonify(research.get_node_with_subtree(nid))
+
+
+@app.route("/api/research/nodes/<int:nid>", methods=["DELETE"])
+def api_research_node_delete(nid):
+    count, err = research.delete_node_subtree(nid)
+    if err:
+        return jsonify({"error": err}), 400
+    return jsonify({"ok": True, "deleted": count})
 
 
 # ═══════════════════════════════════════════════════════════

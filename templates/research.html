@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1>研究脉络</h1>
+  <div style="display:flex;gap:8px">
+    <span class="research-hint" style="align-self:center;color:#888;font-size:13px">
+      目标 → 实验 → 结论 → 新目标（证据链）
+    </span>
+    <button class="btn btn-primary" onclick="researchAddRoot()">+ 新增根目标</button>
+  </div>
+</div>
+
+<div class="toolbar" style="gap:8px">
+  <input type="text" id="researchQuery" placeholder="筛选标题 / 标签 / 实验标题…"
+         oninput="researchRender()" style="flex:1;min-width:200px">
+  <select id="researchTagFilter" onchange="researchRender()">
+    <option value="">全部标签</option>
+  </select>
+  <select id="researchProteinFilter" onchange="researchRender()">
+    <option value="">全部蛋白</option>
+  </select>
+  <button class="btn btn-sm btn-outline" onclick="researchRender(true)">↺ 重载</button>
+</div>
+
+<!-- ── 链视图：选中节点时显示「根 → … → 当前」breadcrumb ── -->
+<div id="researchChain" class="research-chain hidden"></div>
+
+<!-- ── 树视图 ── -->
+<div id="researchTree" class="research-tree"></div>
+<div id="researchEmpty" class="empty-hint hidden">
+  还没有研究节点。<br>
+  <button class="btn btn-primary" onclick="researchAddRoot()" style="margin-top:10px">开始：新增根目标</button>
+</div>
+
+<!-- ── 节点详情面板 ── -->
+<div id="researchDetail" class="panel hidden">
+  <div class="panel-header">
+    <h2 id="researchDetailTitle"></h2>
+    <button class="btn btn-sm" onclick="researchCloseDetail()">✕</button>
+  </div>
+  <div id="researchDetailContent"></div>
+</div>
+
+<!-- ── 节点编辑弹窗 ── -->
+<div id="researchModal" class="modal hidden">
+  <div class="modal-box modal-wide">
+    <div class="modal-header">
+      <h3 id="researchModalTitle">研究节点</h3>
+      <button class="btn btn-sm" onclick="researchCloseModal()">✕</button>
+    </div>
+    <form id="researchForm" onsubmit="researchSave(event)">
+      <input type="hidden" id="researchNodeId">
+      <input type="hidden" id="researchParentId">
+      <label>类型
+        <select id="researchNodeType">
+          <option value="goal">目标</option>
+          <option value="experiment">实验</option>
+          <option value="conclusion">结论</option>
+        </select>
+      </label>
+      <label>标题 <input type="text" id="researchTitle" required placeholder="一句话：目标 / 实验内容 / 结论主张"></label>
+      <label>详情 <textarea id="researchDetailTxt" rows="3" placeholder="补充说明（可选）"></textarea></label>
+      <label>标签 <input type="text" id="researchTag" placeholder="逗号分隔，如 稳定性, TIM"></label>
+      <label>关联实验（实验块；留空 = 计划占位）
+        <div class="research-exp-picker">
+          <input type="text" id="researchExpSearch" placeholder="搜索实验标题…" oninput="researchExpFilter()">
+          <select id="researchExpSel">
+            <option value="">-- 计划占位（未归档）--</option>
+          </select>
+        </div>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:500;margin-top:4px">
+        <input type="checkbox" id="researchFreeAttach" style="width:auto">
+        自由挂载（打破白名单限制，可把实验挂到目标、结论挂到实验外等）
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <button type="button" class="btn btn-outline" onclick="researchCloseModal()">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

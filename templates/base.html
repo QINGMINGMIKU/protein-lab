@@ -8,9 +8,10 @@
 </head>
 <body>
 <nav class="topbar">
-  <a href="/proteins" class="brand">🧬 Protein Lab</a>
+  <a href="/research" class="brand">🧬 Protein Lab</a>
   <div class="nav-links">
-    <a href="/proteins" class="{% if request.path == '/proteins' or request.path == '/' %}active{% endif %}">蛋白库</a>
+    <a href="/research" class="{% if request.path == '/research' or request.path == '/' %}active{% endif %}">研究脉络</a>
+    <a href="/proteins" class="{% if request.path == '/proteins' %}active{% endif %}">蛋白库</a>
     <a href="/calculator" class="{% if request.path == '/calculator' %}active{% endif %}">计算工具</a>
     <a href="/experiments" class="{% if request.path == '/experiments' %}active{% endif %}">实验归档</a>
   </div>

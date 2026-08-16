@@ -3107,6 +3107,317 @@ async function aktaSaveExp() {
 function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
 
 // ═════════════════════════════════════════════════════
+//  研究脉络（v0.1.0）— 证据链：目标 → 实验 → 结论 → 新目标
+//  白名单边与 research.py WHITELIST 一致（此处仅前端类型预选提示，
+//  权威校验在服务端）：goal→{goal,experiment}、experiment→conclusion、
+//  conclusion→goal；勾「自由挂载」(free_attach) 逃生舱可打破任一边。
+// ═════════════════════════════════════════════════════
+const researchState = { trees: [], experiments: [], expMap: {}, selectedId: null, collapsed: new Set() };
+
+function researchFirstAllowed(parentType) {
+  if (!parentType) return "goal";
+  const allowed = { goal: ["goal", "experiment"], experiment: ["conclusion"], conclusion: ["goal"] }[parentType] || [];
+  for (const t of ["goal", "experiment", "conclusion"]) if (allowed.includes(t)) return t;
+  return "goal";
+}
+
+function researchNodeMatch(node, q, tag, prot) {
+  if (tag) {
+    const tags = (node.tag || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (!tags.includes(tag)) return false;
+  }
+  if (prot) {
+    const exp = node.exp_id ? researchState.expMap[node.exp_id] : null;
+    const names = (exp && exp.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (!names.includes(prot)) return false;
+  }
+  if (q) {
+    const exp = node.exp_id ? researchState.expMap[node.exp_id] : null;
+    const expTitle = (exp && exp.title) || (node.experiment && node.experiment.title) || "";
+    const hay = `${node.title || ""} ${node.tag || ""} ${expTitle}`.toLowerCase();
+    if (!hay.includes(q.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function researchFilterMatch(node, q, tag, prot) {
+  if (researchNodeMatch(node, q, tag, prot)) return true;
+  return (node.children || []).some(c => researchFilterMatch(c, q, tag, prot));
+}
+
+function researchFindNode(id) {
+  const stack = [...researchState.trees];
+  while (stack.length) {
+    const n = stack.pop();
+    if (n.id === id) return n;
+    if (n.children) stack.push(...n.children);
+  }
+  return null;
+}
+
+function researchToggle(id) {
+  if (researchState.collapsed.has(id)) researchState.collapsed.delete(id);
+  else researchState.collapsed.add(id);
+  researchRender();
+}
+
+function researchRender(force) {
+  const q = (document.getElementById("researchQuery").value || "").trim();
+  const tag = document.getElementById("researchTagFilter").value || "";
+  const prot = document.getElementById("researchProteinFilter").value || "";
+  if (!researchState.trees.length && force) { researchLoad().catch(() => {}); return; }
+  const filtering = q !== "" || tag !== "" || prot !== "";
+  const treeEl = document.getElementById("researchTree");
+  const emptyEl = document.getElementById("researchEmpty");
+  if (!researchState.trees.length) {
+    treeEl.classList.add("hidden");
+    emptyEl.classList.remove("hidden");
+    return;
+  }
+  treeEl.classList.remove("hidden");
+  emptyEl.classList.add("hidden");
+  treeEl.innerHTML = researchState.trees
+    .filter(r => researchFilterMatch(r, q, tag, prot))
+    .map(r => researchRenderNode(r, 0, q, tag, prot, filtering)).join("") ||
+    '<div class="empty-hint">没有匹配的节点</div>';
+  // 选中节点已被删（子树删除）时收起详情
+  if (researchState.selectedId != null && !researchFindNode(researchState.selectedId)) {
+    researchState.selectedId = null;
+    document.getElementById("researchDetail").classList.add("hidden");
+    document.getElementById("researchChain").classList.add("hidden");
+  }
+}
+
+function researchRenderNode(node, depth, q, tag, prot, filtering) {
+  const kids = node.children || [];
+  const hasKids = kids.length > 0;
+  const expanded = filtering || !researchState.collapsed.has(node.id);
+  const childHtml = kids
+    .filter(c => researchFilterMatch(c, q, tag, prot))
+    .map(c => researchRenderNode(c, depth + 1, q, tag, prot, filtering)).join("");
+  const toggle = hasKids
+    ? `<button class="res-toggle" onclick="event.stopPropagation();researchToggle(${node.id})" title="${expanded ? "折叠" : "展开"}">${expanded ? "▾" : "▸"}</button>`
+    : `<span class="res-toggle res-toggle-empty"></span>`;
+  const badge = `<span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>`;
+  const expIcon = node.exp_id ? `<span class="res-exp-ico" title="关联实验 #${node.exp_id}">📄</span>` : "";
+  const free = node.free_attach ? `<span class="res-free" title="自由挂载（逃生舱）">⛓</span>` : "";
+  const dim = researchNodeMatch(node, q, tag, prot) ? "" : " dim";
+  const sel = researchState.selectedId === node.id ? " sel" : "";
+  return `<div class="res-node${sel}" style="margin-left:${depth * 22}px">
+    <div class="res-row${dim}" onclick="researchSelect(${node.id})">
+      ${toggle}<span class="res-title">${esc(node.title)}</span>${badge}${expIcon}${free}
+      <span class="res-tags">${esc(node.tag || "")}</span>
+      <span class="res-actions">
+        <button class="btn btn-sm" title="加子节点" onclick="event.stopPropagation();researchAddChild(${node.id})">＋</button>
+        <button class="btn btn-sm" title="编辑" onclick="event.stopPropagation();researchEdit(${node.id})">✎</button>
+        <button class="btn btn-sm btn-danger" title="删除（含子树）" onclick="event.stopPropagation();researchDelete(${node.id})">🗑</button>
+      </span>
+    </div>${hasKids && expanded ? `<div class="res-children">${childHtml}</div>` : ""}
+  </div>`;
+}
+
+async function researchSelect(id) {
+  let node;
+  try { node = await API.get(`/api/research/nodes/${id}`); }
+  catch (err) { toast(err.message, true); return; }
+  researchState.selectedId = id;
+  researchRender();
+  renderResearchChain(node.chain || []);
+  renderResearchDetail(node);
+  const detailEl = document.getElementById("researchDetail");
+  detailEl.classList.remove("hidden");
+  detailEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function renderResearchChain(chain) {
+  const el = document.getElementById("researchChain");
+  el.classList.remove("hidden");
+  el.innerHTML = chain.map((c, i) =>
+    `${i ? '<span class="res-chain-sep">→</span>' : ""}<span class="res-chain-link" onclick="researchSelect(${c.id})">${esc(c.title)}</span>`
+  ).join("");
+}
+
+function renderResearchDetail(node) {
+  document.getElementById("researchDetailTitle").textContent = node.title;
+  const kids = node.children || [];
+  const tags = (node.tag || "").split(",").map(s => s.trim()).filter(Boolean);
+  let expCard = "";
+  if (node.experiment) {
+    const e = node.experiment;
+    expCard = `<div class="res-exp-card">
+      <div class="res-exp-card-head">📄 关联实验</div>
+      <a class="res-exp-card-title" href="/experiments/${e.id}">${esc(e.title)}</a>
+      <div class="res-exp-card-meta">${esc(e.exp_type)} · ${esc(e.date || "")} · #${e.id}</div>
+    </div>`;
+  } else if (node.node_type === "experiment") {
+    expCard = `<div class="res-exp-card res-exp-placeholder">📋 计划占位（尚未归档实验，留作后续执行）</div>`;
+  }
+  const kidChips = kids.length
+    ? `<div class="res-kids"><span class="res-kids-label">直接子节点</span>` +
+      kids.map(k => `<span class="res-chain-link" onclick="researchSelect(${k.id})">${esc(k.title)}</span>`).join(" · ") + "</div>"
+    : "";
+  document.getElementById("researchDetailContent").innerHTML = `
+    <div class="res-detail-meta">
+      <span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>
+      ${node.free_attach ? '<span class="res-free">⛓ 自由挂载</span>' : ""}
+      ${tags.map(t => `<span class="res-tag-chip">${esc(t)}</span>`).join("")}
+      <span class="res-detail-id">#${node.id}</span>
+    </div>
+    ${expCard}
+    ${node.detail ? `<div class="res-detail-txt">${esc(node.detail)}</div>` : ""}
+    ${kidChips}
+    <div class="res-detail-actions">
+      <button class="btn btn-primary" onclick="researchAddChild(${node.id})">+ 加子节点</button>
+      <button class="btn" onclick="researchEdit(${node.id})">✎ 编辑</button>
+      <button class="btn btn-danger" onclick="researchDelete(${node.id})">🗑 删除（含子树）</button>
+    </div>`;
+}
+
+function researchOpenModal(mode, node, parent) {
+  const nid = document.getElementById("researchNodeId");
+  const pid = document.getElementById("researchParentId");
+  const typeSel = document.getElementById("researchNodeType");
+  const titleInp = document.getElementById("researchTitle");
+  const detailInp = document.getElementById("researchDetailTxt");
+  const tagInp = document.getElementById("researchTag");
+  const expSel = document.getElementById("researchExpSel");
+  const expSearch = document.getElementById("researchExpSearch");
+  const freeChk = document.getElementById("researchFreeAttach");
+  // 每次都重建实验下拉（实验可能新归档）；未加载过则先拉取
+  if (researchState.experiments.length) {
+    researchExpFill();
+  } else {
+    researchLoad().then(researchExpFill);
+  }
+  expSearch.value = "";
+  researchExpFilter();
+  if (mode === "edit" && node) {
+    document.getElementById("researchModalTitle").textContent = "编辑节点";
+    nid.value = node.id;
+    pid.value = node.parent_id || "";
+    typeSel.value = node.node_type;
+    titleInp.value = node.title;
+    detailInp.value = node.detail || "";
+    tagInp.value = node.tag || "";
+    expSel.value = node.exp_id || "";
+    freeChk.checked = !!node.free_attach;
+  } else {
+    document.getElementById("researchModalTitle").textContent = mode === "root" ? "新增根目标" : "新增子节点";
+    nid.value = "";
+    pid.value = parent ? parent.id : "";
+    typeSel.value = researchFirstAllowed(parent ? parent.node_type : null);
+    titleInp.value = "";
+    detailInp.value = "";
+    tagInp.value = "";
+    expSel.value = "";
+    expSearch.value = "";
+    freeChk.checked = false;
+  }
+  document.getElementById("researchModal").classList.remove("hidden");
+  titleInp.focus();
+}
+
+function researchAddRoot() { researchOpenModal("root", null, null); }
+function researchAddChild(parentId) {
+  const parent = researchFindNode(parentId) || { id: parentId, node_type: "goal" };
+  researchOpenModal("child", null, parent);
+}
+function researchEdit(id) { researchOpenModal("edit", researchFindNode(id) || null, null); }
+function researchCloseModal() { document.getElementById("researchModal").classList.add("hidden"); }
+function researchCloseDetail() {
+  document.getElementById("researchDetail").classList.add("hidden");
+  document.getElementById("researchChain").classList.add("hidden");
+  researchState.selectedId = null;
+  researchRender();
+}
+
+async function researchSave(e) {
+  e.preventDefault();
+  const id = document.getElementById("researchNodeId").value;
+  const rawPid = document.getElementById("researchParentId").value;
+  const rawExp = document.getElementById("researchExpSel").value;
+  const payload = {
+    node_type: document.getElementById("researchNodeType").value,
+    title: document.getElementById("researchTitle").value.trim(),
+    detail: document.getElementById("researchDetailTxt").value,
+    parent_id: rawPid ? Number(rawPid) : null,
+    exp_id: rawExp ? Number(rawExp) : null,
+    tag: document.getElementById("researchTag").value.trim(),
+    free_attach: document.getElementById("researchFreeAttach").checked,
+  };
+  try {
+    if (id) await API.put(`/api/research/nodes/${id}`, payload);
+    else await API.post("/api/research/nodes", payload);
+    researchCloseModal();
+    toast(id ? "已更新" : "已添加");
+    await researchLoad();
+  } catch (err) { toast(err.message, true); }
+}
+
+async function researchDelete(id) {
+  const node = researchFindNode(id);
+  const label = node ? `「${node.title}」及其整棵子树` : `节点 #${id}`;
+  if (!confirm(`确认删除 ${label}？子树一并删除，不可恢复。`)) return;
+  try {
+    await API.del(`/api/research/nodes/${id}`);
+    if (researchState.selectedId === id) researchCloseDetail();
+    toast("已删除");
+    await researchLoad();
+  } catch (err) { toast(err.message, true); }
+}
+
+function researchExpFill() {
+  const sel = document.getElementById("researchExpSel");
+  sel.innerHTML = '<option value="">-- 计划占位（未归档）--</option>' +
+    researchState.experiments.map(e =>
+      `<option value="${e.id}">${esc(e.date || "")} ${esc(e.title)} — ${esc(e.exp_type)}</option>`).join("");
+}
+function researchExpFilter() {
+  const q = (document.getElementById("researchExpSearch").value || "").toLowerCase();
+  [...document.getElementById("researchExpSel").options].forEach(o => {
+    o.hidden = q !== "" && !o.text.toLowerCase().includes(q);
+  });
+}
+function researchFillTagFilter() {
+  const sel = document.getElementById("researchTagFilter");
+  const seen = new Set();
+  const stack = [...researchState.trees];
+  while (stack.length) {
+    const n = stack.pop();
+    (n.tag || "").split(",").map(s => s.trim()).filter(Boolean).forEach(t => seen.add(t));
+    if (n.children) stack.push(...n.children);
+  }
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全部标签</option>' +
+    [...seen].sort().map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
+}
+function researchFillProteinFilter() {
+  const sel = document.getElementById("researchProteinFilter");
+  const seen = new Set();
+  researchState.experiments.forEach(e =>
+    (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean).forEach(p => seen.add(p)));
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全部蛋白</option>' +
+    [...seen].sort().map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
+}
+async function researchLoad() {
+  const [trees, exps] = await Promise.all([
+    API.get("/api/research/nodes"),
+    API.get("/api/experiments?limit=500"),
+  ]);
+  researchState.trees = trees;
+  researchState.experiments = exps;
+  researchState.expMap = {};
+  exps.forEach(e => { researchState.expMap[e.id] = e; });
+  researchFillTagFilter();
+  researchFillProteinFilter();
+  researchRender();
+}
+function researchInit() { researchLoad().catch(() => {}); }
+
+// ═════════════════════════════════════════════════════
 //  Init
 // ═════════════════════════════════════════════════════
 function init() {
@@ -3132,6 +3443,9 @@ function init() {
   if (document.querySelector("#bliTable") || document.querySelector("#bliProteinSearch")) {
     const dilSel = document.getElementById("dilUnitSel");
     if (dilSel) dilSel.value = dilUnit;
+  }
+  if (document.querySelector("#researchTree")) {
+    researchInit();
   }
 }
 init();

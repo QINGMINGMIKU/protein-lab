@@ -278,3 +278,66 @@ label textarea { resize: vertical; }
 .copy-type-tag.active { border-color: currentColor; }
 
 @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } }
+
+/* ── 研究脉络（v0.1.0）────────────────────────────── */
+.research-chain {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  padding: 8px 14px; margin-bottom: 12px;
+  background: #f4f6fb; border: 1px solid #dde3f0; border-radius: 6px;
+  font-size: 13px;
+}
+.res-chain-sep { color: #9aa3b5; margin: 0 2px; }
+.res-chain-link { color: #4361ee; cursor: pointer; }
+.res-chain-link:hover { text-decoration: underline; }
+
+.res-node { position: relative; }
+.res-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; margin: 2px 0; border-radius: 6px;
+  cursor: pointer; background: #fff; border: 1px solid #eef0f4;
+  transition: .12s;
+}
+.res-row:hover { background: #f4f6fb; }
+.res-row.dim { opacity: .5; }
+.res-node.sel > .res-row { background: #e8edfc; border-color: #4361ee; }
+.res-toggle {
+  width: 20px; height: 20px; flex: none; border: none; background: none;
+  cursor: pointer; color: #5a6478; font-size: 12px; padding: 0;
+}
+.res-toggle-empty { width: 20px; flex: none; }
+.res-title { font-size: 14px; color: #1a1a2e; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-tags { font-size: 12px; color: #9aa3b5; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-actions { display: flex; gap: 4px; flex: none; opacity: 0; }
+.res-row:hover .res-actions, .res-node.sel > .res-row .res-actions { opacity: 1; }
+.res-children { position: relative; }
+
+.res-badge {
+  display: inline-flex; align-items: center; flex: none;
+  padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+}
+.res-badge-goal { background: #e8f5e9; color: #2e7d32; }
+.res-badge-experiment { background: #e3f2fd; color: #1565c0; }
+.res-badge-conclusion { background: #fce4ec; color: #ad1457; }
+.res-exp-ico { font-size: 13px; flex: none; }
+.res-free { color: #b8860b; font-size: 13px; flex: none; }
+
+.res-detail-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.res-detail-id { color: #aaa; font-size: 12px; }
+.res-tag-chip { background: #f0f0f0; color: #555; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+.res-detail-txt { white-space: pre-wrap; color: #333; font-size: 14px; line-height: 1.6; margin-bottom: 12px; }
+.res-detail-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.res-kids { margin-top: 12px; font-size: 13px; }
+.res-kids-label { color: #888; margin-right: 8px; }
+
+.res-exp-card {
+  border: 1px solid #dde3f0; background: #f8faff; border-radius: 8px;
+  padding: 10px 14px; margin-bottom: 12px;
+}
+.res-exp-card-head { font-size: 12px; color: #888; margin-bottom: 4px; }
+.res-exp-card-title { font-size: 15px; font-weight: 600; color: #4361ee; text-decoration: none; }
+.res-exp-card-title:hover { text-decoration: underline; }
+.res-exp-card-meta { font-size: 12px; color: #888; margin-top: 2px; }
+.res-exp-placeholder { color: #7a6a2d; border-color: #e0c878; background: #fffbf0; }
+.res-exp-picker input, .res-exp-picker select { width: 100%; }
+
+.empty-hint { text-align: center; color: #888; padding: 40px 0; font-size: 14px; }

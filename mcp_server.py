@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import models
 import services
+import research
 from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert_concentration
 
 # ── MCP 读写契约（数据完整性规则 #6）──────────────────────
@@ -147,6 +148,26 @@ TOOLS = [
         }
     },
     {
+        "name": "list_research_trees",
+        "description": "列出研究脉络森林（v0.1.0）：全部根目标，每棵递归嵌套 children。节点类型 goal(目标)/experiment(实验，含 exp_id 关联或为计划占位)/conclusion(结论)；evidence chain：目标→实验→结论→新目标",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "get_research_node",
+        "description": "获取研究脉络单节点：递归子树 + 根→节点链（breadcrumb）+ 关联实验摘要。用于看一个目标/实验/结论的完整证据链上下文",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "node_id": {"type": "integer", "description": "研究节点 id"}
+            },
+            "required": ["node_id"]
+        }
+    },
+    {
         "name": "save_experiment",
         "description": "归档一条实验记录到数据库",
         "inputSchema": {
@@ -268,6 +289,17 @@ def handle_tools_call(id_, params):
             limit = int(args.get("limit", 30))
             result = models.exp_list(exp_type, limit)
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "list_research_trees":
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(research.build_trees(), ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "get_research_node":
+            nid = int(args["node_id"])
+            node = research.get_node_with_subtree(nid)
+            if not node:
+                return send_response(id_, {"content": [{"type": "text", "text": f"未找到研究节点: {nid}"}]})
+            node["chain"] = research.get_chain(nid)
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(node, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "save_experiment":
             protein_ids = []
