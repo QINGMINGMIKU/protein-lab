@@ -140,10 +140,14 @@ def build_trees() -> list[dict]:
 
 
 def _attach_subtree(node: dict) -> dict:
-    """给节点挂上递归 children（原地改造并返回）。"""
+    """给节点挂上递归 children（原地改造并返回）。
+
+    递归传下来的 `_node_public(c)` 是浅拷贝，没有 children 键——先 setdefault 再挂。
+    """
     children = [models.research_node_get(c["id"])
                 for c in models.research_node_children(node["id"])]
     children = [c for c in children if c]
+    node.setdefault("children", [])
     for c in children:
         node["children"].append(_attach_subtree(_node_public(c)))
     node["children"].sort(key=lambda c: (c.get("sort_order", 0), c.get("id", 0)))

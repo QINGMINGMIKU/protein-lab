@@ -165,6 +165,11 @@ assert r.status_code == 200 and r.get_json()["chain"] == [{"id": api_gid,
     "node_type": "goal", "node_type_label": "目标", "title": "API目标"}], "GET 应带链视图"
 r = client.get("/api/research/nodes")
 assert r.status_code == 200 and any(t["id"] == api_gid for t in r.get_json()), "列表应含新根"
+# 递归子树路径（回归：_attach_subtree 曾因递归传浅拷贝缺 children 键 KeyError）
+r = client.get(f"/api/research/nodes/{g}")
+rj = r.get_json()
+assert r.status_code == 200 and rj.get("children") is not None, "GET 有子节点应带 children"
+assert len(rj["children"]) == len(models.research_node_children(g)), "children 数应等于直接子节点数"
 r = client.put(f"/api/research/nodes/{api_gid}", json={
     "node_type": "goal", "title": "API目标改", "parent_id": None, "tag": "api"})
 assert r.status_code == 200 and r.get_json()["title"] == "API目标改", "PUT 应更新"
@@ -185,7 +190,14 @@ for tool, args in [
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         mcp_server.handle_tools_call(None, {"name": tool, "arguments": args})
-    assert buf.getvalue().strip(), f"{tool} 应有响应"
+    out = buf.getvalue().strip()
+    assert out, f"{tool} 应有响应"
+    # 错误响应也是非空——解析首行断言非 error（回归：get_research_node 曾因
+    # _attach_subtree KeyError 静默走 send_error，仍能通过旧"非空"断言）
+    if tool == "get_research_node" and args.get("node_id") == g:
+        assert '"error"' not in out, f"get_research_node 应成功返回: {out[:200]}"
+        text = json.loads(json.loads(out.split(chr(10))[0])["result"]["content"][0]["text"])
+        assert text.get("children"), "有子节点应带递归子树"
     assert dump_db() == before, f"读工具 {tool} 不应写库"
 print("12. MCP 读工具零写库 OK")
 
