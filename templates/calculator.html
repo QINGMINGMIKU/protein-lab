@@ -457,16 +457,26 @@
     </div>
   </div>
 
-  <!-- 时间点筛选：取消勾选排除异常时间点（对拟合/绘图/存档/导出统一生效） -->
+  <!-- 时间范围筛选：拖动长轴两端把手选定连续时间区间（对拟合/绘图/存档/导出统一生效） -->
   <div id="enzymeTimePanel" class="hidden" style="margin-top:12px">
     <div class="calc-card" style="padding:12px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
-        <h3 style="margin:0;font-size:15px">时间点筛选</h3>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
+        <h3 style="margin:0;font-size:15px">时间范围筛选</h3>
         <span id="enzymeTimeCount" style="font-size:12px;color:#888"></span>
-        <button class="btn btn-sm btn-outline" onclick="enzymeTimeAll(true)">全选</button>
-        <button class="btn btn-sm btn-outline" onclick="enzymeTimeAll(false)">清空</button>
+        <button class="btn btn-sm btn-outline" onclick="enzymeTimeAll()">全选</button>
       </div>
-      <div id="enzymeTimeCbs" style="display:flex;flex-wrap:wrap;gap:4px;max-height:150px;overflow-y:auto"></div>
+      <div id="enzymeTimeAxis" class="enzyme-time-axis"
+           onpointerdown="enzymeTimeAxisDown(event)" onpointermove="enzymeTimeAxisMove(event)"
+           onpointerup="enzymeTimeAxisUp(event)" onpointercancel="enzymeTimeAxisUp(event)">
+        <div class="eta-track"></div>
+        <div class="eta-range"></div>
+        <div class="eta-handle eta-handle-lo"></div>
+        <div class="eta-handle eta-handle-hi"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#999;margin-top:4px">
+        <span id="enzymeTimeLoLabel"></span>
+        <span id="enzymeTimeHiLabel"></span>
+      </div>
     </div>
   </div>
 
@@ -485,6 +495,9 @@
     </label>
     <label style="font-size:12px;display:flex;align-items:center;gap:4px">
       <input type="checkbox" id="enzymeAlignEnd" onchange="enzymePlot('kinetics')"> 对齐终止
+    </label>
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px" title="同组孔逐时间点取平均成一条曲线 + 误差棒；关闭则逐孔绘制">
+      <input type="checkbox" id="enzymeGroup" checked onchange="enzymePlot('kinetics')"> 按组分平均
     </label>
     <select id="enzymeErrorBar" onchange="enzymePlot('kinetics')" title="同组孔平均曲线的误差棒" style="font-size:13px;padding:4px 6px;border:1px solid #d0d0d0;border-radius:4px">
       <option value="sd" selected>误差棒 SD</option>

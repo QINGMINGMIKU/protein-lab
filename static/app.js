@@ -1348,9 +1348,10 @@ async function applyCopyAndSwitch() {
         enzymeData.wells[id] = { times: w.times, od: w.od };
       }
     }
-    // 时间点筛选：复制数据重建（与上传路径一致，面板默认全选）
-    enzymeTimePoints = [...new Set(emeta.temps || Object.values(enzymeData.wells)[0]?.times || [])];
-    enzymeTimeActive = new Set(enzymeTimePoints);
+    // 时间范围筛选：复制数据重建（与上传路径一致，面板默认全选）
+    enzymeTimePoints = [...new Set(emeta.temps || Object.values(enzymeData.wells)[0]?.times || [])].sort((a, b) => a - b);
+    enzymeTimeLo = 0;
+    enzymeTimeHi = enzymeTimePoints.length - 1;
     enzymeLastImage = null;
     enzymeLastPlotType = null;
     renderEnzymeTimePanel();
@@ -1659,8 +1660,10 @@ let enzymeSelection = new Set();
 let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw}}
 let enzymeLastImage = null;    // 最近一次曲线图 base64（供下载）
 let enzymeLastPlotType = null; // kinetics | michaelis
-let enzymeTimePoints = [];     // 时间点列表（秒，来自 meta.temps，全孔共享网格）
-let enzymeTimeActive = new Set(); // 当前激活的时间点（按时间值匹配，兼容个别孔缺测点错位）
+let enzymeTimePoints = [];     // 时间点列表（秒，升序，全孔共享网格）
+let enzymeTimeLo = 0;          // 时间区间起点下标（含）
+let enzymeTimeHi = 0;          // 时间区间终点下标（含）
+let enzymeTimeDragging = null; // 正在拖动的长轴把手: 'lo' | 'hi'
 let enzymeRefilterTimer = null;
 
 async function uploadEnzymeFile() {
@@ -1675,9 +1678,10 @@ async function uploadEnzymeFile() {
     enzymeData = data;
     enzymeSelection.clear();
     enzymeWellInfo = {};
-    // 时间点筛选：全孔共享 meta.temps 网格，缺省全选
-    enzymeTimePoints = [...new Set(data.meta.temps || Object.values(data.wells)[0]?.times || [])];
-    enzymeTimeActive = new Set(enzymeTimePoints);
+    // 时间范围筛选：全孔共享 meta.temps 网格，缺省全区间
+    enzymeTimePoints = [...new Set(data.meta.temps || Object.values(data.wells)[0]?.times || [])].sort((a, b) => a - b);
+    enzymeTimeLo = 0;
+    enzymeTimeHi = enzymeTimePoints.length - 1;
     enzymeLastImage = null;
     enzymeLastPlotType = null;
     renderEnzymeTimePanel();
@@ -1717,44 +1721,104 @@ function updatePlateSelection() {
   updateWellForm();
 }
 
-// ── 时间点筛选：排除明显异常时间点，对拟合/绘图/存档/导出统一生效 ──
+// ── 时间范围筛选：拖动长轴把手选连续时间区间，对拟合/绘图/存档/导出统一生效 ──
 function renderEnzymeTimePanel() {
   const panel = document.getElementById("enzymeTimePanel");
-  const box = document.getElementById("enzymeTimeCbs");
-  if (!panel || !box) return;
+  if (!panel) return;
   if (!enzymeTimePoints.length) { panel.classList.add("hidden"); return; }
   panel.classList.remove("hidden");
-  box.innerHTML = enzymeTimePoints.map((t, i) => {
-    const label = Number.isInteger(t) ? t : +t.toFixed(1);
-    return `<label style="font-size:12px;display:inline-flex;align-items:center;gap:3px;border:1px solid #e3e3e3;border-radius:4px;padding:2px 6px;cursor:pointer">
-      <input type="checkbox" data-tpidx="${i}" ${enzymeTimeActive.has(t) ? "checked" : ""} onchange="enzymeTimeToggle(${i})"> ${label}s</label>`;
-  }).join("");
+  renderEnzymeTimeAxis();
+}
+
+function enzymeTimeFrac(i) {
+  const n = enzymeTimePoints.length;
+  return n < 2 ? 0 : i / (n - 1);
+}
+
+function renderEnzymeTimeAxis() {
+  const axis = document.getElementById("enzymeTimeAxis");
+  if (!axis || !enzymeTimePoints.length) return;
+  // 时间点刻度（1px 竖线，hover 显示秒数）
+  axis.querySelectorAll(".eta-tick").forEach(t => t.remove());
+  enzymeTimePoints.forEach((t, i) => {
+    const tick = document.createElement("div");
+    tick.className = "eta-tick";
+    tick.style.left = enzymeTimeFrac(i) * 100 + "%";
+    tick.title = t + "s";
+    axis.appendChild(tick);
+  });
+  // 区间高亮 + 双把手位置
+  const loPct = enzymeTimeFrac(enzymeTimeLo) * 100;
+  const hiPct = enzymeTimeFrac(enzymeTimeHi) * 100;
+  const range = axis.querySelector(".eta-range");
+  const hLo = axis.querySelector(".eta-handle-lo");
+  const hHi = axis.querySelector(".eta-handle-hi");
+  range.style.left = loPct + "%";
+  range.style.width = Math.max(0, hiPct - loPct) + "%";
+  hLo.style.left = loPct + "%";
+  hHi.style.left = hiPct + "%";
+  // 端点读数
+  const eLo = document.getElementById("enzymeTimeLoLabel");
+  const eHi = document.getElementById("enzymeTimeHiLabel");
+  if (eLo) eLo.textContent = "起始 " + enzymeTimePoints[enzymeTimeLo] + " s";
+  if (eHi) eHi.textContent = "终止 " + enzymeTimePoints[enzymeTimeHi] + " s";
   updateEnzymeTimeBadge();
 }
 
 function updateEnzymeTimeBadge() {
   const el = document.getElementById("enzymeTimeCount");
   if (!el || !enzymeTimePoints.length) return;
-  const n = enzymeTimePoints.filter(t => enzymeTimeActive.has(t)).length;
-  el.textContent = `已选 ${n}/${enzymeTimePoints.length} 个时间点`;
+  const n = enzymeTimeHi - enzymeTimeLo + 1;
+  el.textContent = `已选 ${n}/${enzymeTimePoints.length} 个时间点（${enzymeTimePoints[enzymeTimeLo]}s — ${enzymeTimePoints[enzymeTimeHi]}s）`;
   el.style.color = n < 2 ? "#e74c3c" : "#888";  // <2 点无法拟合斜率，标红提醒
 }
 
-function enzymeTimeToggle(i) {
-  if (!enzymeTimePoints.length) return;
-  const t = enzymeTimePoints[i];
-  enzymeTimeActive.has(t) ? enzymeTimeActive.delete(t) : enzymeTimeActive.add(t);
-  const cb = document.querySelector(`#enzymeTimeCbs input[data-tpidx="${i}"]`);
-  if (cb) cb.checked = enzymeTimeActive.has(t);
-  updateEnzymeTimeBadge();
-  clearTimeout(enzymeRefilterTimer);
-  enzymeRefilterTimer = setTimeout(enzymeRefilter, 250);  // 防抖，批量切换只触发一次
+function enzymeTimeIndexFromEvent(e) {
+  const axis = document.getElementById("enzymeTimeAxis");
+  const rect = axis.getBoundingClientRect();
+  const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  return Math.round(frac * (enzymeTimePoints.length - 1));
 }
 
-function enzymeTimeAll(on) {
+function enzymeTimeAxisDown(e) {
   if (!enzymeTimePoints.length) return;
-  enzymeTimeActive = new Set(on ? enzymeTimePoints : []);
-  renderEnzymeTimePanel();
+  const idx = enzymeTimeIndexFromEvent(e);
+  if (enzymeTimeLo === enzymeTimeHi) {
+    // 区间坍缩成单点时：点左拖 lo、点右拖 hi，才能向两侧展开
+    enzymeTimeDragging = idx <= enzymeTimeLo ? "lo" : "hi";
+  } else {
+    const dLo = Math.abs(idx - enzymeTimeLo), dHi = Math.abs(idx - enzymeTimeHi);
+    enzymeTimeDragging = dLo <= dHi ? "lo" : "hi";
+  }
+  enzymeTimeAxisMoveTo(idx);
+  document.getElementById("enzymeTimeAxis").setPointerCapture(e.pointerId);
+}
+
+function enzymeTimeAxisMove(e) {
+  if (enzymeTimeDragging === null || !enzymeTimePoints.length) return;
+  enzymeTimeAxisMoveTo(enzymeTimeIndexFromEvent(e));
+}
+
+function enzymeTimeAxisUp() {
+  enzymeTimeDragging = null;
+}
+
+function enzymeTimeAxisMoveTo(idx) {
+  if (enzymeTimeDragging === "lo") {
+    enzymeTimeLo = Math.min(idx, enzymeTimeHi);   // lo 拖不过 hi
+  } else {
+    enzymeTimeHi = Math.max(idx, enzymeTimeLo);   // hi 拖不过 lo
+  }
+  renderEnzymeTimeAxis();
+  clearTimeout(enzymeRefilterTimer);
+  enzymeRefilterTimer = setTimeout(enzymeRefilter, 250);  // 防抖，连续拖动只触发一次
+}
+
+function enzymeTimeAll() {
+  if (!enzymeTimePoints.length) return;
+  enzymeTimeLo = 0;
+  enzymeTimeHi = enzymeTimePoints.length - 1;
+  renderEnzymeTimeAxis();
   clearTimeout(enzymeRefilterTimer);
   enzymeRefilterTimer = setTimeout(enzymeRefilter, 250);
 }
@@ -1767,12 +1831,14 @@ async function enzymeRefilter() {
   if (enzymeLastPlotType) await enzymePlot(enzymeLastPlotType);
 }
 
-// 按激活时间点过滤某孔数据（按时间值匹配，兼容个别孔缺测点导致的索引错位）
+// 按激活区间过滤某孔数据（按时间值匹配，兼容个别孔缺测点导致的索引错位）
 function enzymeFilteredData(wd) {
   if (!enzymeTimePoints.length) return { times: wd.times, od: wd.od };
+  const lo = enzymeTimePoints[enzymeTimeLo], hi = enzymeTimePoints[enzymeTimeHi];
   const times = [], od = [];
   for (let i = 0; i < wd.times.length; i++) {
-    if (enzymeTimeActive.has(wd.times[i])) { times.push(wd.times[i]); od.push(wd.od[i]); }
+    const t = wd.times[i];
+    if (t >= lo && t <= hi) { times.push(t); od.push(wd.od[i]); }
   }
   return { times, od };
 }
@@ -1859,13 +1925,22 @@ function enzymeUpdateWells() {
   const mw = parseFloat(document.getElementById("wellMW").value) || null;
 
   const ids = Array.from(enzymeSelection);
-  const multi = ids.length > 1 && !!name;  // 批量命名：同名孔按位置加 _1/_2/_3
+  // 批量命名：同名孔按孔位顺序自动加 _1/_2/_3；已存在不同名字的孔跳过不覆盖（enzymeShouldAutoRename）
+  const multi = ids.length > 1 && !!name;
   if (multi) {
     ids.sort((a, b) => (a.charCodeAt(0) - b.charCodeAt(0)) || (parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10)));
   }
-  ids.forEach((id, i) => {
+  const renameIds = multi ? ids.filter(id => enzymeShouldAutoRename(id, name)) : ids;
+  ids.forEach((id) => {
     if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
-    if (name) enzymeWellInfo[id].name = multi ? `${name}_${i + 1}` : name;
+    if (name) {
+      if (!multi) {
+        enzymeWellInfo[id].name = name;
+      } else {
+        const ri = renameIds.indexOf(id);
+        if (ri >= 0) enzymeWellInfo[id].name = `${name}_${ri + 1}`;
+      }
+    }
     enzymeWellInfo[id].group = group;  // 空=清除组（与 name 的「非空才写」不同）
     enzymeWellInfo[id].mw = mw;
     if (!isNaN(conc)) {
@@ -1880,6 +1955,17 @@ function enzymeUpdateWells() {
   });
   refreshWellGroupOptions();
   renderPlate();
+}
+
+// 批量自动命名是否改这个孔：空名、同名、或已是 {name}_N 模式 → 命名；名字不同 → 跳过不覆盖
+function enzymeShouldAutoRename(id, name) {
+  const cur = (enzymeWellInfo[id]?.name || "").trim();
+  if (!cur || cur === name) return true;
+  return new RegExp("^" + _escRegex(name) + "_\\d+$").test(cur);
+}
+
+function _escRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function enzymeBatchConc() {
@@ -1977,6 +2063,7 @@ async function enzymePlot(type) {
   const showBlank = document.getElementById("enzymeShowBlank")?.checked || false;
   const subBlank = document.getElementById("enzymeSubBlank")?.checked || false;
   const errorBar = document.getElementById("enzymeErrorBar")?.value || "sd";
+  const groupEnabled = document.getElementById("enzymeGroup")?.checked ?? true;  // 按组分平均开关
   const payload = { type, align_start: alignStart, align_end: alignEnd, show_blank: showBlank, sub_blank: subBlank, error_bar: errorBar, wells: {} };
   for (const id of ids) {
     const wd = enzymeData.wells[id];
@@ -1987,7 +2074,7 @@ async function enzymePlot(type) {
       times, od,
       ref: info.ref,  // 后端据此识别阴性/空白（扣除 + 默认隐藏）
       name: info.name || id,
-      group: info.group || "",  // 同组孔后端逐时间点取平均 + 误差棒
+      group: groupEnabled ? (info.group || "") : "",  // 关「按组分平均」→ 不传组，后端逐孔画
       conc_ng_ml: info.conc_ng_ml,
       substrate_uM: info.conc_uM,
       rate: info.fit?.slope,
