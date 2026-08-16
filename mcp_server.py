@@ -156,7 +156,7 @@ TOOLS = [
                 "exp_type": {"type": "string", "description": f"实验类型: {', '.join(models.EXP_TYPES)}"},
                 "protein_names": {"type": "array", "items": {"type": "string"}, "description": "关联蛋白名称列表（可选）"},
                 "date": {"type": "string", "description": "日期 YYYY-MM-DD，默认今天"},
-                "params": {"type": "object", "description": "实验参数 (JSON object)"},
+                "params": {"type": "object", "description": "实验参数 (JSON object)。浓度测定建议传 a280 + (mw_da 或 epsilon_red/epsilon_ox)，计算出的浓度放 results.mean_uM / mean_mg_ml；服务端保存时自动附上绑定的蛋白快照并规范成标准形态"},
                 "results": {"type": "object", "description": "实验结果 (JSON object)"},
                 "notes": {"type": "string", "description": "备注"}
             },
