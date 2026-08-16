@@ -115,7 +115,7 @@ protein_lab/
 - v0.0.1 ✓ 已发布 — 基础蛋白库 / 浓度+BLI / 实验归档 / MCP
 - v0.0.2 ✓ 已发布 (2026-08-09) — Weblogo / 撤销 / ProtParam / 酶活计算 / 启动自动备份
 - v0.0.3 ✓ 已发布 (2026-08-10) — 批量改标签 / 表头排序 / Weblogo 换行+区间+多聚体
-- v0.0.4 ✓ 已发布 (2026-08-11) — PyInstaller **onedir** 打包（免解压、秒开、误报低）+ GitHub Actions CI 双平台构建（tag 推送出 Win zip + macOS zip 附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db` + 酶活模块增强（**实验自动命名** `{date}_{type}_{seq:02d}` / 曲线图 PNG 下载 / **作图友好 Excel** 孔位-时间-OD 长格式 + 动力学汇总）+ 发布前打磨（Weblogo 服务端缓存+切页自动恢复 / Excel 导出**实验信息独占行**布局 / 详情页兜底修复 / 信息卡表格排版）
+- v0.0.4 ✓ 已发布 (2026-08-11) — PyInstaller **onedir** 打包（免解压、秒开、误报低）+ GitHub Actions CI 双平台构建（tag 推送出 Win zip + macOS zip 附到 Release）+ macOS 兼容（打包 Noto Sans SC、`paths.py` 统一路径）+ `--mcp` / `--import-db` + 酶活模块增强（**实验自动命名** `{date}_{type}_{seq:02d}` / 曲线图 PNG 下载 / **作图友好 Excel**（每孔独立时间/OD 列对宽格式）+ 动力学汇总）+ 发布前打磨（Weblogo 服务端缓存+切页自动恢复 / Excel 导出**实验信息独占行**布局 / 详情页兜底修复 / 信息卡表格排版）
 - v0.0.5 ✓ 已发布 (2026-08-12) — 浓度单位管理 + 酶活模块增强 + BLI 模块。
   - **浓度单位管理**：`calculators.CONC_UNITS` 与 `convert_concentration` 实现六单位互转，跨摩尔/质量换算需分子量，前端 JS 逐行镜像。蛋白浓度与 BLI 浓度梯度处增加单位下拉框，仅显示层换算，存档仍固定 µM/mg/mL。MCP 新增 `convert_concentration` 工具。
   - **酶活模块增强**：时间点筛选 UI；阴性信号级扣除，图内阴性归零；拟合后速率级校正 `slope_corrected`；拟合虚线锚定曲线首点并优先采用扣阴性后斜率；扣除与对齐解耦；纵轴取整；从实验复制重建时间面板；参考列样品兜底。
@@ -125,6 +125,7 @@ protein_lab/
 - v0.0.7 ✓ 已发布 (2026-08-13) — **数据存储地基**：schema 迁移框架（`PRAGMA user_version`）/ `experiment_raw` 不可变快照 / 迁移前自动备份 / MCP 读写契约 / CI 测试步（test_models 14 节 + test_bli）
 - v0.0.8 ✓ 已完成 (2026-08-15) — **BLI 原始数据拟合 UI**：`/api/bli/analyze|plot|fit|save` 四端点 + 计算工具「BLI 分析」tab（上传 ForteBio CSV → 样本摘要/参数面板 → 传感器图/每样本图 → 5 方法 KD 表 → 保存实验）。results 带 `BLI_ANALYSIS_VERSION`，raw→`experiment_raw` `data_type=bli_curves`（只写一次）；会话 `_bli_sessions` 内存缓存（TTL 2h/上限 10）；详情页新增原始数据快照表（`exp_raw_list(with_version=True)` 轻量提取版本号）。
 - v0.0.9 ✓ 已完成 (2026-08-15) — **AKTA 峰图整理**：`akta.py` 纯函数模块——**标准库原生解析 Unicorn zip（无 pycorn 依赖）**：嵌套 zip `rindex(EOCD)+22` 截断 + float32 偏移 47 起解码（pycorn 逻辑，REF 真实样例 zip 验证）；峰检测（SG 平滑 + 5% 分位基线 + scipy find_peaks height/prominence/distance）；峰图（标注 + Fraction 事件竖线）；峰表 Excel 导出。`/api/akta/analyze|plot|export|save` + 计算工具「AKTA 峰图」tab；results 带 `AKTA_ANALYSIS_VERSION`，raw→`experiment_raw` `data_type=akta_traces`；`test_akta.py` 用 REF 两个真实 zip 回归。
+- v0.0.10 ✓ 已发布 (2026-08-16) — **酶活孔分组 + 作图 Excel 宽格式**：`aggregate_groups` 纯函数——同组孔逐时间点取平均（均值曲线 + 误差棒 SD/SEM，图例带 `(n=成员数)`，组内仅 1 孔退化为单孔）；孔位详情面板「组」输入框（datalist 可选已有组，多选孔批量应用）；批量命名同名孔按孔位从左到右、上到下自动加 `_1/_2/_3`；空/错位孔返回 null fit（防 stale R² 标红）；作图 Excel 改宽格式（每孔独立「时间/OD」两列，撞名回落孔位，归档多实验用标题前缀），BLI/AKTA 作图导出复用共享写器 `_write_wide_ws_pairs`。**评审修复**：undo 先 peek 校验成功才 pop（失败保留可重试）/ renderBliKd 返回值落 DOM（KD 表此前不渲染）/ `exp_update` 列表参数序列化 / BLI 空窗口守卫（4 处 IndexError/ValueError）。experiments 列表蛋白列只显示首个 + hover 完整列表、日期/类型列 nowrap。
 - v0.1.0 — 酶活原始/结果分离 + recompute（raw 落库、results 带 version、recompute 复算一致——可复现规则 #8）
 - v0.1.1 — 轻量谱系 + 实验上下文（`experiment_links` + `used_sample_from`，**供 AI 消费而非管理 workflow**；不做全量 audit）
 - v0.1.2 — MCP 证据包（`get_variant_context`：一个 variant 的全部实验/上下文/可复算入口）
