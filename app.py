@@ -53,10 +53,6 @@ def _push_undo(item_type: str, data: dict):
         _undo_stack.pop(0)
 
 
-def _pop_undo():
-    return _undo_stack.pop() if _undo_stack else None
-
-
 # ═══════════════════════════════════════════════════════════
 #  页面路由
 # ═══════════════════════════════════════════════════════════
@@ -509,14 +505,16 @@ def api_undo_status():
 
 @app.route("/api/undo", methods=["POST"])
 def api_undo_restore():
-    item = _pop_undo()
-    if not item:
+    # 先 peek 校验、成功才 pop：恢复失败（如蛋白已存在）时项保留原位可重试，不吞撤销项
+    if not _undo_stack:
         return jsonify({"error": "无撤销项"}), 404
+    item = _undo_stack[-1]
     data = item["data"]
     if item["type"] == "protein":
         existing = models.protein_get_by_name(data["name"])
         if existing:
             return jsonify({"error": f"蛋白 '{data['name']}' 已存在，无法撤销"}), 409
+        _undo_stack.pop()
         models.protein_create(
             name=data["name"], sequence=data["sequence"],
             tag=data.get("tag", ""), notes=data.get("notes", ""),
@@ -527,6 +525,7 @@ def api_undo_restore():
         )
         return jsonify({"ok": True, "restored": data["name"]})
     elif item["type"] == "experiment":
+        _undo_stack.pop()
         protein_ids = data.get("protein_ids", [])
         new_eid = models.exp_create(
             title=data["title"], exp_type=data["exp_type"],

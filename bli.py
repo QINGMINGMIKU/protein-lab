@@ -167,39 +167,49 @@ def fit_1to1_per_curve(t, y, t_assoc, t_dissoc) -> dict:
     result: Dict[str, float] = {}
 
     mask_a = (t >= t_assoc) & (t <= t_dissoc)
-    t_a = t[mask_a] - t_assoc
-    y_a = y[mask_a] - y[mask_a][0]
-    try:
-        popt_a, _ = curve_fit(
-            lambda ta, Req, kobs: Req * (1 - np.exp(-kobs * ta)),
-            t_a, y_a,
-            p0=[np.max(y_a), 0.01],
-            bounds=([0, 1e-5], [20, 0.5]),
-            maxfev=10000,
-        )
-        result["Req"], result["kobs"] = popt_a[0], popt_a[1]
-        y_pred = popt_a[0] * (1 - np.exp(-popt_a[1] * t_a))
-        result["assoc_r2"] = _r2_score(y_a, y_pred)
-    except Exception:
-        result["Req"], result["kobs"] = np.max(y_a), 0.01
+    if mask_a.any():
+        t_a = t[mask_a] - t_assoc
+        y_a = y[mask_a] - y[mask_a][0]
+        try:
+            popt_a, _ = curve_fit(
+                lambda ta, Req, kobs: Req * (1 - np.exp(-kobs * ta)),
+                t_a, y_a,
+                p0=[np.max(y_a), 0.01],
+                bounds=([0, 1e-5], [20, 0.5]),
+                maxfev=10000,
+            )
+            result["Req"], result["kobs"] = popt_a[0], popt_a[1]
+            y_pred = popt_a[0] * (1 - np.exp(-popt_a[1] * t_a))
+            result["assoc_r2"] = _r2_score(y_a, y_pred)
+        except Exception:
+            result["Req"], result["kobs"] = np.max(y_a), 0.01
+            result["assoc_r2"] = 0.0
+    else:
+        # 结合窗口为空（t_dissoc 落在数据起点前）→ 无法拟合，给退化值不崩溃
+        result["Req"], result["kobs"] = 0.0, 0.01
         result["assoc_r2"] = 0.0
 
     mask_d = t >= t_dissoc
     t_d = t[mask_d] - t_dissoc
     y_d = y[mask_d]
-    try:
-        popt_d, _ = curve_fit(
-            lambda td, R0, koff: R0 * np.exp(-koff * td),
-            t_d, y_d,
-            p0=[max(y_d[0], 0.001), 1e-3],
-            bounds=([0, 1e-7], [10, 0.1]),
-            maxfev=10000,
-        )
-        result["R0"], result["koff"] = popt_d[0], popt_d[1]
-        y_pred = popt_d[0] * np.exp(-popt_d[1] * t_d)
-        result["dissoc_r2"] = _r2_score(y_d, y_pred)
-    except Exception:
-        result["R0"], result["koff"] = y_d[0], 1e-3
+    if y_d.size:
+        try:
+            popt_d, _ = curve_fit(
+                lambda td, R0, koff: R0 * np.exp(-koff * td),
+                t_d, y_d,
+                p0=[max(y_d[0], 0.001), 1e-3],
+                bounds=([0, 1e-7], [10, 0.1]),
+                maxfev=10000,
+            )
+            result["R0"], result["koff"] = popt_d[0], popt_d[1]
+            y_pred = popt_d[0] * np.exp(-popt_d[1] * t_d)
+            result["dissoc_r2"] = _r2_score(y_d, y_pred)
+        except Exception:
+            result["R0"], result["koff"] = y_d[0], 1e-3
+            result["dissoc_r2"] = 0.0
+    else:
+        # 解离窗口为空（t_dissoc 超出数据末端）→ 退化值不崩溃
+        result["R0"], result["koff"] = 0.0, 1e-3
         result["dissoc_r2"] = 0.0
     return result
 
@@ -363,9 +373,10 @@ def fit_standard(t_list, y_list, conc_list, t_assoc, t_dissoc, verbose=False):
     for t, y, conc in zip(t_list, y_list, conc_list):
         mask_a = (t >= t_assoc) & (t <= t_dissoc)
         t_a = t[mask_a] - t_assoc
-        y_a = y[mask_a] - y[mask_a][0]
+        y_a = y[mask_a]
         if len(y_a) < 5:
-            continue
+            continue  # 窗口不足 5 点跳过（先判后减，避免空窗口 y[0] 越界）
+        y_a = y_a - y_a[0]
         try:
             popt, _ = curve_fit(lambda ta, Req, kobs: Req * (1 - np.exp(-kobs * ta)),
                                 t_a, y_a, p0=[y_a[-1], 0.01],
@@ -405,8 +416,13 @@ def fit_split(t_list, y_list, conc_list, t_assoc, t_dissoc, verbose=False):
         _p(verbose, "  ⚠ 解离相全局拟合可能未收敛")
     koff = float(fit_d.x[0])
 
-    max_sig = max(float(np.max(y[(t >= t_assoc) & (t <= t_dissoc)]))
-                  for t, y, _ in zip(t_list, y_list, conc_list))
+    max_sig = 0.0
+    for t, y, _ in zip(t_list, y_list, conc_list):
+        _win = y[(t >= t_assoc) & (t <= t_dissoc)]
+        if _win.size:
+            max_sig = max(max_sig, float(np.max(_win)))
+    if max_sig <= 0:
+        return None  # 结合窗口全空（相界离谱/数据过短），无法拟合
 
     def assoc_residuals(par):
         kon, rmax = float(par[0]), float(par[1])
@@ -414,9 +430,10 @@ def fit_split(t_list, y_list, conc_list, t_assoc, t_dissoc, verbose=False):
         for t, y, conc in zip(t_list, y_list, conc_list):
             mask_a = (t >= t_assoc) & (t <= t_dissoc)
             ta = t[mask_a] - t_assoc
-            ya = y[mask_a] - y[mask_a][0]
+            ya = y[mask_a]
             if len(ta) < 5:
-                continue
+                continue  # 窗口不足 5 点跳过（先判后减，避免空窗口 ya[0] 越界）
+            ya = ya - ya[0]
             kobs = kon * conc + koff
             frac = (kon * conc) / kobs if kobs > 1e-15 else 0.0
             chunks.append(ya - rmax * frac * (1.0 - np.exp(-kobs * ta)))
@@ -434,8 +451,13 @@ def fit_split(t_list, y_list, conc_list, t_assoc, t_dissoc, verbose=False):
 
 def fit_joint(t_list, y_list, conc_list, t_assoc, t_dissoc, verbose=False):
     """关联+解离全曲线全局拟合：共享 kon/koff/Rmax。"""
-    max_sig = max(float(np.max(y[(t >= t_assoc) & (t <= t_dissoc)]))
-                  for t, y, _ in zip(t_list, y_list, conc_list))
+    max_sig = 0.0
+    for t, y, _ in zip(t_list, y_list, conc_list):
+        _win = y[(t >= t_assoc) & (t <= t_dissoc)]
+        if _win.size:
+            max_sig = max(max_sig, float(np.max(_win)))
+    if max_sig <= 0:
+        return None  # 结合窗口全空（相界离谱/数据过短），无法拟合
 
     def joint_residuals(par):
         kon, koff, rmax = float(par[0]), float(par[1]), float(par[2])
@@ -502,8 +524,13 @@ def fit_mixed(t_list, y_list, conc_list, t_assoc, t_dissoc, verbose=False):
         except Exception as e:
             _p(verbose, f"  steady-state mixed 拟合失败: {e}")
 
-    max_sig = max(float(np.max(y[(t >= t_assoc) & (t <= t_dissoc)]))
-                  for t, y, _ in zip(t_list, y_list, conc_list))
+    max_sig = 0.0
+    for t, y, _ in zip(t_list, y_list, conc_list):
+        _win = y[(t >= t_assoc) & (t <= t_dissoc)]
+        if _win.size:
+            max_sig = max(max_sig, float(np.max(_win)))
+    if max_sig <= 0:
+        return None  # 结合窗口全空（相界离谱/数据过短），无法拟合
 
     def simulate_mixed_v2(t, kon, koff, rmax, ns_scale, conc):
         y_spec = _simulate_1to1(t, kon, koff, rmax, conc, t_assoc, t_dissoc)

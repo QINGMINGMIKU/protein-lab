@@ -453,7 +453,8 @@ def exp_update(exp_id: int, protein_ids: list[int] = None, **kwargs) -> bool:
     for k, v in kwargs.items():
         if k in EXP_SAFE_COLUMNS:
             val = v
-            if isinstance(val, dict):
+            # params/results 落库恒为 JSON 字符串：非 str（dict/list/标量）一律 dumps，str 原样（防重复编码）
+            if k in ("params", "results") and not isinstance(val, str):
                 val = json.dumps(val, ensure_ascii=False)
             updates[k] = val
     if updates:

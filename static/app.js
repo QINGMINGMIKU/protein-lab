@@ -2713,7 +2713,7 @@ async function bliFitSelected() {
     const r = await API.post("/api/bli/fit", { ...bliParams(), sample: bliSelectedSample });
     bliKdResult = r;
     document.getElementById("bliKdWrap").classList.remove("hidden");
-    renderBliKd(bliSelectedSample, r);
+    document.getElementById("bliKdTables").innerHTML = renderBliKd(bliSelectedSample, r);
   } catch (err) { toast(err.message, true); }
 }
 

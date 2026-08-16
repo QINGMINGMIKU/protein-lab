@@ -18,7 +18,7 @@ import os, sys, csv, base64, importlib, tempfile
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 import numpy as np
 from bli import _simulate_1to1, parse_fortebio_csv, group_by_sample, \
-    generate_sensorgram_png, fit_kd
+    generate_sensorgram_png, fit_kd, fit_1to1_per_curve
 
 TMP = tempfile.mkdtemp(prefix="protein_lab_test_")
 
@@ -93,6 +93,26 @@ assert 10 < kd_std < 1000, f"standard KD {kd_std} 偏离真值过远"
 kd_joint = res["joint"]["kd"]
 assert 10 < kd_joint < 1000, f"joint KD {kd_joint} 偏离真值过远"
 print(f"KD OK: standard={kd_std:.1f} nM, joint={kd_joint:.1f} nM (truth 100)")
+
+# 4c. 空窗口守卫：相界落在数据外时 fit_1to1_per_curve 不崩溃，返回退化值（此前 IndexError）
+t_short = np.arange(0.0, 60.0, 2.0)   # 数据只到 58s
+y_short = 1.0 * (1 - np.exp(-0.01 * t_short))
+# 结合+解离窗口全空：t_assoc=80、t_dissoc=120 都超出数据末端
+f_empty = fit_1to1_per_curve(t_short, y_short, 80.0, 120.0)
+assert f_empty["Req"] == 0.0 and f_empty["R0"] == 0.0, f_empty
+assert f_empty["kobs"] == 0.01 and f_empty["assoc_r2"] == 0.0 and f_empty["dissoc_r2"] == 0.0, f_empty
+# 仅解离窗口空：t_dissoc 恰在数据末端 → mask_d 空
+f_d = fit_1to1_per_curve(t_short, y_short, 0.0, 60.0)
+assert f_d["R0"] == 0.0 and f_d["dissoc_r2"] == 0.0, f_d
+# 正常窗口仍能拟合（回归 sanity：纯结合曲线 → kobs≈0.01）
+f_ok = fit_1to1_per_curve(t_short, y_short, 0.0, 30.0)
+assert f_ok["kobs"] > 0 and f_ok["koff"] > 0 and f_ok["assoc_r2"] > 0.9, f_ok
+print("BLI empty-window guard OK")
+
+# 4d. fit_kd 相界全空（远超数据）：优雅返回 error，不抛异常
+res_degen = fit_kd(groups["WT"], t_assoc=900, t_dissoc=1000)
+assert res_degen.get("error"), res_degen
+print("fit_kd degenerate phase OK")
 
 # ── 5. 酶活纯函数（calculators：sub_blank / align_wells / snap_ylim）──
 from calculators import sub_blank, align_wells, snap_ylim, correct_slopes

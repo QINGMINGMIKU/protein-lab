@@ -314,6 +314,31 @@ assert relinked["payload"] == {"curves": [[1, 2]]}, "relink 不得改动 payload
 assert models.exp_raw_list(new_id)[0]["data_type"] == "bli_curves", "新实验应能读到快照"
 print("16. exp_raw_relink 断链修复 OK")
 
+# ── 17. exp_update 对 list 型 params/results 序列化（此前仅 dict 序列化，list 直接绑库报错）──
+_e17 = models.exp_create(title="list参数", exp_type="BLI", params={}, results={})
+assert models.exp_update(_e17, params=[{"x": 1}, {"x": 2}], results=[1, 2, 3])
+_r17 = models.exp_get(_e17)
+assert _r17["params"] == [{"x": 1}, {"x": 2}], _r17["params"]
+assert _r17["results"] == [1, 2, 3], _r17["results"]
+print("17. exp_update list 序列化 OK")
+
+# ── 18. undo peek-before-pop：恢复冲突（同名蛋白已存在）时项保留原位，可重试 ──
+from app import app as _undo_app
+_uc = _undo_app.test_client()
+_p18 = models.protein_create(name="UndoConflict", sequence="MK")
+assert _uc.delete(f"/api/proteins/{_p18}").status_code == 200
+_cnt18 = _uc.get("/api/undo/status").get_json()["count"]
+models.protein_create(name="UndoConflict", sequence="MK")   # 造同名冲突
+_conf = _uc.post("/api/undo")
+assert _conf.status_code == 409, _conf.status_code
+assert _uc.get("/api/undo/status").get_json()["count"] == _cnt18, "冲突后 undo 项应保留（peek-before-pop）"
+cid = [p["id"] for p in models.protein_list() if p["name"] == "UndoConflict"][0]
+models.protein_delete(cid)                                   # 移除冲突 → 可重试恢复
+_ok = _uc.post("/api/undo")
+assert _ok.status_code == 200 and _ok.get_json()["restored"] == "UndoConflict", _ok.get_json()
+assert _uc.get("/api/undo/status").get_json()["count"] == _cnt18 - 1, "恢复成功应 pop 一项"
+print("18. undo peek-before-pop OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")
