@@ -15,10 +15,11 @@
 | **蛋白库存** | 蛋白库 + FASTA 批量导入 + 搜索 / 标签筛选 / 批量改标签；MW、消光系数自动计算（ProtParam，与 Expasy 一致）；表头排序 |
 | **自动化分析** | TECAN Spark xlsx 一键解析 → 96 孔板 → 动力学拟合（ΔOD/min、R²）→ Michaelis-Menten → 阴性扣除 → 作图 Excel（每孔独立时间/OD 列对宽格式，Origin/Prism 直接可用） |
 | **实验记录** | 一键归档 + 自动命名（`{日期}_{类型}_{序号}`）+ 详情页 + Excel 导出 + 撤销；从历史实验一键复制回填到工具 |
-| **AI 集成** | MCP 服务器 8 个工具：读蛋白库 / 算浓度 / 稀释规划 / 单位换算 / 存实验，Claude 等 AI 可直接操作你的数据 |
+| **AI 集成** | MCP 服务器 10 个工具：读蛋白库 / 算浓度 / 稀释规划 / 单位换算 / 读研究脉络 / 存实验，Claude 等 AI 可直接操作你的数据 |
 
 ## 功能
 
+- **研究脉络**（v0.1.0）— 顶层导航第一项（默认首页）：**目标 →(拆解)子目标/实验 →(得出)结论 →(引出)新目标** 证据链；白名单 + 自由挂载逃生舱；实验块 = 关联已归档实验（exp_id）或计划占位；树视图（折叠、三色块）+ 链视图（根到节点 breadcrumb）+ 实验引用卡 + 搜索/标签/蛋白筛选；MCP 可读
 - **蛋白库** — 手动添加 / FASTA 批量导入 / 搜索匹配 / 标签筛选与编辑 / **批量改标签**（选中多条添加/移除标签）/ **点击表头按 MW、消光系数排序**
 - **计算工具**（7 个标签页）：
   - 蛋白浓度 — Beer-Lambert 计算（Biopython ProtParam 消光系数，与 Expasy 一致）；**浓度单位切换**（M/uM/nM/mg/mL/ug/mL/ng/uL）
@@ -150,3 +151,4 @@ protein_lab/
 | **v0.0.8** | **BLI 原始数据拟合 UI**：ForteBio CSV 上传分析（传感器图 / 5 方法 KD 拟合）/ 保存为实验（raw→experiment_raw `bli_curves`，results 带 `BLI_ANALYSIS_VERSION`）/ 详情页原始快照展示 |
 | **v0.0.9** | **AKTA 峰图整理**：`akta.py` 标准库原生解析 Unicorn zip（无 pycorn 依赖）/ 峰检测标注 / 峰表 Excel 导出 / 保存为实验（raw→experiment_raw `akta_traces`，results 带 `AKTA_ANALYSIS_VERSION`）；**BLI 分析增强**（曲线勾选入样 / 单样本拟合 / 默认截去结合起点前基线 / 相界对齐 REF 脚本）；**AKTA 复制恢复 + 参数回填 + Sheet3 多样品作图导出 + 峰图 PNG 下载** |
 | **v0.0.10**（当前） | **酶活孔分组 + 作图 Excel 宽格式**：同组孔逐时间点均值曲线 + 误差棒（SD/SEM，图例带 `(n=N)`）；「组」输入框带 datalist 可选已有组 + 多选批量应用；批量命名同名孔自动加 `_1/_2/_3`；作图 Excel 每孔独立时间/OD 两列（BLI/AKTA/酶活统一宽格式）；**评审修复**（undo peek 成功才 pop / renderBliKd 落 DOM / exp_update 列表序列化 / BLI 空窗口守卫） |
+| **v0.1.0**（researcher 分支，未发布） | **研究脉络**：证据链 **目标 → 实验 → 结论 → 新目标**；`research_nodes` 表（迁移 v3）+ `research.py` service 层白名单 + 自由挂载逃生舱；实验块引用/计划占位；`/research` 默认首页 + 树/链视图 + 实验引用卡 + 搜索/标签/蛋白筛选；MCP `list_research_trees` / `get_research_node`；`test_research.py` |
