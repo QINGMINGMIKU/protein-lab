@@ -81,6 +81,32 @@
     </table>
   </div>
 </div>
+{% elif exp.exp_type == "浓度测定" and not proteins and (params.get("mw_da") or params.get("epsilon_red")) %}
+<!-- 旧格式（v0.0.x）单蛋白 A280 浓度：无 calc_type/proteins，results 为 measurements/mean -->
+{% set abs01 = (10 * (params.get("epsilon_red") or 0) / params.get("mw_da")) if params.get("mw_da") else 0 %}
+<div class="calc-card" style="margin-bottom:20px">
+  <h2>浓度计算 <span style="font-size:12px;color:#888;font-weight:400">（旧版格式）</span></h2>
+  <div class="table-scroll" style="margin-top:12px">
+    <table class="calc-table">
+      <thead><tr>
+        <th>蛋白</th><th>MW (Da)</th><th>ε (reduced)</th><th>Abs 0.1%</th>
+        <th>A₂₈₀</th><th class="col-result">浓度 (μM)</th><th class="col-result">浓度 (mg/mL)</th><th>测量次数</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td>{{ exp.protein_names or exp.title }}</td>
+          <td>{{ "%.1f"|format(params.mw_da) if params.mw_da else "-" }}</td>
+          <td>{{ "%.0f"|format(params.epsilon_red) if params.epsilon_red else "-" }}</td>
+          <td>{{ "%.4f"|format(abs01) if params.mw_da else "-" }}</td>
+          <td>{{ params.a280 if params.a280 != None else "-" }}</td>
+          <td class="col-result">{{ "%.2f"|format(results.mean_uM) if results.get("mean_uM") != None else "-" }}</td>
+          <td class="col-result">{{ "%.3f"|format(results.mean_mg_ml) if results.get("mean_mg_ml") != None else "-" }}</td>
+          <td>{{ results.measurements_mg_ml|length if results.get("measurements_mg_ml") else "-" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
 {% endif %}
 
 <!-- ═══════════════════════════════════════════════ -->
@@ -251,7 +277,7 @@
 <!--  其他实验：显示原始 JSON                         -->
 <!-- ═══════════════════════════════════════════════ -->
 {# 兜底：仅当类型无法识别（或浓度/BLI 缺蛋白数据无法渲染表格）时才显示原始 JSON；酶活/Weblogo/AKTA/BLI 各自渲染，不在此列 #}
-{% set known = calc_type in ["concentration", "dilution", "enzyme", "weblogo", "akta", "bli_fit"] or exp.exp_type in ["AKTA", "BLI"] %}
+{% set known = calc_type in ["concentration", "dilution", "enzyme", "weblogo", "akta", "bli_fit"] or exp.exp_type in ["AKTA", "BLI"] or (exp.exp_type == "浓度测定" and not proteins and (params.get("mw_da") or params.get("epsilon_red"))) %}
 {% if not known or (calc_type in ["concentration", "dilution"] and not proteins) %}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
   <div class="calc-card">

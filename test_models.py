@@ -98,7 +98,8 @@ print("6. init_db 幂等 OK")
 e7 = services.create_experiment(title="", exp_type="浓度测定", protein_ids=[pid],
                                 params={"a": 1}, results={"b": 2})
 assert e7["title"].endswith("_浓度测定_01") or "_浓度测定_" in e7["title"], f"自动命名异常: {e7['title']}"
-assert e7["params"] == {"a": 1} and e7["results"] == {"b": 2}
+assert e7["params"]["a"] == 1 and e7["results"] == {"b": 2}, "params/results 应透传"
+assert e7["params"].get("proteins") and e7["params"]["proteins"][0]["id"] == pid, "绑定蛋白应附数值快照"
 # 非法 protein_ids 不抛错，静默过滤（避免 Python 原始错误文本泄漏）
 assert services.coerce_int_list(["abc", pid, None, 0, ""]) == [pid], "非 int id 应被过滤"
 e7b = services.create_experiment(title="坏ids", exp_type="BLI",
@@ -344,6 +345,33 @@ _ok = _uc.post("/api/undo")
 assert _ok.status_code == 200 and _ok.get_json()["restored"] == "UndoConflict", _ok.get_json()
 assert _uc.get("/api/undo/status").get_json()["count"] == _cnt18 - 1, "恢复成功应 pop 一项"
 print("18. undo peek-before-pop OK")
+
+# ── 19. 蛋白快照：任何写入路径都记录「当时绑定的蛋白 + 浓度参数」──
+# 19a. MCP 紧凑浓度存档（a280+mw，无 calc_type/proteins）→ 服务端规范成标准形态，详情页可渲染
+_legacy = services.create_experiment(
+    title="MCP 紧凑浓度", exp_type="浓度测定", protein_ids=[pid], date="2026-08-16",
+    params={"a280": 1.94, "path_length_cm": 1, "epsilon_red": 50880,
+            "oxidized": False, "mw_da": 53309.8},
+    results={"measurements_mg_ml": [2.03, 2.03, 2.03], "mean_mg_ml": 2.03, "mean_uM": 38.13})
+_pj = _legacy["params"]
+assert _pj.get("calc_type") == "concentration", "紧凑浓度存档应规范出 calc_type=concentration"
+assert _pj.get("proteins") and _pj["proteins"][0]["name"] == models.protein_get(pid)["name"], "应规范出含绑定蛋白的 proteins 列表"
+assert _pj["proteins"][0]["a280"] == 1.94 and _pj["proteins"][0]["conc_uM"] == 38.13, "proteins 应含 a280/浓度"
+_html19a = client.get(f"/experiments/{_legacy['id']}").get_data(as_text=True)
+assert "浓度计算" in _html19a and "38.13" in _html19a, "MCP 紧凑浓度详情页应渲染浓度卡片"
+# 19b. 通用绑定快照：无 proteins 的存档（酶活等）也会附上库内蛋白数值快照
+_enzyme19 = services.create_experiment(
+    title="", exp_type="酶活测定", protein_ids=[pid], date="2026-08-16",
+    params={"calc_type": "enzyme", "wells": {}}, results={})
+_p19 = _enzyme19["params"].get("proteins")
+assert _p19 and _p19[0].get("mw") is not None and "epsilon_ox" in _p19[0], "酶活存档应附蛋白数值快照"
+# 19c. Web 存档已带 proteins（计算工具）→ 不被覆盖
+_web19 = services.create_experiment(
+    title="", exp_type="浓度测定", protein_ids=[pid], date="2026-08-16",
+    params={"calc_type": "concentration",
+            "proteins": [{"id": pid, "name": "X", "conc_uM": 9.9}]}, results={})
+assert _web19["params"]["proteins"][0]["conc_uM"] == 9.9 and len(_web19["params"]["proteins"]) == 1, "已有 proteins 不应被覆盖"
+print("19. 蛋白+浓度快照（MCP 紧凑浓度规范化 / 通用绑定 / 不覆盖已有）OK")
 
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
