@@ -240,6 +240,31 @@ label textarea { resize: vertical; }
 .enzyme-ref-btn { padding: 3px 8px; font-size: 12px; border: 1.5px solid #d0d0d0; border-radius: 4px; background: #fff; cursor: pointer; }
 .enzyme-ref-btn.active { border-color: #4361ee; background: #4361ee; color: #fff; }
 
+/* ── 酶活时间范围筛选长轴（双把手拖动） ────────────── */
+.enzyme-time-axis {
+  position: relative; height: 36px; margin: 10px 6px 2px;
+  cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: none;
+}
+.enzyme-time-axis .eta-track {
+  position: absolute; top: 50%; left: 0; right: 0; height: 4px;
+  transform: translateY(-50%); background: #e5e5e5; border-radius: 2px;
+}
+.enzyme-time-axis .eta-range {
+  position: absolute; top: 50%; height: 4px; transform: translateY(-50%);
+  background: #4a90d9; border-radius: 2px;
+}
+.enzyme-time-axis .eta-tick {
+  position: absolute; top: 50%; width: 1px; height: 9px;
+  background: #c8c8c8; transform: translate(-50%, -50%);
+}
+.enzyme-time-axis .eta-handle {
+  position: absolute; top: 50%; transform: translate(-50%, -50%);
+  width: 12px; height: 20px; background: #4a90d9; border: 1.5px solid #fff;
+  border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  cursor: ew-resize; z-index: 2;
+}
+.enzyme-time-axis .eta-handle:hover { background: #2e7ee0; }
+
 /* ── Copy experiment cards ─────────────────────────── */
 .copy-card {
   display: flex; align-items: flex-start; gap: 12px;
