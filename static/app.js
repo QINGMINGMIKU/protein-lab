@@ -3161,25 +3161,42 @@ function researchToggle(id) {
   researchRender();
 }
 
+// 横向流程图布局常量：CARD_W/CARD_H 节点卡片，COL_GAP 列间距，ROW_H 行距，PAD 边距
+const RES_FLOW = { CARD_W: 232, CARD_H: 92, COL_GAP: 48, ROW_H: 104, PAD: 12 };
+// 连接线按父节点类型着色
+const RES_FLOW_EDGE = { goal: "#4caf79", experiment: "#4a90d9", conclusion: "#d96aa6" };
+
 function researchRender(force) {
   const q = (document.getElementById("researchQuery").value || "").trim();
   const tag = document.getElementById("researchTagFilter").value || "";
   const prot = document.getElementById("researchProteinFilter").value || "";
   if (!researchState.trees.length && force) { researchLoad().catch(() => {}); return; }
-  const filtering = q !== "" || tag !== "" || prot !== "";
-  const treeEl = document.getElementById("researchTree");
+  const flowEl = document.getElementById("researchFlow");
   const emptyEl = document.getElementById("researchEmpty");
   if (!researchState.trees.length) {
-    treeEl.classList.add("hidden");
+    flowEl.classList.add("hidden");
     emptyEl.classList.remove("hidden");
     return;
   }
-  treeEl.classList.remove("hidden");
+  flowEl.classList.remove("hidden");
   emptyEl.classList.add("hidden");
-  treeEl.innerHTML = researchState.trees
-    .filter(r => researchFilterMatch(r, q, tag, prot))
-    .map(r => researchRenderNode(r, 0, q, tag, prot, filtering)).join("") ||
-    '<div class="empty-hint">没有匹配的节点</div>';
+  const { cards, edges, width, height } = researchFlowLayout(q, tag, prot);
+  if (!cards.length) {
+    flowEl.innerHTML = '<div class="empty-hint">没有匹配的节点</div>';
+    flowEl.style.width = "";
+    flowEl.style.height = "";
+  } else {
+    const svg = edges.length
+      ? `<svg class="res-flow-svg" width="${width}" height="${height}">` +
+        edges.map(e =>
+          `<path d="M ${e.x1} ${e.y1} H ${(e.x1 + e.x2) / 2} V ${e.y2} H ${e.x2}" ` +
+          `fill="none" stroke="${e.color}" stroke-width="2" opacity="0.75"/>`).join("") +
+        "</svg>"
+      : "";
+    flowEl.innerHTML = svg + cards.map(c => researchFlowCard(c.node, c.x, c.y, c.dim)).join("");
+    flowEl.style.width = width + "px";
+    flowEl.style.height = height + "px";
+  }
   // 选中节点已被删（子树删除）时收起详情
   if (researchState.selectedId != null && !researchFindNode(researchState.selectedId)) {
     researchState.selectedId = null;
@@ -3188,31 +3205,59 @@ function researchRender(force) {
   }
 }
 
-function researchRenderNode(node, depth, q, tag, prot, filtering) {
-  const kids = node.children || [];
-  const hasKids = kids.length > 0;
-  const expanded = filtering || !researchState.collapsed.has(node.id);
-  const childHtml = kids
-    .filter(c => researchFilterMatch(c, q, tag, prot))
-    .map(c => researchRenderNode(c, depth + 1, q, tag, prot, filtering)).join("");
+function researchFlowLayout(q, tag, prot) {
+  // DFS 访问序布局：x=depth 列、y=全局访问行 → 同层兄弟纵向并联、子树连续占行，天然无重叠。
+  const filtering = !!(q || tag || prot);
+  const cards = [], edges = [];
+  let row = 0, maxX = 0, maxY = 0;
+  const visit = (node, col) => {
+    if (filtering && !researchFilterMatch(node, q, tag, prot)) return -1; // 无匹配的子树整棵隐藏
+    const x = RES_FLOW.PAD + col * (RES_FLOW.CARD_W + RES_FLOW.COL_GAP);
+    const y = RES_FLOW.PAD + row * RES_FLOW.ROW_H;
+    const myRow = row++;
+    cards.push({ node, x, y, dim: filtering && !researchNodeMatch(node, q, tag, prot) });
+    maxX = Math.max(maxX, x + RES_FLOW.CARD_W);
+    maxY = Math.max(maxY, y + RES_FLOW.CARD_H);
+    const kids = (filtering || !researchState.collapsed.has(node.id)) ? (node.children || []) : [];
+    for (const k of kids) {
+      const childRow = visit(k, col + 1);
+      if (childRow < 0) continue;
+      edges.push({
+        x1: x + RES_FLOW.CARD_W,
+        y1: y + RES_FLOW.CARD_H / 2,
+        x2: RES_FLOW.PAD + (col + 1) * (RES_FLOW.CARD_W + RES_FLOW.COL_GAP),
+        y2: RES_FLOW.PAD + childRow * RES_FLOW.ROW_H + RES_FLOW.CARD_H / 2,
+        color: RES_FLOW_EDGE[node.node_type] || "#c3c8d4",
+      });
+    }
+    return myRow;
+  };
+  for (const root of researchState.trees) visit(root, 0);
+  return { cards, edges, width: maxX + RES_FLOW.PAD, height: maxY + RES_FLOW.PAD };
+}
+
+function researchFlowCard(node, x, y, dim) {
+  const hasKids = (node.children || []).length > 0;
+  const expanded = !researchState.collapsed.has(node.id);
   const toggle = hasKids
-    ? `<button class="res-toggle" onclick="event.stopPropagation();researchToggle(${node.id})" title="${expanded ? "折叠" : "展开"}">${expanded ? "▾" : "▸"}</button>`
-    : `<span class="res-toggle res-toggle-empty"></span>`;
-  const badge = `<span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>`;
-  const expIcon = node.exp_id ? `<span class="res-exp-ico" title="关联实验 #${node.exp_id}">📄</span>` : "";
-  const free = node.free_attach ? `<span class="res-free" title="自由挂载（逃生舱）">⛓</span>` : "";
-  const dim = researchNodeMatch(node, q, tag, prot) ? "" : " dim";
+    ? `<button class="res-flow-collapse" onclick="event.stopPropagation();researchToggle(${node.id})" title="${expanded ? "折叠" : "展开"}">${expanded ? "▾" : "▸"}</button>`
+    : "";
   const sel = researchState.selectedId === node.id ? " sel" : "";
-  return `<div class="res-node${sel}" style="margin-left:${depth * 22}px">
-    <div class="res-row${dim}" onclick="researchSelect(${node.id})">
-      ${toggle}<span class="res-title">${esc(node.title)}</span>${badge}${expIcon}${free}
-      <span class="res-tags">${esc(node.tag || "")}</span>
-      <span class="res-actions">
+  const dimCls = dim ? " dim" : "";
+  return `<div class="res-flow-card res-flow-${node.node_type}${sel}${dimCls}" style="left:${x}px;top:${y}px" onclick="researchSelect(${node.id})">
+    <div class="res-flow-top">
+      <span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>
+      ${node.exp_id ? `<span class="res-exp-ico" title="关联实验 #${node.exp_id}">📄</span>` : ""}
+      ${node.free_attach ? `<span class="res-free" title="自由挂载（逃生舱）">⛓</span>` : ""}
+      ${toggle}
+      <span class="res-flow-actions">
         <button class="btn btn-sm" title="加子节点" onclick="event.stopPropagation();researchAddChild(${node.id})">＋</button>
         <button class="btn btn-sm" title="编辑" onclick="event.stopPropagation();researchEdit(${node.id})">✎</button>
         <button class="btn btn-sm btn-danger" title="删除（含子树）" onclick="event.stopPropagation();researchDelete(${node.id})">🗑</button>
       </span>
-    </div>${hasKids && expanded ? `<div class="res-children">${childHtml}</div>` : ""}
+    </div>
+    <div class="res-flow-title">${esc(node.title)}</div>
+    <div class="res-flow-tags">${esc(node.tag || "")}</div>
   </div>`;
 }
 
@@ -3444,7 +3489,7 @@ function init() {
     const dilSel = document.getElementById("dilUnitSel");
     if (dilSel) dilSel.value = dilUnit;
   }
-  if (document.querySelector("#researchTree")) {
+  if (document.querySelector("#researchFlow")) {
     researchInit();
   }
 }

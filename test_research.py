@@ -16,6 +16,7 @@
 10. 更新重挂：白名单拦截 + free_attach 放行 + 换父重排
 11. API：/api/research/nodes 增查改删 + 白名单 400
 12. MCP 读工具零写库（list_research_trees / get_research_node）
+13. /research 页面渲染（流程图容器 #researchFlow）
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
@@ -200,5 +201,12 @@ for tool, args in [
         assert text.get("children"), "有子节点应带递归子树"
     assert dump_db() == before, f"读工具 {tool} 不应写库"
 print("12. MCP 读工具零写库 OK")
+
+# ── 13. /research 页面渲染（横向流程图容器）──
+r = client.get("/research")
+html = r.get_data(as_text=True)
+assert r.status_code == 200 and 'id="researchFlow"' in html, "/research 应渲染流程图容器"
+assert 'class="res-flow-container"' in html, "流程图容器应有 res-flow-container 样式"
+print("13. /research 页面渲染 OK")
 
 print("\n全部研究脉络测试通过 ✓")
