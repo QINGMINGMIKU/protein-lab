@@ -291,6 +291,27 @@ label textarea { resize: vertical; }
 .res-chain-link:hover { text-decoration: underline; }
 
 .res-flow-container { position: relative; overflow: auto; min-height: 220px; }
+.research-flow-back {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+  padding: 8px 14px; background: #f8faff; border: 1px solid #dde3f0; border-radius: 6px;
+}
+.research-flow-back-title { font-size: 15px; font-weight: 600; color: #1a1a2e; }
+
+.res-root-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px; padding: 2px;
+}
+.res-root-card {
+  border: 1px solid #dfe3ea; border-left: 4px solid #4caf79; background: #fff;
+  border-radius: 10px; padding: 12px 14px; cursor: pointer;
+  box-shadow: 0 1px 3px rgba(20, 24, 50, .08); transition: box-shadow .12s, transform .12s;
+}
+.res-root-card:hover { box-shadow: 0 3px 10px rgba(20, 24, 50, .14); transform: translateY(-1px); }
+.res-root-top { display: flex; align-items: center; gap: 8px; }
+.res-root-count { font-size: 12px; color: #9aa3b5; }
+.res-root-actions { margin-left: auto; display: flex; gap: 2px; opacity: 0; }
+.res-root-card:hover .res-root-actions { opacity: 1; }
+.res-root-title { font-size: 15px; font-weight: 600; color: #1a1a2e; margin-top: 8px; line-height: 1.4; }
 .res-flow-svg { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; }
 .res-flow-card {
   position: absolute; z-index: 1;

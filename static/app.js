@@ -3112,7 +3112,11 @@ function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
 //  权威校验在服务端）：goal→{goal,experiment}、experiment→conclusion、
 //  conclusion→goal；勾「自由挂载」(free_attach) 逃生舱可打破任一边。
 // ═════════════════════════════════════════════════════
-const researchState = { trees: [], experiments: [], expMap: {}, selectedId: null, collapsed: new Set() };
+const researchState = {
+  trees: [], experiments: [], expMap: {},
+  selectedId: null, collapsed: new Set(),
+  view: "list", activeRootId: null,   // list=根目标列表（默认首页）；flow=单根流程图
+};
 
 function researchFirstAllowed(parentType) {
   if (!parentType) return "goal";
@@ -3172,30 +3176,31 @@ function researchRender(force) {
   const prot = document.getElementById("researchProteinFilter").value || "";
   if (!researchState.trees.length && force) { researchLoad().catch(() => {}); return; }
   const flowEl = document.getElementById("researchFlow");
+  const backEl = document.getElementById("researchFlowBack");
   const emptyEl = document.getElementById("researchEmpty");
   if (!researchState.trees.length) {
     flowEl.classList.add("hidden");
+    backEl.classList.add("hidden");
     emptyEl.classList.remove("hidden");
     return;
   }
   flowEl.classList.remove("hidden");
   emptyEl.classList.add("hidden");
-  const { cards, edges, width, height } = researchFlowLayout(q, tag, prot);
-  if (!cards.length) {
-    flowEl.innerHTML = '<div class="empty-hint">没有匹配的节点</div>';
-    flowEl.style.width = "";
-    flowEl.style.height = "";
+  if (researchState.view === "list") {
+    backEl.classList.add("hidden");
+    renderResearchRootList(flowEl, q, tag, prot);
   } else {
-    const svg = edges.length
-      ? `<svg class="res-flow-svg" width="${width}" height="${height}">` +
-        edges.map(e =>
-          `<path d="M ${e.x1} ${e.y1} H ${(e.x1 + e.x2) / 2} V ${e.y2} H ${e.x2}" ` +
-          `fill="none" stroke="${e.color}" stroke-width="2" opacity="0.75"/>`).join("") +
-        "</svg>"
-      : "";
-    flowEl.innerHTML = svg + cards.map(c => researchFlowCard(c.node, c.x, c.y, c.dim)).join("");
-    flowEl.style.width = width + "px";
-    flowEl.style.height = height + "px";
+    const root = researchFindNode(researchState.activeRootId);
+    if (!root) { // 根目标被删（级联删）→ 回落列表
+      researchState.view = "list";
+      researchState.activeRootId = null;
+      backEl.classList.add("hidden");
+      renderResearchRootList(flowEl, q, tag, prot);
+    } else {
+      backEl.classList.remove("hidden");
+      document.getElementById("researchFlowBackTitle").textContent = root.title;
+      renderResearchFlow(flowEl, [root], q, tag, prot);
+    }
   }
   // 选中节点已被删（子树删除）时收起详情
   if (researchState.selectedId != null && !researchFindNode(researchState.selectedId)) {
@@ -3205,7 +3210,84 @@ function researchRender(force) {
   }
 }
 
-function researchFlowLayout(q, tag, prot) {
+function renderResearchFlow(flowEl, trees, q, tag, prot) {
+  const { cards, edges, width, height } = researchFlowLayout(trees, q, tag, prot);
+  if (!cards.length) {
+    flowEl.innerHTML = '<div class="empty-hint">没有匹配的节点</div>';
+    flowEl.style.width = "";
+    flowEl.style.height = "";
+    return;
+  }
+  const svg = edges.length
+    ? `<svg class="res-flow-svg" width="${width}" height="${height}">` +
+      edges.map(e =>
+        `<path d="M ${e.x1} ${e.y1} H ${(e.x1 + e.x2) / 2} V ${e.y2} H ${e.x2}" ` +
+        `fill="none" stroke="${e.color}" stroke-width="2" opacity="0.75"/>`).join("") +
+      "</svg>"
+    : "";
+  flowEl.innerHTML = svg + cards.map(c => researchFlowCard(c.node, c.x, c.y, c.dim)).join("");
+  flowEl.style.width = width + "px";
+  flowEl.style.height = height + "px";
+}
+
+// ── 根目标列表（/research 默认首页：列全部根目标，点进单根流程图）──
+function researchRootStats(root) {
+  let nodes = 0, exps = 0;
+  const walk = n => {
+    nodes++;
+    if (n.exp_id) exps++;
+    (n.children || []).forEach(walk);
+  };
+  walk(root);
+  return { nodes, exps };
+}
+
+function researchRootCard(root) {
+  const { nodes, exps } = researchRootStats(root);
+  const tags = (root.tag || "").split(",").map(s => s.trim()).filter(Boolean);
+  return `<div class="res-root-card" onclick="researchOpenRoot(${root.id})">
+    <div class="res-root-top">
+      <span class="res-badge res-badge-goal">目标</span>
+      <span class="res-root-count">${nodes} 节点 · ${exps} 实验</span>
+      <span class="res-root-actions">
+        <button class="btn btn-sm" title="编辑" onclick="event.stopPropagation();researchEdit(${root.id})">✎</button>
+        <button class="btn btn-sm btn-danger" title="删除（含子树）" onclick="event.stopPropagation();researchDelete(${root.id})">🗑</button>
+      </span>
+    </div>
+    <div class="res-root-title">${esc(root.title)}</div>
+    ${tags.length ? `<div class="res-flow-tags">${tags.map(t => esc(t)).join(" · ")}</div>` : ""}
+  </div>`;
+}
+
+function renderResearchRootList(flowEl, q, tag, prot) {
+  const matched = researchState.trees.filter(r => researchFilterMatch(r, q, tag, prot));
+  flowEl.innerHTML = matched.length
+    ? `<div class="res-root-list">${matched.map(researchRootCard).join("")}</div>`
+    : '<div class="empty-hint">没有匹配的根目标</div>';
+  flowEl.style.width = "";
+  flowEl.style.height = "";
+}
+
+function researchOpenRoot(id) {
+  researchState.view = "flow";
+  researchState.activeRootId = id;
+  researchState.selectedId = null;
+  document.getElementById("researchDetail").classList.add("hidden");
+  document.getElementById("researchChain").classList.add("hidden");
+  researchRender();
+  document.getElementById("researchFlow").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function researchBackToList() {
+  researchState.view = "list";
+  researchState.activeRootId = null;
+  researchState.selectedId = null;
+  document.getElementById("researchDetail").classList.add("hidden");
+  document.getElementById("researchChain").classList.add("hidden");
+  researchRender();
+}
+
+function researchFlowLayout(trees, q, tag, prot) {
   // DFS 访问序布局：x=depth 列、y=全局访问行 → 同层兄弟纵向并联、子树连续占行，天然无重叠。
   const filtering = !!(q || tag || prot);
   const cards = [], edges = [];
@@ -3232,7 +3314,7 @@ function researchFlowLayout(q, tag, prot) {
     }
     return myRow;
   };
-  for (const root of researchState.trees) visit(root, 0);
+  for (const root of trees) visit(root, 0);
   return { cards, edges, width: maxX + RES_FLOW.PAD, height: maxY + RES_FLOW.PAD };
 }
 

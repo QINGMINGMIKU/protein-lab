@@ -26,7 +26,13 @@
 <!-- ── 链视图：选中节点时显示「根 → … → 当前」breadcrumb ── -->
 <div id="researchChain" class="research-chain hidden"></div>
 
-<!-- ── 流程图（左→右流式，同级纵向并联）── -->
+<!-- ── 流程图视图返回栏（点根目标进入单根流程图时显示）── -->
+<div id="researchFlowBack" class="research-flow-back hidden">
+  <button class="btn btn-sm btn-outline" onclick="researchBackToList()">← 根目标列表</button>
+  <span id="researchFlowBackTitle" class="research-flow-back-title"></span>
+</div>
+
+<!-- ── 根目标列表 / 单根流程图（默认首页=列表）── -->
 <div id="researchFlow" class="res-flow-container"></div>
 <div id="researchEmpty" class="empty-hint hidden">
   还没有研究节点。<br>

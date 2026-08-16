@@ -206,6 +206,7 @@ print("12. MCP 读工具零写库 OK")
 r = client.get("/research")
 html = r.get_data(as_text=True)
 assert r.status_code == 200 and 'id="researchFlow"' in html, "/research 应渲染流程图容器"
+assert 'id="researchFlowBack"' in html, "应有单根流程图返回栏（根目标列表→流程图）"
 assert 'class="res-flow-container"' in html, "流程图容器应有 res-flow-container 样式"
 print("13. /research 页面渲染 OK")
 
