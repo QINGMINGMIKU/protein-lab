@@ -1493,18 +1493,25 @@ async function loadExperiments() {
   try {
     const type = document.getElementById("expTypeFilter")?.value || "";
     const exps = await API.get(`/api/experiments?type=${encodeURIComponent(type)}`);
-    tbody.innerHTML = exps.map(e => `
+    tbody.innerHTML = exps.map(e => {
+      // 关联蛋白只显示第一个，hover 显示完整列表
+      const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
+      const pcell = pnames.length
+        ? `<span title="${esc(e.protein_names)}">${esc(pnames[0])}${pnames.length > 1 ? " 等" : ""}</span>`
+        : "-";
+      return `
       <tr>
         <td><input type="checkbox" class="exp-check" value="${e.id}" onchange="updateExpBulkBar()"></td>
-        <td>${e.date || "-"}</td>
+        <td class="exp-date">${e.date || "-"}</td>
         <td><a href="/experiments/${e.id}" style="color:#4361ee;font-weight:500;text-decoration:none">${esc(e.title)}</a></td>
-        <td><span class="badge">${esc(e.exp_type)}</span></td>
-        <td>${esc(e.protein_names || "-")}</td>
+        <td class="exp-type"><span class="badge">${esc(e.exp_type)}</span></td>
+        <td>${pcell}</td>
         <td>${esc((e.notes || "").substring(0, 40))}</td>
         <td><button class="btn btn-sm btn-danger" data-action="delete-exp" data-id="${e.id}">删除</button></td>
         <td><a class="btn btn-sm btn-outline" href="/api/experiments/${e.id}/export" title="导出此实验">📥</a></td>
       </tr>
-    `).join("");
+    `;
+    }).join("");
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" style="color:#c0392b;text-align:center;padding:20px">加载失败: ${esc(err.message)}</td></tr>`;
   }

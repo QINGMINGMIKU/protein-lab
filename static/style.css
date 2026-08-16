@@ -26,6 +26,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
   display: inline-flex; align-items: center; gap: 4px;
   padding: 8px 16px; border: none; border-radius: 6px; font-size: 14px;
   cursor: pointer; transition: .15s; font-weight: 500;
+  white-space: nowrap;
 }
 .btn-primary { background: #4361ee; color: #fff; }
 .btn-primary:hover { background: #3a56d4; }
@@ -47,6 +48,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
 .datatable { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
 .datatable th { background: #f8f9fb; text-align: left; padding: 10px 14px; font-size: 12px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: .5px; }
 .datatable td { padding: 10px 14px; font-size: 14px; border-top: 1px solid #f0f0f0; }
+.datatable td.exp-date, .datatable td.exp-type { white-space: nowrap; }
 .datatable tr:hover { background: #f8f9ff; }
 .datatable .seq-preview { font-family: "SF Mono", "Consolas", monospace; font-size: 12px; color: #888; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; cursor: pointer; user-select: all; transition: max-width .2s; }
 .datatable .seq-preview.expanded { max-width: none; white-space: normal; word-break: break-all; color: #333; }
