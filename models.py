@@ -33,7 +33,7 @@ def get_db(read_only: bool = False) -> sqlite3.Connection:
 # user_version=N→COMMIT 原子。老库（user_version=0）从 v1 起跑：v1 全是 CREATE IF NOT
 # EXISTS + 旧列清理，对已有表是 no-op——这是"非破坏性升级"的保证（数据原样不动）。
 
-SCHEMA_VERSION = 2  # 当前 schema 版本（与 MIGRATIONS 末项一致）
+SCHEMA_VERSION = 3  # 当前 schema 版本（与 MIGRATIONS 末项一致）
 
 
 def _migrate_v1_post(conn):
@@ -106,6 +106,28 @@ MIGRATIONS = [
                 FOREIGN KEY (experiment_id) REFERENCES experiments(id) ON DELETE SET NULL
             )""",
             "CREATE INDEX IF NOT EXISTS idx_raw_exp ON experiment_raw(experiment_id)",
+        ],
+    },
+    {
+        "version": 3,
+        # research_nodes：研究脉络树（v0.1.0）。三节点类型 goal/experiment/conclusion。
+        # parent_id 自引用 FK，删父级联删子树；exp_id 指向实验，删实验 FK SET NULL
+        # 保留节点作断链占位。白名单边校验在 service 层（research.py），表层只存
+        # free_attach 逃生舱标记——不做 CHECK 约束，留逃生舱可打破任意边（IP 本地产物）。
+        "sql": [
+            """CREATE TABLE IF NOT EXISTS research_nodes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_type   TEXT NOT NULL,           -- goal | experiment | conclusion
+                parent_id   INTEGER REFERENCES research_nodes(id) ON DELETE CASCADE,
+                title       TEXT NOT NULL,
+                detail      TEXT DEFAULT '',
+                exp_id      INTEGER REFERENCES experiments(id) ON DELETE SET NULL,
+                tag         TEXT DEFAULT '',
+                free_attach INTEGER DEFAULT 0,       -- 逃生舱：自由挂载，打破白名单
+                sort_order  INTEGER DEFAULT 0,
+                created_at  TEXT DEFAULT (datetime('now','localtime'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_research_parent ON research_nodes(parent_id)",
         ],
     },
 ]
@@ -572,6 +594,116 @@ def exp_raw_relink(raw_ids: list[int], new_exp_id: int) -> None:
         raise
     finally:
         conn.close()
+
+
+# ── research_nodes：研究脉络树（v0.1.0）───────────────────
+# 三节点类型 goal(目标)/experiment(实验引用或计划占位)/conclusion(结论)。
+# 白名单边校验在 research.py service 层（留 free_attach 逃生舱），这里只管存取——
+# SQL 全在 models.py，业务规则不进表（不建 CHECK，逃生舱可打破任意边）。
+
+RESEARCH_NODE_TYPES = ("goal", "experiment", "conclusion")
+RESEARCH_SAFE_COLUMNS = frozenset({"node_type", "title", "detail", "parent_id",
+                                   "exp_id", "tag", "free_attach", "sort_order"})
+
+
+def research_node_create(node_type: str, title: str, detail: str = "",
+                         parent_id: int = None, exp_id: int = None,
+                         tag: str = "", free_attach: bool = False,
+                         sort_order: int = 0) -> int:
+    """新建研究节点，返回 id。结构校验（白名单/根须目标）由 service 层负责。"""
+    conn = get_db()
+    cur = conn.execute("""
+        INSERT INTO research_nodes
+            (node_type, title, detail, parent_id, exp_id, tag, free_attach, sort_order)
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (node_type, title, detail, parent_id, exp_id, tag,
+          1 if free_attach else 0, sort_order))
+    conn.commit()
+    nid = cur.lastrowid
+    conn.close()
+    return nid
+
+
+def research_node_get(node_id: int) -> dict | None:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM research_nodes WHERE id = ?",
+                       (node_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def research_node_update(node_id: int, **kwargs) -> bool:
+    """更新研究节点标量字段（列名白名单过滤）。parent_id/exp_id 传 None 可置空。"""
+    updates = {}
+    for k, v in kwargs.items():
+        if k in RESEARCH_SAFE_COLUMNS:
+            # 三元右结合陷阱：必须显式括号，否则非 free_attach 列真值也会被存成 1
+            val = (1 if v else 0) if k == "free_attach" else v
+            updates[k] = val
+    if not updates:
+        return False
+    cols = ", ".join(f'"{c}"=?' for c in updates)
+    conn = get_db()
+    conn.execute(f"UPDATE research_nodes SET {cols} WHERE id=?",
+                 list(updates.values()) + [node_id])
+    conn.commit()
+    conn.close()
+    return True
+
+
+def research_node_delete_subtree(node_id: int) -> int:
+    """物理删除节点及其整棵子树，返回删除节点数。
+
+    收集后代 id 后单事务统一删——比逐层递归删更原子；FK ON DELETE CASCADE 为兜底。
+    """
+    conn = get_db()
+    stack = [node_id]
+    ids = []
+    while stack:
+        nid = stack.pop()
+        ids.append(nid)
+        rows = conn.execute("SELECT id FROM research_nodes WHERE parent_id=?",
+                            (nid,)).fetchall()
+        stack.extend(r["id"] for r in rows)
+    conn.execute("BEGIN")
+    try:
+        conn.executemany("DELETE FROM research_nodes WHERE id=?", [(i,) for i in ids])
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return len(ids)
+
+
+def research_nodes_all() -> list[dict]:
+    """全部研究节点（扁平列表，供 service 建树）。"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM research_nodes ORDER BY sort_order, id").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def research_node_children(parent_id: int) -> list[dict]:
+    """某节点的直接子节点（按 sort_order 排序）。"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM research_nodes WHERE parent_id=? ORDER BY sort_order, id",
+        (parent_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def research_nodes_root() -> list[dict]:
+    """根节点（parent_id 为 NULL）。"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM research_nodes WHERE parent_id IS NULL "
+        "ORDER BY sort_order, id").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ── Init on import ─────────────────────────────────────────

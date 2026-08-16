@@ -199,6 +199,10 @@ import mcp_server
 assert mcp_server.WRITE_TOOLS == {"save_experiment"}, f"写工具应仅 save_experiment: {mcp_server.WRITE_TOOLS}"
 names = {t["name"] for t in mcp_server.TOOLS}
 assert names == mcp_server.READ_TOOLS | mcp_server.WRITE_TOOLS, "每个工具必须归入读或写"
+# 13b 前置：种研究脉络节点，供研究读工具返回真实数据（同一快照做零写断言）
+_rn_id = models.research_node_create(node_type="goal", title="稳定性优化", tag="稳定性", sort_order=0)
+models.research_node_create(node_type="experiment", title="表达纯化",
+                            parent_id=_rn_id, exp_id=e7["id"], sort_order=0)
 read_cases = [
     ("search_proteins", {"query": "1YPI"}),
     ("get_protein", {"name": "1YPI_WT"}),
@@ -207,6 +211,8 @@ read_cases = [
     ("convert_concentration", {"value": 1, "from_unit": "uM", "to_unit": "nM"}),
     ("calculate_dilution", {"stock_conc_uM": 100, "start_conc_uM": 10}),
     ("list_experiments", {}),
+    ("list_research_trees", {}),
+    ("get_research_node", {"node_id": _rn_id}),
 ]
 before = _db_dump()
 for tool, args in read_cases:
