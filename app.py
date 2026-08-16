@@ -22,7 +22,7 @@ import numpy as np
 import paths
 import models
 import services
-from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics, sub_blank, align_wells, snap_ylim, correct_slopes
+from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics, sub_blank, align_wells, snap_ylim, correct_slopes, aggregate_groups
 
 app = Flask(__name__,
             template_folder=paths.resource_path("templates"),
@@ -562,13 +562,16 @@ def api_exp_export():
     return _export_excel(exps)
 
 
-def _enzyme_long_rows(wells) -> list[list]:
-    """把每孔时间序列压成长格式行 [孔位, 名称, 参考类型, 浓度(ng/mL), 浓度(μM), 时间(min), OD]，
-    供「孔位-时间-OD」作图 Sheet 使用（时间秒转分钟，OD 保留 4 位）。"""
-    rows = []
+def _enzyme_wide_columns(wells, prefix="") -> tuple[list, list]:
+    """把每孔时间序列转成宽格式：每孔独立两列（时间 + OD），跨孔并列。
+    返回 (headers, col_data)：headers 每孔一对 `{标签} 时间 (min)` / `{标签} OD`；
+    标签优先样品名、缺省用孔位，撞名时退回孔位，prefix 用于多实验合并区分来源。
+    col_data 为 [(times, ods), ...]，写入时每孔占两列、行按各自时间索引对齐（不足留空）。"""
+    headers = []
+    col_data = []
     if not isinstance(wells, dict):
-        return rows
-    ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}
+        return headers, col_data
+    seen = set()
     for wid, w in sorted(wells.items()):
         if not isinstance(w, dict):
             continue
@@ -576,13 +579,49 @@ def _enzyme_long_rows(wells) -> list[list]:
         ods = w.get("od") or []
         if not times or not ods:
             continue
-        for t, od in zip(times, ods):
-            rows.append([
-                wid, w.get("name", ""), ref_label.get(w.get("ref", ""), ""),
-                w.get("conc_ng_ml", ""), w.get("conc_uM", ""),
-                round(t / 60, 3), round(od, 4) if od is not None else "",
-            ])
-    return rows
+        lbl = (w.get("name") or "").strip() or wid
+        full = f"{prefix}{lbl}"
+        if full in seen:
+            full = f"{prefix}{wid}"
+        seen.add(full)
+        headers += [f"{full} 时间 (min)", f"{full} OD"]
+        col_data.append((times, ods))
+    return headers, col_data
+
+
+def _write_wide_ws(ws, headers, col_data):
+    """把宽格式列对写入 worksheet：第 1 行表头加粗 + 固定列宽，数据每孔两列
+    （时间 (min) + OD），各列对从第 2 行起按各自时间索引对齐（点数不同不足处留空）。"""
+    from openpyxl.utils import get_column_letter
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+        ws.column_dimensions[get_column_letter(c)].width = 15
+    for ci, (times, ods) in enumerate(col_data):
+        base = ci * 2 + 1
+        for r, (t, od) in enumerate(zip(times, ods), 2):
+            ws.cell(row=r, column=base).value = round(t / 60, 3)
+            ws.cell(row=r, column=base + 1).value = round(od, 4) if od is not None else ""
+
+
+def _write_wide_ws_pairs(ws, headers, col_data, fmt=None):
+    """通用宽格式列对写入：第 1 行表头加粗 + 固定列宽 15，每单位两列从第 2 行起
+    按各自索引对齐写入（点数不同不足处留空）。col_data 为 [(xs, ys), ...]；
+    fmt: (x, y) -> (v1, v2) 数值转换，缺省原样 float。
+    BLI/AKTA 作图数据用此写入器；酶活专用变换（时间 /60、OD 取 4 位）见 _write_wide_ws。"""
+    from openpyxl.utils import get_column_letter
+    if fmt is None:
+        fmt = lambda x, y: (float(x), float(y))
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+        ws.column_dimensions[get_column_letter(c)].width = 15
+    for ci, (xs, ys) in enumerate(col_data):
+        base = ci * 2 + 1
+        for r, (x, y) in enumerate(zip(xs, ys), 2):
+            v1, v2 = fmt(x, y)
+            ws.cell(row=r, column=base).value = v1
+            ws.cell(row=r, column=base + 1).value = v2
 
 
 def _export_excel(exps, download_name="实验记录.xlsx"):
@@ -597,7 +636,7 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
         p = e.get("params") or {}
         return p.get("calc_type", "") if isinstance(p, dict) else ""
     all_enzyme = exps and all(_get_calc_type(e) == "enzyme" for e in exps)
-    enzyme_long_rows = []  # 长格式（孔位-时间-OD），全酶活导出时附加为第二个 Sheet
+    enzyme_wide_groups = []  # (headers, col_data) 宽格式（每孔两列），全酶活导出时附加为作图 Sheet
 
     CONC_HEADERS = ["蛋白", "MW (Da)", "ε", "Abs 0.1%", "A280", "浓度 (μM)", "浓度 (mg/mL)",
                     "目标浓度 (μM)", "目标体积 (μL)", "取母液 (μL)", "加缓冲液 (μL)"]
@@ -707,9 +746,10 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
                         emeta.get("sample", ""), emeta.get("wavelength", ""),
                     ])
                 _write_block(ENZ_HEADERS, rows)
-                # 汇总 Sheet 的原始数据也收进长格式（孔位-时间-OD）
-                for r in _enzyme_long_rows(wells):
-                    enzyme_long_rows.append([e["title"]] + r)
+                # 汇总 Sheet 的原始数据收进宽格式（每孔时间+OD 两列），多实验用标题前缀区分
+                h2, cd2 = _enzyme_wide_columns(wells, prefix=f"{e['title']} ")
+                if h2:
+                    enzyme_wide_groups.append((h2, cd2))
             else:
                 ws.append(["关联蛋白", e.get("protein_names", "")])
 
@@ -744,18 +784,14 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
             max_len = max(max_len, n)
         ws.column_dimensions[cell.column_letter].width = min(max_len + 2, 40)
 
-    # 酶活导出：附加「孔位-时间-OD」长格式 Sheet（方便 Origin/Prism 等外部作图）
-    if all_enzyme and enzyme_long_rows:
-        ws2 = wb.create_sheet("孔位-时间-OD")
-        headers2 = ["实验名称", "孔位", "名称", "参考类型", "浓度 (ng/mL)", "浓度 (μM)",
-                    "时间 (min)", "OD"]
-        ws2.append(headers2)
-        for c in range(1, len(headers2) + 1):
-            ws2.cell(row=1, column=c).font = Font(bold=True)
-        for r in enzyme_long_rows:
-            ws2.append(r)
-        for i, w in enumerate([30, 8, 16, 10, 14, 12, 12, 12], 1):
-            ws2.column_dimensions[ws2.cell(row=1, column=i).column_letter].width = w
+    # 酶活导出：附加「作图数据」宽格式 Sheet（每孔独立时间+OD 两列，方便 Origin/Prism 等外部作图）
+    if all_enzyme and enzyme_wide_groups:
+        ws2 = wb.create_sheet("作图数据")
+        headers2, all_cols = [], []
+        for h2, cd2 in enzyme_wide_groups:
+            headers2 += h2
+            all_cols += cd2
+        _write_wide_ws(ws2, headers2, all_cols)
 
     buf = BytesIO()
     wb.save(buf)
@@ -954,8 +990,13 @@ def api_enzyme_fit():
     refs = {}
     for well_id, wd in wells_data.items():
         refs[well_id] = wd.get("ref")
-        if wd.get("times") and wd.get("od"):
-            fits[well_id] = fit_kinetics(wd["times"], wd["od"])
+        t = wd.get("times") or []
+        o = wd.get("od") or []
+        if t and o and len(t) == len(o):
+            fits[well_id] = fit_kinetics(t, o)
+        else:
+            # 空/错位数据：仍返回该孔（null fit）——前端据此覆盖旧 fit，避免筛选成 0 点的孔残留 stale R² 标红
+            fits[well_id] = {"slope": None, "intercept": None, "r2": None, "n": len(t)}
     corrected, bg = correct_slopes(fits, refs)
     return jsonify({"wells": corrected, "bg": bg})
 
@@ -989,16 +1030,45 @@ def api_enzyme_plot():
             wells_data, mean_neg = sub_blank(wells_data, enabled=body.get("sub_blank", False))
             wells_data, _avg_first, _avg_last = align_wells(wells_data, align_start, align_end)
 
-            idx = 0  # 实际绘制的孔序号（跳过隐藏的阴性/空白），用于逐孔取 BLI 配色
-            plotted_od = []  # 收集实际绘制曲线/拟合线的纵坐标，用于纵轴取整缩放
-            for well_id, wd in wells_data.items():
-                if not wd.get("times") or not wd.get("od"):
-                    continue
-                ref = wd.get("ref", "")
-                # 默认隐藏阴性/空白
-                if ref in ("blank", "neg") and not body.get("show_blank", False):
-                    continue
+            # 分组聚合：同组孔逐时间点取平均曲线（aggregate_groups 纯函数），未设组/单孔组照常逐孔画
+            error_bar = body.get("error_bar", "sd")  # sd | sem | none
+            drawable = {wid: wd for wid, wd in wells_data.items()
+                        if wd.get("times") and wd.get("od")
+                        and not (wd.get("ref", "") in ("blank", "neg") and not body.get("show_blank", False))}
+            groups, singles = aggregate_groups(drawable)
 
+            idx = 0  # 实际绘制条目序号（分组 + 单孔连续计数），用于取 BLI 配色
+            plotted_od = []  # 收集实际绘制曲线/拟合线的纵坐标，用于纵轴取整缩放
+
+            # 1) 分组平均曲线 + 误差棒（图例带 (n=成员数)）
+            for g in groups:
+                label = g["label"]
+                conc = g.get("conc_ng_ml")
+                lbl = f"{label} (n={g['n']})" + (f" ({conc} ng/mL)" if conc else "")
+                times_min = [t / 60 for t in g["times"]]
+                od_vals = g["od"]
+                color = COLORS[idx % len(COLORS)]
+                if error_bar in ("sd", "sem"):
+                    yerr = g["err"] if error_bar == "sd" else [e / (g["n"] ** 0.5) for e in g["err"]]
+                    ax.errorbar(times_min, od_vals, yerr=yerr, label=lbl, color=color,
+                                marker="o", markersize=4, linewidth=1.8, capsize=3, alpha=0.85)
+                else:
+                    ax.plot(times_min, od_vals, ".-", label=lbl, linewidth=1.8,
+                            markersize=4, alpha=0.85, color=color)
+                plotted_od.extend(od_vals)
+                # 拟合虚线：组内成员平均斜率（slope_corrected 优先），从平均曲线首点出发
+                slope = g.get("mean_slope")
+                if slope is not None and od_vals:
+                    t_fit = np.linspace(times_min[0], times_min[-1], 100)
+                    od_fit = [od_vals[0] + slope * (t - t_fit[0]) for t in t_fit]
+                    ax.plot(t_fit, od_fit, "--", linewidth=2.3, alpha=0.6, color=color)
+                    plotted_od.extend(od_fit)
+                idx += 1
+
+            # 2) 单孔曲线（未设组/单孔组，逐孔绘制）
+            for well_id in singles:
+                wd = drawable[well_id]
+                ref = wd.get("ref", "")
                 label = wd.get("name", well_id)
                 conc = wd.get("conc_ng_ml", "")
                 lbl = f"{label}" + (f" ({conc} ng/mL)" if conc else "")
@@ -1079,21 +1149,16 @@ def api_enzyme_plot():
 @app.route("/api/enzyme/export", methods=["POST"])
 def api_enzyme_export():
     """导出酶活原始数据为作图友好 Excel：
-    Sheet1「孔位-时间-OD」长格式（每孔每个时间点一行），Sheet2「动力学汇总」（每孔拟合一行）。"""
+    Sheet1「作图数据」宽格式（每孔独立两列：时间 + OD），Sheet2「动力学汇总」（每孔拟合一行）。"""
     body = request.get_json() or {}
     wells = body.get("wells", {}) or {}
     wb = Workbook()
 
-    # Sheet 1: 长格式
+    # Sheet 1: 作图数据（宽格式，每孔时间+OD 两列）
     ws = wb.active
-    ws.title = "孔位-时间-OD"
-    headers = ["孔位", "名称", "参考类型", "浓度 (ng/mL)", "浓度 (μM)", "时间 (min)", "OD"]
-    ws.append(headers)
-    for c in range(1, len(headers) + 1):
-        ws.cell(row=1, column=c).font = Font(bold=True)
-    ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}
-    for row in _enzyme_long_rows(wells):
-        ws.append(row)
+    ws.title = "作图数据"
+    headers, col_data = _enzyme_wide_columns(wells)
+    _write_wide_ws(ws, headers, col_data)
 
     # Sheet 2: 动力学汇总
     ws2 = wb.create_sheet("动力学汇总")
@@ -1102,6 +1167,7 @@ def api_enzyme_export():
     ws2.append(headers2)
     for c in range(1, len(headers2) + 1):
         ws2.cell(row=1, column=c).font = Font(bold=True)
+    ref_label = {"blank": "空白", "neg": "阴性", "pos": "阳性"}
     for wid, wd in sorted(wells.items()):
         if not isinstance(wd, dict):
             continue
@@ -1496,28 +1562,16 @@ def api_bli_export():
         ws.append(row + ["；".join(notes)])
 
     # Sheet2 作图数据：每条曲线两列（时间 + 响应），label 撞名时拼 sample_id 去重
-    from openpyxl.utils import get_column_letter
     ws2 = wb.create_sheet("作图数据")
-    col_labels = []
+    header = []
     seen = set()
     for c in curve_objs:
         lbl = c.label
         if lbl in seen:
             lbl = f"{lbl}·{c.sample_id}"
         seen.add(lbl)
-        col_labels.append(lbl)
-    header = []
-    for lbl in col_labels:
         header += [f"{lbl} 时间 (s)", f"{lbl} 响应 (nm)"]
-    ws2.append(header)
-    for c in range(1, len(header) + 1):
-        ws2.cell(row=1, column=c).font = Font(bold=True)
-        ws2.column_dimensions[get_column_letter(c)].width = 15
-    for ci, c in enumerate(curve_objs):
-        base = ci * 2 + 1
-        for r, (t, y) in enumerate(zip(c.time, c.response), 2):
-            ws2.cell(row=r, column=base).value = float(t)
-            ws2.cell(row=r, column=base + 1).value = float(y)
+    _write_wide_ws_pairs(ws2, header, [(c.time, c.response) for c in curve_objs])
 
     buf = BytesIO()
     wb.save(buf)
@@ -1869,23 +1923,14 @@ def api_akta_export():
         label = str(rs.get("name") or rch.name)
         samples.append((label, rch))
     if samples:
-        from openpyxl.utils import get_column_letter
         ws3 = wb.create_sheet("作图数据")
         header = []
+        col_data = []
         for label, rch in samples:
             header += [f"{label} 体积 (mL)", f"{label} 信号 ({rch.unit or ''})"]
-        ws3.append(header)
-        for c in range(1, len(header) + 1):
-            ws3.cell(row=1, column=c).font = Font(bold=True)
-            ws3.column_dimensions[get_column_letter(c)].width = 15
-        for si, (label, rch) in enumerate(samples):
-            base = si * 2 + 1
-            r = 2
-            for v, a in zip(rch.vols, rch.amps):
-                if _range(v):
-                    ws3.cell(row=r, column=base).value = float(v)
-                    ws3.cell(row=r, column=base + 1).value = float(a)
-                    r += 1
+            pairs = [(v, a) for v, a in zip(rch.vols, rch.amps) if _range(v)]
+            col_data.append(([p[0] for p in pairs], [p[1] for p in pairs]))
+        _write_wide_ws_pairs(ws3, header, col_data)
 
     buf = BytesIO()
     wb.save(buf)

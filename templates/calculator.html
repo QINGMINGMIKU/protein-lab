@@ -424,6 +424,9 @@
       <div id="wellDetail" style="font-size:13px;color:#888">选择孔位查看详情</div>
       <div id="wellForm" class="hidden" style="margin-top:8px">
         <label style="font-size:13px">命名 <input type="text" id="wellName" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
+        <label style="font-size:13px;margin-top:4px">组 <input type="text" id="wellGroup" list="wellGroupOptions" onchange="enzymeUpdateWells()" placeholder="同组孔取平均作图" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+          <datalist id="wellGroupOptions"></datalist>
+        </label>
         <div style="display:flex;gap:8px;align-items:end">
           <label style="font-size:13px;flex:1">浓度
             <input type="number" id="wellConc" step="any" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
@@ -483,6 +486,11 @@
     <label style="font-size:12px;display:flex;align-items:center;gap:4px">
       <input type="checkbox" id="enzymeAlignEnd" onchange="enzymePlot('kinetics')"> 对齐终止
     </label>
+    <select id="enzymeErrorBar" onchange="enzymePlot('kinetics')" title="同组孔平均曲线的误差棒" style="font-size:13px;padding:4px 6px;border:1px solid #d0d0d0;border-radius:4px">
+      <option value="sd" selected>误差棒 SD</option>
+      <option value="sem">误差棒 SEM</option>
+      <option value="none">无误差棒</option>
+    </select>
     <button class="btn btn-outline" onclick="enzymePlot('kinetics')">📈 动力学曲线</button>
     <button class="btn btn-outline" onclick="enzymePlot('michaelis')">📊 MM 曲线</button>
     <button class="btn btn-outline" onclick="enzymeExportExcel()">📊 导出作图 Excel</button>
@@ -493,7 +501,7 @@
   <div class="table-scroll" style="margin-top:12px">
     <table id="enzymeTable" class="calc-table hidden">
       <thead><tr>
-        <th>井</th><th>命名</th><th>参考</th><th>ng/mL</th><th>μM</th>
+        <th>井</th><th>命名</th><th>组</th><th>参考</th><th>ng/mL</th><th>μM</th>
         <th>ΔOD/min</th><th>R²</th><th>U/mL</th>
       </tr></thead>
       <tbody></tbody>

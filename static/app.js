@@ -1338,6 +1338,7 @@ async function applyCopyAndSwitch() {
       enzymeWellInfo[id] = {
         name: w.name,
         ref: w.ref,
+        group: w.group || "",
         protein_id: w.protein_id,
         conc_ng_ml: w.conc_ng_ml,
         conc_uM: w.conc_uM,
@@ -1785,6 +1786,15 @@ function enzymeClickWell(e, id) {
   updatePlateSelection();
 }
 
+// 刷新「组」下拉可选项：从所有孔已设的组名去重填充 datalist（供新建/改名时选已有组）
+function refreshWellGroupOptions() {
+  const d = document.getElementById("wellGroupOptions");
+  if (!d) return;
+  const groups = [...new Set(Object.values(enzymeWellInfo)
+    .map(i => (i.group || "").trim()).filter(Boolean))];
+  d.innerHTML = groups.map(g => `<option value="${g.replace(/"/g, "&quot;")}"></option>`).join("");
+}
+
 function updateWellForm() {
   const detail = document.getElementById("wellDetail");
   const form = document.getElementById("wellForm");
@@ -1799,6 +1809,8 @@ function updateWellForm() {
   const ids = Array.from(enzymeSelection);
   const info = enzymeWellInfo[ids[0]] || {};
   document.getElementById("wellName").value = info.name || "";
+  document.getElementById("wellGroup").value = info.group || "";
+  refreshWellGroupOptions();
   const unit = document.getElementById("wellConcUnit").value;
   document.getElementById("wellConc").value =
     unit === "ng_ml" ? (info.conc_ng_ml ?? "") : (info.conc_uM ?? "");
@@ -1812,6 +1824,8 @@ function updateWellForm() {
     document.getElementById("enzymeProteinSearch").value = "";
   }
   document.getElementById("wellName").placeholder = `${enzymeSelection.size} 个孔选中`;
+  document.getElementById("wellGroup").placeholder =
+    enzymeSelection.size > 1 ? `同时设置 ${enzymeSelection.size} 个孔的组` : "同组孔取平均作图";
 
   // 参考孔按钮状态
   const ref = info.ref;
@@ -1832,13 +1846,20 @@ function updateWellForm() {
 
 function enzymeUpdateWells() {
   const name = document.getElementById("wellName").value.trim();
+  const group = document.getElementById("wellGroup").value.trim();
   const conc = parseFloat(document.getElementById("wellConc").value);
   const unit = document.getElementById("wellConcUnit").value;
   const mw = parseFloat(document.getElementById("wellMW").value) || null;
 
-  for (const id of enzymeSelection) {
+  const ids = Array.from(enzymeSelection);
+  const multi = ids.length > 1 && !!name;  // 批量命名：同名孔按位置加 _1/_2/_3
+  if (multi) {
+    ids.sort((a, b) => (a.charCodeAt(0) - b.charCodeAt(0)) || (parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10)));
+  }
+  ids.forEach((id, i) => {
     if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
-    if (name) enzymeWellInfo[id].name = name;
+    if (name) enzymeWellInfo[id].name = multi ? `${name}_${i + 1}` : name;
+    enzymeWellInfo[id].group = group;  // 空=清除组（与 name 的「非空才写」不同）
     enzymeWellInfo[id].mw = mw;
     if (!isNaN(conc)) {
       if (unit === "ng_ml") {
@@ -1849,7 +1870,8 @@ function enzymeUpdateWells() {
         enzymeWellInfo[id].conc_ng_ml = mw ? +(conc * mw).toFixed(1) : null;
       }
     }
-  }
+  });
+  refreshWellGroupOptions();
   renderPlate();
 }
 
@@ -1930,6 +1952,7 @@ function renderEnzymeTable(wellIds) {
     const refLabel = info.ref === "blank" ? "空白" : info.ref === "neg" ? "阴性" : info.ref === "pos" ? "阳性" : "样品";
     return `<tr>
       <td>${id}</td><td>${esc(info.name || "")}</td>
+      <td style="color:#888">${esc(info.group || "")}</td>
       <td>${refLabel}</td>
       <td>${info.conc_ng_ml ?? "-"}</td><td>${info.conc_uM ?? "-"}</td>
       <td>${f.blank_corrected ? (f.slope_corrected?.toFixed(5) + ' <span style=color:#888;font-size:11px>(校正)</span>') : (f.slope?.toFixed(5) || "-")}</td>
@@ -1946,7 +1969,8 @@ async function enzymePlot(type) {
   const alignEnd = document.getElementById("enzymeAlignEnd")?.checked || false;
   const showBlank = document.getElementById("enzymeShowBlank")?.checked || false;
   const subBlank = document.getElementById("enzymeSubBlank")?.checked || false;
-  const payload = { type, align_start: alignStart, align_end: alignEnd, show_blank: showBlank, sub_blank: subBlank, wells: {} };
+  const errorBar = document.getElementById("enzymeErrorBar")?.value || "sd";
+  const payload = { type, align_start: alignStart, align_end: alignEnd, show_blank: showBlank, sub_blank: subBlank, error_bar: errorBar, wells: {} };
   for (const id of ids) {
     const wd = enzymeData.wells[id];
     if (!wd) continue;
@@ -1956,6 +1980,7 @@ async function enzymePlot(type) {
       times, od,
       ref: info.ref,  // 后端据此识别阴性/空白（扣除 + 默认隐藏）
       name: info.name || id,
+      group: info.group || "",  // 同组孔后端逐时间点取平均 + 误差棒
       conc_ng_ml: info.conc_ng_ml,
       substrate_uM: info.conc_uM,
       rate: info.fit?.slope,
@@ -2007,6 +2032,7 @@ async function enzymeSaveExp() {
     wells[id] = {
       name: info.name,
       ref: info.ref,
+      group: info.group || "",
       protein_id: info.protein_id,
       conc_ng_ml: info.conc_ng_ml,
       conc_uM: info.conc_uM,
@@ -2034,7 +2060,7 @@ async function enzymeSaveExp() {
   } catch (err) { toast(err.message, true); }
 }
 
-// 导出作图友好 Excel（长格式 孔位-时间-OD + 动力学汇总），文件名用自动命名
+// 导出作图友好 Excel（宽格式：每孔独立时间/OD 两列 + 动力学汇总），文件名用自动命名
 async function enzymeExportExcel() {
   if (!enzymeData) { toast("请先上传数据", true); return; }
   const autoName = await getAutoName("酶活测定") || "酶活测定";
@@ -2044,6 +2070,7 @@ async function enzymeExportExcel() {
     const { times, od } = enzymeFilteredData(wd);  // 导出只包含激活的时间点
     wells[id] = {
       name: info.name, ref: info.ref,
+      group: info.group || "",
       conc_ng_ml: info.conc_ng_ml, conc_uM: info.conc_uM,
       fit: info.fit || null,
       times, od,

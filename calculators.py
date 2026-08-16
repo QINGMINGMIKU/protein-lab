@@ -330,6 +330,73 @@ def align_wells(wells: dict, align_start: bool = False, align_end: bool = False)
     return new_wells, avg_first, avg_last
 
 
+def aggregate_groups(wells_data: dict):
+    """把带非空 group 的孔按组聚合为平均曲线（逐时间点 OD 均值 ± SD）。
+
+    供动力学曲线「同组孔取平均 + 误差棒」使用。逐时间点按时间值匹配聚合
+    （round 到 6 位，兼容个别孔缺测点错位）；时间单位保持输入（秒），
+    调用方作图时再转分钟。
+
+    返回 (groups, singles)：
+      groups: list[dict]，每项 = {label, times, od, err, n, conc_ng_ml, mean_slope}
+              times=时间点列表（升序），od=逐点均值，
+              err=逐点样本标准差（ddof=1，该点仅 1 孔时为 0），
+              n=组内成员孔数，conc_ng_ml=组内一致的浓度（不一致则 None），
+              mean_slope=成员 fit 斜率（slope_corrected 优先，回退 slope）的非空均值；
+      singles: list[well_id]，无 group 的孔 + 组内仅 1 孔的孔（退化为单孔绘制）。"""
+    groups = {}
+    singles = []
+    for wid, wd in wells_data.items():
+        if not isinstance(wd, dict) or not wd.get("times") or not wd.get("od"):
+            continue
+        g = (wd.get("group") or "").strip()
+        if not g:
+            singles.append(wid)
+        else:
+            groups.setdefault(g, []).append(wid)
+
+    out = []
+    for g, member_ids in sorted(groups.items()):
+        if len(member_ids) < 2:
+            singles.extend(member_ids)  # 单孔组退化为普通孔
+            continue
+        buckets = {}  # time -> [od...]
+        fit_slopes = []
+        concs = set()
+        for wid in member_ids:
+            wd = wells_data[wid]
+            for t, od in zip(wd["times"], wd["od"]):
+                if od is None:
+                    continue
+                key = round(float(t), 6)
+                buckets.setdefault(key, []).append(float(od))
+            fit = wd.get("fit") or {}
+            sl = fit.get("slope_corrected")
+            if sl is None:
+                sl = fit.get("slope")
+            if sl is not None:
+                fit_slopes.append(float(sl))
+            if wd.get("conc_ng_ml"):
+                concs.add(wd["conc_ng_ml"])
+        times = sorted(buckets)
+        od = []
+        err = []
+        for t in times:
+            vals = buckets[t]
+            od.append(float(np.mean(vals)))
+            err.append(float(np.std(vals, ddof=1)) if len(vals) >= 2 else 0.0)
+        out.append({
+            "label": g,
+            "times": times,
+            "od": od,
+            "err": err,
+            "n": len(member_ids),
+            "conc_ng_ml": list(concs)[0] if len(concs) == 1 else None,
+            "mean_slope": float(np.mean(fit_slopes)) if fit_slopes else None,
+        })
+    return out, singles
+
+
 def snap_ylim(values, pad: float = 0.06):
     """纵轴范围：数据范围外扩 pad 后按数量级取整到整刻度，避免难看的自动刻度。
     返回 (lo, hi)；values 为空返回 None。"""

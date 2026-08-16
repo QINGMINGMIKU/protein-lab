@@ -243,6 +243,129 @@ assert "slope_corrected" not in wells["C1"], "空白不做速率校正"
 assert fit_res["bg"]["count"] == 1 and _close(fit_res["bg"]["avg"], 0.06), fit_res["bg"]
 print("enzyme fit slope_corrected OK")
 
+# 6c. 筛选成 0 点的孔仍返回 null fit（前端据此覆盖旧 fit，避免 stale R² 残留标红）
+resp = client.post("/api/enzyme/fit", json={"wells": {
+    "A1": {"times": tt, "od": [0.1 + 0.002 * x for x in range(len(tt))], "ref": ""},
+    "B1": {"times": [], "od": [], "ref": ""},   # 时间点被全部筛选掉
+}})
+assert resp.status_code == 200, resp.status_code
+w6 = resp.get_json()["wells"]
+assert "B1" in w6, f"空孔 B1 应返回（否则前端残留旧 fit）: {w6.keys()}"
+assert w6["B1"]["r2"] is None and w6["B1"]["slope"] is None, w6["B1"]
+assert w6["A1"]["r2"] == 1.0, w6["A1"]
+print("enzyme fit empty-well null fit OK")
+
+# 6d. /api/enzyme/export 宽格式：每孔独立两列（时间 + OD），不再长格式堆叠；动力学汇总保留
+import io
+from openpyxl import load_workbook
+resp = client.post("/api/enzyme/export", json={"wells": {
+    "A1": {"name": "WT", "ref": "", "conc_ng_ml": 200, "conc_uM": 1.0,
+           "times": [0, 30, 60], "od": [0.10, 0.13, 0.16],
+           "fit": {"slope": 0.002, "intercept": 0.1, "r2": 1.0}},
+    "B1": {"name": "MUT", "ref": "", "conc_ng_ml": 200, "conc_uM": 1.0,
+           "times": [0, 30, 60], "od": [0.10, 0.12, 0.14],
+           "fit": {"slope": 0.001, "intercept": 0.1, "r2": 1.0}},
+}})
+assert resp.status_code == 200, resp.status_code
+wb_x = load_workbook(io.BytesIO(resp.data))
+assert wb_x.sheetnames == ["作图数据", "动力学汇总"], wb_x.sheetnames
+ws_x = wb_x["作图数据"]
+hdr_x = [c.value for c in ws_x[1]]
+assert hdr_x == ["WT 时间 (min)", "WT OD", "MUT 时间 (min)", "MUT OD"], hdr_x
+# 每孔两列：时间秒→分钟、OD 保留；行按时间索引对齐
+assert [ws_x.cell(row=r, column=1).value for r in range(2, 5)] == [0.0, 0.5, 1.0], "A1 时间列"
+assert [ws_x.cell(row=r, column=2).value for r in range(2, 5)] == [0.1, 0.13, 0.16], "A1 OD 列"
+assert [ws_x.cell(row=r, column=3).value for r in range(2, 5)] == [0.0, 0.5, 1.0], "B1 时间列"
+assert [ws_x.cell(row=r, column=4).value for r in range(2, 5)] == [0.1, 0.12, 0.14], "B1 OD 列"
+ws_sum = wb_x["动力学汇总"]
+assert ws_sum.cell(row=2, column=1).value == "A1" and ws_sum.cell(row=2, column=6).value == 0.002
+print("enzyme export wide-format OK")
+
+# 6e. 撞名回落孔位 + 无名字用孔位：列头仍唯一
+resp2 = client.post("/api/enzyme/export", json={"wells": {
+    "A1": {"name": "dup", "times": [0], "od": [0.1]},
+    "B1": {"name": "dup", "times": [0], "od": [0.2]},
+    "C1": {"name": "", "times": [0], "od": [0.3]},
+}})
+assert resp2.status_code == 200, resp2.status_code
+hdr2 = [c.value for c in load_workbook(io.BytesIO(resp2.data))["作图数据"][1]]
+assert hdr2 == ["dup 时间 (min)", "dup OD", "B1 时间 (min)", "B1 OD",
+                "C1 时间 (min)", "C1 OD"], hdr2
+print("enzyme export wide-format dedup OK")
+
+# 6f. 归档酶活实验导出（_export_excel 全酶活分支）同样宽格式：标题前缀 + 每孔两列
+from services import create_experiment
+exp3 = create_experiment(title="酶活导出测试", exp_type="酶活测定",
+                         params={"calc_type": "enzyme", "meta": {"sample": "A1-A2"},
+                                 "wells": {
+                                     "A1": {"name": "WT", "times": [0, 30], "od": [0.10, 0.14],
+                                            "fit": {"slope": 0.002, "r2": 1.0}},
+                                     "B1": {"name": "MUT", "times": [0, 30], "od": [0.10, 0.12],
+                                            "fit": {"slope": 0.001, "r2": 1.0}},
+                                 }})
+resp3 = client.get(f"/api/experiments/{exp3['id']}/export")
+assert resp3.status_code == 200, resp3.status_code
+wb3 = load_workbook(io.BytesIO(resp3.data))
+assert "作图数据" in wb3.sheetnames, wb3.sheetnames
+hdr3 = [c.value for c in wb3["作图数据"][1]]
+assert hdr3 == ["酶活导出测试 WT 时间 (min)", "酶活导出测试 WT OD",
+                "酶活导出测试 MUT 时间 (min)", "酶活导出测试 MUT OD"], hdr3
+assert [wb3["作图数据"].cell(row=2, column=1).value,
+        wb3["作图数据"].cell(row=2, column=2).value] == [0.0, 0.1]
+print("enzyme archive export wide-format OK")
+
+# 6g. 分组聚合纯函数 aggregate_groups：同组逐时间点取均值 ± SD；单孔组退化；无组走 singles
+from calculators import aggregate_groups
+agg_wells = {
+    "A1": {"group": "WT", "times": [0, 30, 60], "od": [0.10, 0.14, 0.18], "ref": "",
+           "conc_ng_ml": 200, "fit": {"slope_corrected": 0.004}},
+    "A2": {"group": "WT", "times": [0, 30, 60], "od": [0.12, 0.16, 0.20], "ref": "",
+           "conc_ng_ml": 200, "fit": {"slope_corrected": 0.004}},
+    "B1": {"times": [0, 30, 60], "od": [0.20, 0.22, 0.24], "ref": ""},
+    "C1": {"group": "solo", "times": [0, 30, 60], "od": [0.5, 0.6, 0.7], "ref": ""},
+}
+groups, singles = aggregate_groups(agg_wells)
+assert len(groups) == 1, f"只有 WT 是有效组（solo 单孔组应退化）: {groups}"
+assert groups[0]["label"] == "WT" and groups[0]["n"] == 2, groups[0]
+g = groups[0]
+assert g["times"] == [0, 30, 60], g["times"]
+assert all(_close(a, b) for a, b in zip(g["od"], [0.11, 0.15, 0.19])), g["od"]
+assert abs(g["err"][0] - 0.0141421356) < 1e-4, f"SD(ddof=1) 首点 {g['err'][0]}"
+assert _close(g["mean_slope"], 0.004), g["mean_slope"]
+assert g["conc_ng_ml"] == 200, g["conc_ng_ml"]
+assert sorted(singles) == ["B1", "C1"], singles
+# 组内缺测点错位：按时间值匹配聚合，B3 少 30s 一点——该点均值只算有数据的成员
+agg_ragged = {"A1": {"group": "G", "times": [0, 30, 60], "od": [0.1, 0.2, 0.3]},
+              "B3": {"group": "G", "times": [0, 60], "od": [0.2, 0.4]}}
+gr, sg = aggregate_groups(agg_ragged)
+assert len(sg) == 0 and gr[0]["times"] == [0, 30, 60], (gr, sg)  # 时间取成员并集
+assert [_close(a, b) for a, b in zip(gr[0]["od"], [0.15, 0.2, 0.35])], gr[0]["od"]
+assert abs(gr[0]["err"][1]) < 1e-9 and abs(gr[0]["err"][0] - 0.0707107) < 1e-4, gr[0]["err"]
+print("enzyme aggregate_groups OK")
+
+# 6h. /api/enzyme/plot 分组：同组孔平均曲线 + 误差棒（sd/sem/none 三态 200）
+resp = client.post("/api/enzyme/plot", json={
+    "type": "kinetics", "error_bar": "sd", "wells": {
+        "A1": {"times": tt, "od": [0.1 + 0.002 * x for x in range(len(tt))],
+               "name": "r1", "group": "WT", "ref": "",
+               "fit": {"slope": 0.002, "intercept": 0.1, "slope_corrected": 0.002}},
+        "A2": {"times": tt, "od": [0.11 + 0.002 * x for x in range(len(tt))],
+               "name": "r2", "group": "WT", "ref": "",
+               "fit": {"slope": 0.002, "intercept": 0.11, "slope_corrected": 0.002}},
+        "B1": {"times": tt, "od": [0.2 + 0.001 * x for x in range(len(tt))],
+               "name": "MUT", "group": "", "ref": ""},
+    }})
+assert resp.status_code == 200, resp.status_code
+assert resp.get_json()["image"].startswith("data:image/png;base64,")
+# 单孔组退化为单孔 + sem/none 各 200
+for eb in ("sem", "none"):
+    r = client.post("/api/enzyme/plot", json={
+        "type": "kinetics", "error_bar": eb, "wells": {"A1": {
+            "times": tt, "od": [0.1] * len(tt), "group": "solo", "name": "x",
+            "ref": "", "fit": {"slope": 0}}} })
+    assert r.status_code == 200, (eb, r.status_code)
+print("enzyme plot grouped errorbar OK")
+
 assert client.get("/calculator").status_code == 200
 print("/calculator OK")
 
