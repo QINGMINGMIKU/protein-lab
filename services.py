@@ -4,10 +4,12 @@
 - 审计（audit_log）
 - 谱系血缘（experiment_links / copied_from）
 - 原始数据分离（experiment_raw + analysis_version）
+- v0.1.1：从实验自然产生研究脉络（保存时挂 Goal→Experiment 节点）
 """
 from datetime import datetime
 
 import models
+import research
 
 
 def auto_exp_name(exp_type: str, date: str = "") -> str:
@@ -90,12 +92,17 @@ def _enrich_protein_snapshot(params, results, protein_ids):
 def create_experiment(title: str, exp_type: str, protein_ids: list[int] = None,
                       date: str = "", params: dict = None, results: dict = None,
                       notes: str = "", auto_name: bool = True,
-                      raw_snapshots: list[tuple[str, object]] = None) -> dict:
-    """统一创建实验：校验 + 自动命名 + 蛋白快照 + 落库（可选原子携带 raw 快照），返回完整实验 dict。
+                      raw_snapshots: list[tuple[str, object]] = None,
+                      goal_id: int | None = None,
+                      new_goal: dict | None = None) -> dict:
+    """统一创建实验：校验 + 自动命名 + 蛋白快照 + 落库（可选原子携带 raw 快照）+ 可选挂研究脉络节点。
 
     auto_name=False 时标题留空不自动命名（MCP 已要求 title 必填，走默认 True 也无副作用）。
     raw_snapshots: [(data_type, payload), ...] —— 与实验在同事务内原子落库（experiment_raw），
-    避免先建实验再单独 save raw 的部分写入（孤儿实验）。BLI/AKTA 等需要快照的写入入口走这里。"""
+    避免先建实验再单独 save raw 的部分写入（孤儿实验）。BLI/AKTA 等需要快照的写入入口走这里。
+    goal_id / new_goal（v0.1.1）：保存时挂研究脉络 = 已有 goal 节点 / 新建根 goal；
+    二选一互斥，都给时 goal_id 优先。失败时主动删实验（补偿模式），
+    避免孤儿实验。返回 dict 增 `goal_node_id` 字段（int | None）。"""
     exp_type = (exp_type or "").strip()
     if not exp_type:
         raise ValueError("实验类型不能为空")
@@ -116,4 +123,61 @@ def create_experiment(title: str, exp_type: str, protein_ids: list[int] = None,
             title=title, exp_type=exp_type, protein_ids=protein_ids,
             date=date, params=params, results=results, notes=notes,
         )
-    return models.exp_get(eid)
+    # v0.1.1：从实验自然产生研究脉络（入口生死线）
+    exp_dict = models.exp_get(eid)
+    exp_dict["goal_node_id"] = None
+    if goal_id is not None or new_goal:
+        try:
+            exp_dict["goal_node_id"] = _attach_goal_node(
+                eid, title, goal_id=goal_id, new_goal=new_goal)
+        except Exception:
+            # 节点关联失败 → 删实验，避免孤儿（补偿模式）。raw 快照会随 FK SET NULL 留下。
+            models.exp_delete(eid)
+            raise
+    return exp_dict
+
+
+def _attach_goal_node(exp_id: int, exp_title: str,
+                      goal_id: int | None = None,
+                      new_goal: dict | None = None) -> int:
+    """为已存实验挂一个 experiment 节点到 goal 下，返回该节点 id。
+    goal_id 路径：直接挂；new_goal 路径：先建根 goal 节点，再挂 experiment 节点。
+    失败抛 ValueError（services 层捕获后会回滚实验）。"""
+    if not goal_id and not new_goal:
+        raise ValueError("需要 goal_id 或 new_goal 之一")
+    if goal_id is not None:
+        if not models.research_node_get(goal_id):
+            raise ValueError(f"goal 节点 {goal_id} 不存在")
+        parent_id = goal_id
+    else:
+        ng_title = (new_goal.get("title") or "").strip() or exp_title
+        ng_tag = (new_goal.get("tag") or "").strip()
+        nid, err = research.create_node(
+            node_type="goal", title=ng_title, tag=ng_tag, free_attach=False)
+        if not nid:
+            raise ValueError(f"创建 goal 节点失败: {err}")
+        parent_id = nid
+    enid, err = research.create_node(
+        node_type="experiment", title=exp_title, exp_id=exp_id,
+        parent_id=parent_id, free_attach=False)
+    if not enid:
+        raise ValueError(f"挂 experiment 节点失败: {err}")
+    return enid
+
+
+def attach_goal(exp_id: int, goal_id: int) -> dict:
+    """实验详情页「+ 关联到其他目标」：为已存实验追加一个 experiment 节点到指定 goal 下。
+
+    返回 {"node_id": 新建 experiment 节点 id, "goal_id": goal_id, "experiment_id": exp_id}。
+    失败返 None（前端统一按 falsy 处理）。"""
+    if not models.exp_get(exp_id):
+        return None
+    exp = models.exp_get(exp_id)
+    title = exp.get("title") or f"实验 #{exp_id}"
+    try:
+        enid = _attach_goal_node(exp_id, title, goal_id=goal_id, new_goal=None)
+    except ValueError:
+        return None
+    if not enid:
+        return None
+    return {"node_id": enid, "goal_id": goal_id, "experiment_id": exp_id}

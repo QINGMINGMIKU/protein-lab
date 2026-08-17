@@ -413,6 +413,61 @@ _web19 = services.create_experiment(
 assert _web19["params"]["proteins"][0]["conc_uM"] == 9.9 and len(_web19["params"]["proteins"]) == 1, "已有 proteins 不应被覆盖"
 print("19. 蛋白+浓度快照（MCP 紧凑浓度规范化 / 通用绑定 / 不覆盖已有）OK")
 
+# ── 20. v0.1.1 从实验自然产生研究脉络：保存实验时挂 Goal→Experiment 节点 ──
+# 20a. goal_id 路径：已有 goal → 实验自动挂
+_gid = models.research_node_create(node_type="goal", title="TIM 变体活性优化", tag="稳定性,TIM")
+_exp_a = services.create_experiment(
+    title="", exp_type="酶活测定", date="2026-08-17",
+    params={"calc_type": "enzyme"}, results={}, goal_id=_gid)
+assert _exp_a.get("goal_node_id"), f"goal_id 路径应返回新 experiment 节点 id: {_exp_a}"
+_gsub = models.research_node_get(_exp_a["goal_node_id"])
+assert _gsub and _gsub["node_type"] == "experiment" and _gsub["exp_id"] == _exp_a["id"], \
+    f"挂的 experiment 节点应引用新建实验: {_gsub}"
+assert _gsub["parent_id"] == _gid, "experiment 节点应挂在传入的 goal 下"
+# 20b. new_goal 路径：自动建根 goal + experiment 节点
+_exp_b = services.create_experiment(
+    title="", exp_type="浓度测定", date="2026-08-17",
+    params={"calc_type": "concentration"}, results={},
+    new_goal={"title": "PD1 结合 BLI", "tag": "BLI,PD1"})
+assert _exp_b.get("goal_node_id"), f"new_goal 路径应返回新节点: {_exp_b}"
+_root_goals = [n for n in models.research_nodes_root() if n["title"] == "PD1 结合 BLI"]
+assert len(_root_goals) == 1, f"new_goal 应建一个根 goal 节点: {models.research_nodes_root()}"
+_b_node = models.research_node_get(_exp_b["goal_node_id"])
+assert _b_node["parent_id"] == _root_goals[0]["id"], "experiment 应挂在新建的 goal 下"
+# 20c. 未关联路径：不传 goal 参数 → 零节点新建，实验照常创建
+_before_root = len(models.research_nodes_root())
+_exp_c = services.create_experiment(
+    title="", exp_type="BLI", date="2026-08-17", params={}, results={})
+assert _exp_c.get("goal_node_id") is None, "未关联应返回 None"
+assert _exp_c["id"] > 0, "实验应照常创建"
+assert len(models.research_nodes_root()) == _before_root, "未关联不应创建新节点"
+# 20d. 失败回滚：goal_id 不存在 → 整实验回滚（不留孤儿）
+_before_ids = {e["id"] for e in models.exp_list()}
+try:
+    services.create_experiment(
+        title="", exp_type="BLI", date="2026-08-17", params={}, results={},
+        goal_id=99999)
+    raise AssertionError("不存在 goal_id 应抛 ValueError")
+except ValueError:
+    pass
+_after_ids = {e["id"] for e in models.exp_list()}
+assert _after_ids == _before_ids, "goal_id 失败应回滚实验，不留孤儿"
+# 20e. attach_goal：一实验多目标
+_exp_e1 = services.create_experiment(
+    title="", exp_type="BLI", date="2026-08-17", params={}, results={}, goal_id=_gid)
+_extra_gid = models.research_node_create(node_type="goal", title="TIM 寡聚化", tag="TIM")
+_att = services.attach_goal(_exp_e1["id"], _extra_gid)
+assert _att and _att["node_id"] and _att["goal_id"] == _extra_gid, f"attach_goal 应成功: {_att}"
+_subs = models.research_node_children(_gid)
+_sub_ids_e1 = [s for s in _subs if s.get("exp_id") == _exp_e1["id"]]
+_subs_extra = models.research_node_children(_extra_gid)
+_sub_ids_extra = [s for s in _subs_extra if s.get("exp_id") == _exp_e1["id"]]
+assert len(_sub_ids_e1) == 1 and len(_sub_ids_extra) == 1, "同一实验应同时挂在两个 goal 下"
+# 20f. attach_goal 失败：实验不存在 / goal 不存在
+assert services.attach_goal(99999, _gid) is None, "实验不存在应返 None"
+assert services.attach_goal(_exp_e1["id"], 99999) is None, "goal 不存在应返 None"
+print("20. 从实验自然产生研究脉络（goal_id / new_goal / 未关联 / 失败回滚 / attach_goal）OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")

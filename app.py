@@ -471,10 +471,23 @@ def api_exp_create():
             params=data.get("params", {}),
             results=data.get("results", {}),
             notes=data.get("notes", ""),
+            goal_id=_goal_id_from_request(data),
+            new_goal=data.get("new_goal"),
         )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400
     return jsonify(e), 201
+
+
+def _goal_id_from_request(data) -> int | None:
+    """goal_id 类型校验（app 端点共用）。None / 缺失 = 不关联；非整型返 400。"""
+    g = data.get("goal_id")
+    if g is None or g == "":
+        return None
+    try:
+        return int(g)
+    except (TypeError, ValueError):
+        raise ValueError(f"goal_id 应为整数，收到 {g!r}")
 
 
 @app.route("/api/experiments/from-calculation", methods=["POST"])
@@ -493,10 +506,37 @@ def api_exp_from_calc():
             date=data.get("date", ""),
             params=params, results=calc_result,
             notes=data.get("notes", ""),
+            goal_id=_goal_id_from_request(data),
+            new_goal=data.get("new_goal"),
         )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400
     return jsonify(e), 201
+
+
+@app.route("/api/experiments/<int:eid>/attach-goal", methods=["POST"])
+def api_exp_attach_goal(eid):
+    """实验详情页「+ 关联到其他目标」：为已存实验追加一个 experiment 节点到指定 goal 下（一实验多目标）。"""
+    data = request.get_json() or {}
+    try:
+        gid = _goal_id_from_request(data)
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    if gid is None:
+        return jsonify({"error": "goal_id 必填"}), 400
+    result = services.attach_goal(eid, gid)
+    if not result:
+        return jsonify({"error": "关联失败（goal 不存在或实验不存在）"}), 400
+    return jsonify(result), 201
+
+
+@app.route("/api/research/goals", methods=["GET"])
+def api_research_goals():
+    """轻量目标列表（保存弹窗下拉用）：[{"id":..., "title":..., "tag":...}, ...]，
+    仅 goal 类型节点，按 sort_order+id 升序。"""
+    rows = models.research_nodes_all()
+    return jsonify([{"id": r["id"], "title": r["title"], "tag": r.get("tag", "")}
+                    for r in rows if r.get("node_type") == "goal"])
 
 
 @app.route("/api/experiments/<int:eid>", methods=["PUT"])

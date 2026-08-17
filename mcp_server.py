@@ -249,7 +249,7 @@ TOOLS = [
     },
     {
         "name": "save_experiment",
-        "description": "归档一条实验记录到数据库",
+        "description": "归档一条实验记录到数据库。可选挂到研究脉络目标下（v0.1.1）：传 goal_id（已有 goal 节点 id）或 new_goal={title,tag}（自动建根 goal 节点 + experiment 节点），二选一，都不传 = 暂不关联",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -259,7 +259,13 @@ TOOLS = [
                 "date": {"type": "string", "description": "日期 YYYY-MM-DD，默认今天"},
                 "params": {"type": "object", "description": "实验参数 (JSON object)。浓度测定建议传 a280 + (mw_da 或 epsilon_red/epsilon_ox)，计算出的浓度放 results.mean_uM / mean_mg_ml；服务端保存时自动附上绑定的蛋白快照并规范成标准形态"},
                 "results": {"type": "object", "description": "实验结果 (JSON object)"},
-                "notes": {"type": "string", "description": "备注"}
+                "notes": {"type": "string", "description": "备注"},
+                "goal_id": {"type": "integer", "description": "已有研究脉络 goal 节点 id（与 new_goal 互斥，都给时 goal_id 优先）"},
+                "new_goal": {"type": "object", "description": "新建根目标节点，自动建为根 goal 节点 + experiment 节点。形如 {\"title\": \"TIM 优化\", \"tag\": \"稳定性,TIM\"}",
+                             "properties": {
+                                 "title": {"type": "string"},
+                                 "tag": {"type": "string"}
+                             }}
             },
             "required": ["title", "exp_type"]
         }
@@ -425,6 +431,12 @@ def handle_tools_call(id_, params):
                 p = models.protein_get_by_name(name)
                 if p:
                     protein_ids.append(p["id"])
+            goal_id = _inum(args, tool_name, "goal_id", None) if "goal_id" in args else None
+            new_goal = args.get("new_goal")
+            if new_goal is not None and not isinstance(new_goal, dict):
+                raise InvalidParams(f"{tool_name}: new_goal 应为对象，收到 {type(new_goal).__name__}")
+            if goal_id is not None and new_goal:
+                new_goal = None  # 互斥，都给时 goal_id 优先
             saved = services.create_experiment(
                 title=args["title"],
                 exp_type=exp_type,
@@ -433,6 +445,8 @@ def handle_tools_call(id_, params):
                 params=args.get("params", {}),
                 results=args.get("results", {}),
                 notes=args.get("notes", ""),
+                goal_id=goal_id,
+                new_goal=new_goal,
             )
             saved["params"] = _strip_sequences(saved.get("params"))
             saved["results"] = _strip_sequences(saved.get("results"))

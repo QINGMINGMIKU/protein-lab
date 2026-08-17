@@ -73,6 +73,12 @@
       <label>实验参数 (JSON) <textarea name="params" id="expParams" rows="3" placeholder='{"buffer":"PBS","temp":"25°C"}'></textarea></label>
       <label>实验结果 (JSON) <textarea name="results" id="expResults" rows="3" placeholder='{"KD":"1.2e-7"}'></textarea></label>
       <label>备注 <input type="text" name="notes" id="expNotes"></label>
+      <label>属于哪个研究目标？<span style="font-weight:400;color:#888">（v0.1.1 选填；不改 = 暂不关联，可后续详情页追加）</span>
+        <div class="form-row">
+          <select id="expGoalSel"><option value="">-- 暂不关联 --</option></select>
+          <input type="text" id="expNewGoal" placeholder="或写新目标标题（自动建为根 goal）" style="flex:1">
+        </div>
+      </label>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">保存</button>
         <button type="button" class="btn btn-outline" onclick="closeExpModal()">取消</button>

@@ -24,6 +24,20 @@
   </div>
 </div>
 
+<!-- v0.1.1 研究脉络：研究脉络区块由 showExpDetail 在 /experiments/<id> 页面动态渲染，
+     此模板页（/experiments/<id>/detail）只做 SSR 兜底（初始不显式 block）。 -->
+{% if show_research_block | default(false) %}
+<div class="panel" style="margin-bottom:20px">
+  <div class="info-grid">
+    <dt>研究脉络</dt>
+    <dd>
+      <div id="detailResearchList" style="display:inline">（加载中…）</div>
+      <button class="btn btn-sm btn-outline" onclick="attachGoalPrompt({{ exp.id }})" style="margin-left:8px">+ 关联到其他目标</button>
+    </dd>
+  </div>
+</div>
+{% endif %}
+
 <!-- 编辑实验弹窗：替换原先依赖 prompt() 的改标题（prompt 在部分环境被拦截会静默失效） -->
 <div id="editModal" class="modal hidden">
   <div class="modal-box">

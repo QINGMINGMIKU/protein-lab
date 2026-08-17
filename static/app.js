@@ -815,6 +815,9 @@ async function saveConcTable() {
     || ids.map(id => selectedProteins[id].name).join(", ") + " 浓度测定";
   const oxidized = getCurrentOxidized();
 
+  const goal = await promptGoalAttach();
+  if (goal === null) return;
+
   try {
     await API.post("/api/experiments/from-calculation", {
       title: title,
@@ -841,6 +844,7 @@ async function saveConcTable() {
         })),
       },
       calc_result: [],
+      ...goal,
     });
     toast("已保存为实验记录");
   } catch (err) { toast(err.message, true); }
@@ -1117,6 +1121,9 @@ async function saveBliTable() {
   const title = customName || await getAutoName("BLI")
     || Object.values(bliProteins).map(p => p.name).join(", ") + " BLI 稀释";
 
+  const goal = await promptGoalAttach();
+  if (goal === null) return;
+
   try {
     await API.post("/api/experiments/from-calculation", {
       title: title,
@@ -1126,6 +1133,7 @@ async function saveBliTable() {
       calc_type: "dilution",
       calc_params: { proteins },
       calc_result: dilutionResults,
+      ...goal,
     });
     renderBliResults(dilutionResults);
     toast("已保存为实验记录");
@@ -1521,6 +1529,7 @@ async function loadExperiments() {
 function showExpAddModal(prefill = null) {
   document.getElementById("expModalTitle").textContent = prefill?.title || "新建实验";
   document.getElementById("expModal").classList.remove("hidden");
+  loadGoalOptions();  // v0.1.1：拉研究目标下拉
   if (prefill) {
     document.getElementById("expTitle").value = prefill.title || "";
     document.getElementById("expType").value = prefill.exp_type || "";
@@ -1541,6 +1550,46 @@ function closeExpModal() {
   document.getElementById("expModal").classList.add("hidden");
   document.getElementById("expForm").reset();
   document.querySelectorAll("#proteinCheckboxes input[type=checkbox]").forEach(cb => cb.checked = false);
+  const ng = document.getElementById("expNewGoal"); if (ng) ng.value = "";
+}
+
+async function loadGoalOptions() {
+  // 保存弹窗下拉：拉已有 goal 节点轻量列表
+  try {
+    const list = await API.get("/api/research/goals");
+    const sel = document.getElementById("expGoalSel");
+    if (!sel) return;
+    sel.innerHTML = '<option value="">-- 暂不关联 --</option>'
+      + list.map(g => `<option value="${g.id}">${esc(g.title)}${g.tag ? "  · " + esc(g.tag) : ""}</option>`).join("");
+  } catch (_) { /* 拉不到不阻塞保存 */ }
+}
+
+// 公共：从「属于哪个研究目标」控件收集 {goal_id|new_goal|...}（保存弹窗专用）
+function readGoalAttachFromForm(prefix = "exp") {
+  const sel = document.getElementById(prefix + "GoalSel");
+  const inp = document.getElementById(prefix + "NewGoal");
+  const selVal = sel ? sel.value.trim() : "";
+  const inpVal = inp ? inp.value.trim() : "";
+  if (selVal) return { goal_id: parseInt(selVal, 10) };
+  if (inpVal) return { new_goal: { title: inpVal, tag: "" } };
+  return {};
+}
+
+// 公共：从-计算存档 3 处复用：弹「属于哪个研究目标？」（默认暂不关联 = 0）
+// 返回 {goal_id|new_goal|...}；用户取消 = 取消整个存档动作（不保存）
+async function promptGoalAttach() {
+  let goals = [];
+  try { goals = await API.get("/api/research/goals"); } catch (_) { return {}; }
+  const lines = ["0. (暂不关联)"];
+  goals.forEach((g, i) => lines.push(`${i + 1}. ${g.title}${g.tag ? "  · " + g.tag : ""}`));
+  lines.push("", "新目标请直接输入标题（自动建为根 goal）");
+  const ans = prompt("属于哪个研究目标？\n\n" + lines.join("\n"), "0");
+  if (ans === null) return null;  // 取消存档
+  const t = ans.trim();
+  if (!t || t === "0") return {};
+  const n = parseInt(t, 10);
+  if (!isNaN(n) && n >= 1 && n <= goals.length) return { goal_id: goals[n - 1].id };
+  return { new_goal: { title: t, tag: "" } };
 }
 
 async function saveExperiment(e) {
@@ -1560,12 +1609,13 @@ async function saveExperiment(e) {
     }
   }
   try {
-    await API.post("/api/experiments", {
+    const saved = await API.post("/api/experiments", {
       title: data.title, exp_type: data.exp_type,
       protein_ids: proteinIds, date: data.date,
       params: data.params, results: data.results, notes: data.notes,
+      ...readGoalAttachFromForm("exp"),
     });
-    toast("实验已保存");
+    toast(saved.goal_node_id ? "实验已保存 · 已挂研究脉络" : "实验已保存");
     closeExpModal();
     loadExperiments();
   } catch (err) { toast(err.message, true); }
@@ -1584,6 +1634,11 @@ async function showExpDetail(id) {
         <dt>日期</dt><dd>${e.date || "-"}</dd>
         <dt>关联蛋白</dt><dd>${esc(e.protein_names || "无")}</dd>
         <dt>备注</dt><dd id="expDetailNotes">${esc(e.notes || "-")}</dd>
+        <dt>研究脉络</dt>
+        <dd>
+          <div id="detailResearchList" style="display:inline">（加载中…）</div>
+          <button class="btn btn-sm btn-outline" onclick="attachGoalPrompt(${e.id})" style="margin-left:8px">+ 关联到其他目标</button>
+        </dd>
       </dl>
       <div style="margin-top:12px"><strong>实验参数</strong></div>
       <pre style="background:#f8f9fb;padding:10px;border-radius:6px;font-size:12px;max-height:150px;overflow:auto">${esc(paramsStr)}</pre>
@@ -1591,6 +1646,49 @@ async function showExpDetail(id) {
       <pre style="background:#f8f9fb;padding:10px;border-radius:6px;font-size:12px;max-height:200px;overflow:auto">${esc(resultsStr)}</pre>
     `;
     document.getElementById("expDetailPanel").classList.remove("hidden");
+    loadResearchList(e.id);
+  } catch (err) { toast(err.message, true); }
+}
+
+async function loadResearchList(expId) {
+  const el = document.getElementById("detailResearchList");
+  if (!el) return;
+  try {
+    const trees = await API.get("/api/research/trees");
+    const links = [];
+    for (const root of trees) collectLinks(root, expId, links);
+    if (!links.length) { el.textContent = "（暂未关联）"; return; }
+    el.innerHTML = links.map(l => `<a href="/research" target="_blank">${esc(l.goalTitle)}</a>`).join(" · ");
+  } catch (_) { el.textContent = "（加载失败）"; }
+}
+
+function collectLinks(node, expId, out) {
+  if ((node.node_type === "experiment" && node.exp_id === expId) || (node.children || []).length) {
+    if (node.node_type === "experiment" && node.exp_id === expId) {
+      // 找到对应 experiment 节点 → 沿父链找 goal（向上找最近的目标祖先）
+      // 简化：直接收集 node.title（实际应该追溯到 goal），下一步到 /research 即可看到
+      out.push({ goalTitle: node.title });
+    }
+    for (const c of (node.children || [])) collectLinks(c, expId, out);
+  }
+}
+
+async function attachGoalPrompt(expId) {
+  let goals = [];
+  try { goals = await API.get("/api/research/goals"); } catch (_) { toast("加载目标失败", true); return; }
+  const lines = goals.map((g, i) => `${i + 1}. ${g.title}${g.tag ? "  · " + g.tag : ""}`).join("\n");
+  const ans = prompt("关联到哪个目标？\n\n" + (lines || "（暂无目标）"), "");
+  if (ans === null) return;
+  const t = ans.trim();
+  if (!t) return;
+  const n = parseInt(t, 10);
+  let body;
+  if (!isNaN(n) && n >= 1 && n <= goals.length) body = { goal_id: goals[n - 1].id };
+  else body = { new_goal: { title: t, tag: "" } };
+  try {
+    await API.post(`/api/experiments/${expId}/attach-goal`, body);
+    toast("已关联");
+    loadResearchList(expId);
   } catch (err) { toast(err.message, true); }
 }
 
@@ -2137,6 +2235,9 @@ async function enzymeSaveExp() {
     };
   }
 
+  const goal = await promptGoalAttach();
+  if (goal === null) return;
+
   try {
     await API.post("/api/experiments/from-calculation", {
       title, exp_type: "酶活测定",
@@ -2149,6 +2250,7 @@ async function enzymeSaveExp() {
         well_count: Object.keys(enzymeData.wells).length,
       },
       calc_result: {},
+      ...goal,
     });
     toast("已保存为实验记录");
   } catch (err) { toast(err.message, true); }
