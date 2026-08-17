@@ -124,16 +124,20 @@ def create_experiment(title: str, exp_type: str, protein_ids: list[int] = None,
             date=date, params=params, results=results, notes=notes,
         )
     # v0.1.1：从实验自然产生研究脉络（入口生死线）
+    # 设计原则：节点关联是 best-effort——失败时 log warning 但**不删实验**、返回 goal_node_id=None。
+    # 旧版（v0.1.1 初版）走补偿删实验，结果：(a) raw 留底成孤儿 (FK SET NULL)；
+    # (b) 用户为「选目标」付选择成本，整实验丢失，破坏「零摩擦」原则。
+    # 研究脉络是实验的副产物——实验优先落库，节点补建失败不致命。
     exp_dict = models.exp_get(eid)
     exp_dict["goal_node_id"] = None
     if goal_id is not None or new_goal:
         try:
             exp_dict["goal_node_id"] = _attach_goal_node(
                 eid, title, goal_id=goal_id, new_goal=new_goal)
-        except Exception:
-            # 节点关联失败 → 删实验，避免孤儿（补偿模式）。raw 快照会随 FK SET NULL 留下。
-            models.exp_delete(eid)
-            raise
+        except ValueError as err:
+            # 业务级失败（goal 不存在 / 白名单拦截 / 标题为空等）—— 静默降级为不挂节点
+            import logging
+            logging.warning("create_experiment 挂研究脉络失败 (exp_id=%s): %s", eid, err)
     return exp_dict
 
 
@@ -142,7 +146,11 @@ def _attach_goal_node(exp_id: int, exp_title: str,
                       new_goal: dict | None = None) -> int:
     """为已存实验挂一个 experiment 节点到 goal 下，返回该节点 id。
     goal_id 路径：直接挂；new_goal 路径：先建根 goal 节点，再挂 experiment 节点。
-    失败抛 ValueError（services 层捕获后会回滚实验）。"""
+    失败抛 ValueError（业务级：goal 不存在 / 白名单不允许 / 标题为空等）。
+
+    new_goal 路径的两步创建若第二步失败，会主动 delete_subtree 回滚第一步建的根 goal，
+    避免孤儿根 goal 节点。
+    """
     if not goal_id and not new_goal:
         raise ValueError("需要 goal_id 或 new_goal 之一")
     if goal_id is not None:
@@ -150,7 +158,9 @@ def _attach_goal_node(exp_id: int, exp_title: str,
             raise ValueError(f"goal 节点 {goal_id} 不存在")
         parent_id = goal_id
     else:
-        ng_title = (new_goal.get("title") or "").strip() or exp_title
+        ng_title = (new_goal.get("title") or "").strip()
+        if not ng_title:
+            raise ValueError("新建目标标题不能为空")
         ng_tag = (new_goal.get("tag") or "").strip()
         nid, err = research.create_node(
             node_type="goal", title=ng_title, tag=ng_tag, free_attach=False)
@@ -161,6 +171,13 @@ def _attach_goal_node(exp_id: int, exp_title: str,
         node_type="experiment", title=exp_title, exp_id=exp_id,
         parent_id=parent_id, free_attach=False)
     if not enid:
+        # new_goal 路径下回滚第一步建的根 goal（避免孤儿根 goal 节点）
+        if not goal_id and parent_id:
+            try:
+                models.research_node_delete_subtree(parent_id)
+            except Exception:
+                import logging
+                logging.exception("清理孤儿根 goal 失败 (node_id=%s)", parent_id)
         raise ValueError(f"挂 experiment 节点失败: {err}")
     return enid
 
@@ -169,10 +186,11 @@ def attach_goal(exp_id: int, goal_id: int) -> dict:
     """实验详情页「+ 关联到其他目标」：为已存实验追加一个 experiment 节点到指定 goal 下。
 
     返回 {"node_id": 新建 experiment 节点 id, "goal_id": goal_id, "experiment_id": exp_id}。
-    失败返 None（前端统一按 falsy 处理）。"""
-    if not models.exp_get(exp_id):
-        return None
+    失败返 None（前端统一按 falsy 处理）。
+    """
     exp = models.exp_get(exp_id)
+    if not exp:
+        return None
     title = exp.get("title") or f"实验 #{exp_id}"
     try:
         enid = _attach_goal_node(exp_id, title, goal_id=goal_id, new_goal=None)

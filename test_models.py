@@ -441,17 +441,19 @@ _exp_c = services.create_experiment(
 assert _exp_c.get("goal_node_id") is None, "未关联应返回 None"
 assert _exp_c["id"] > 0, "实验应照常创建"
 assert len(models.research_nodes_root()) == _before_root, "未关联不应创建新节点"
-# 20d. 失败回滚：goal_id 不存在 → 整实验回滚（不留孤儿）
+# 20d. 失败 best-effort（H5 修订）：goal_id 不存在 → 静默降级为不挂节点，实验照常创建
+# 原则：研究脉络是实验的副产物，节点关联失败不致命；旧版（v0.1.1 初版）补偿删实验
+# 会留 raw 孤儿 + 破坏"零摩擦"原则。新版不抛、log warning、实验保留、goal_node_id=None。
 _before_ids = {e["id"] for e in models.exp_list()}
-try:
-    services.create_experiment(
-        title="", exp_type="BLI", date="2026-08-17", params={}, results={},
-        goal_id=99999)
-    raise AssertionError("不存在 goal_id 应抛 ValueError")
-except ValueError:
-    pass
+import logging as _log
+_log.getLogger().setLevel(_log.CRITICAL)  # 静音 WARNING
+_exp_d = services.create_experiment(
+    title="", exp_type="BLI", date="2026-08-17", params={}, results={},
+    goal_id=99999)
+_log.getLogger().setLevel(_log.WARNING)
 _after_ids = {e["id"] for e in models.exp_list()}
-assert _after_ids == _before_ids, "goal_id 失败应回滚实验，不留孤儿"
+assert _exp_d["goal_node_id"] is None, f"无效 goal_id 应静默降级，goal_node_id 应为 None: {_exp_d}"
+assert len(_after_ids) == len(_before_ids) + 1, "实验应照常创建（best-effort 不删实验）"
 # 20e. attach_goal：一实验多目标
 _exp_e1 = services.create_experiment(
     title="", exp_type="BLI", date="2026-08-17", params={}, results={}, goal_id=_gid)
