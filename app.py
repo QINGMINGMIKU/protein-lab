@@ -88,7 +88,7 @@ def page_experiment_detail(eid):
         e[field] = val if isinstance(val, dict) else {}
     raws = models.exp_raw_list(eid, with_version=True)
     return render_template("experiment_detail.html", exp=e, exp_types=models.EXP_TYPES,
-                           raws=raws)
+                           raws=raws, show_research_block=True)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -427,13 +427,18 @@ def api_exp_from_calc():
                 for x in raw_in):
             return jsonify({"error": "raw_snapshots 格式应为 [{data_type, payload}, ...]"}), 400
         raw_snapshots = [(x["data_type"], x["payload"]) for x in raw_in]
+    # _json_safe 兜底清 NaN/Inf（酶活 OD 曲线常有非有限值），否则 json.dumps 抛
+    # "Out of range float values are not JSON compliant" → 用户看到 500 而非友好提示。
+    # 与 BLI / AKTA raw 路径一致（见 _json_safe 注释）。
+    if raw_snapshots:
+        raw_snapshots = [(dt, _json_safe(p)) for dt, p in raw_snapshots]
     try:
         e = services.create_experiment(
             title=data.get("title", ""),
             exp_type=data.get("exp_type", ""),
             protein_ids=data.get("protein_ids", []),
             date=data.get("date", ""),
-            params=params, results=calc_result,
+            params=params, results=_json_safe(calc_result),
             notes=data.get("notes", ""),
             raw_snapshots=raw_snapshots,
         )
