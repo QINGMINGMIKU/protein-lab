@@ -289,6 +289,9 @@ def handle_tools_call(id_, params):
         else:
             return send_error(id_, -32601, f"Unknown tool: {tool_name}")
 
+    except ValueError as e:
+        # 业务级参数错误（来自 services.create_experiment 等的 ValueError），与 InvalidParams 同语义
+        return send_error(id_, -32602, f"{tool_name}: {e}")
     except Exception as e:
         return send_error(id_, -32000, str(e))
 
