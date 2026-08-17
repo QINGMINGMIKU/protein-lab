@@ -18,7 +18,7 @@
   - 酶活计算 — TECAN xlsx 解析 + 96 孔板 UI + 动力学拟合 + Michaelis-Menten + 阴性扣除
   - 从实验复制 — 历史实验卡片回填
 - **实验归档**：一键保存 / Excel 导出 / 详情页（含**原始数据快照表**：experiment_raw 类型/时间/分析版本）/ 批量删除 + 撤销（内存 undo 栈，最多 20 条）
-- **MCP 服务器**：`mcp_server.py`，10 个工具，读写契约（唯一写工具 `save_experiment`）
+- **MCP 服务器**：`mcp_server.py`，13 个工具，读写契约（唯一写工具 `save_experiment`）+ 结构化错误码（缺参/类型错/语义不满足 → -32602，未知工具 → -32601，内部错误 → -32000）；实验读取工具（get_experiment/get_experiment_raw）递归剔除 sequence 明文（IP 保护兜底）
 
 ## 环境
 

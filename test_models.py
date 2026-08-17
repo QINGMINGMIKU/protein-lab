@@ -200,10 +200,16 @@ import mcp_server
 assert mcp_server.WRITE_TOOLS == {"save_experiment"}, f"写工具应仅 save_experiment: {mcp_server.WRITE_TOOLS}"
 names = {t["name"] for t in mcp_server.TOOLS}
 assert names == mcp_server.READ_TOOLS | mcp_server.WRITE_TOOLS, "每个工具必须归入读或写"
-# 13b 前置：种研究脉络节点，供研究读工具返回真实数据（同一快照做零写断言）
+# 13b 前置：种研究脉络节点 + 给 e7 挂一条含序列明文的原始快照（供脱敏断言），
+# 供研究/实验读工具返回真实数据（同一快照做零写断言）
 _rn_id = models.research_node_create(node_type="goal", title="稳定性优化", tag="稳定性", sort_order=0)
 models.research_node_create(node_type="experiment", title="表达纯化",
                             parent_id=_rn_id, exp_id=e7["id"], sort_order=0)
+_rn_raw = models.exp_save_raw(e7["id"], "test_trace", {
+    "analysis_version": "v-test",
+    "params": {"sequence": "MKRWASFILLER"},
+    "curves": [[0, 1.0], [1, 2.0]],
+})
 read_cases = [
     ("search_proteins", {"query": "1YPI"}),
     ("get_protein", {"name": "1YPI_WT"}),
@@ -212,6 +218,9 @@ read_cases = [
     ("convert_concentration", {"value": 1, "from_unit": "uM", "to_unit": "nM"}),
     ("calculate_dilution", {"stock_conc_uM": 100, "start_conc_uM": 10}),
     ("list_experiments", {}),
+    ("get_experiment", {"exp_id": e7["id"]}),
+    ("get_experiment_raw", {"raw_id": _rn_raw}),
+    ("list_protein_tags", {}),
     ("list_research_trees", {}),
     ("get_research_node", {"node_id": _rn_id}),
 ]
@@ -234,6 +243,37 @@ assert "sequence" not in gp_text, "get_protein 不得返回序列明文"
 assert gp_text.get("sequence_fp"), "get_protein 应返回序列指纹"
 assert len(gp_text["sequence_fp"]) == 12, "指纹应为前 12 位"
 print("13b. get_protein 序列脱敏（指纹替代明文）OK")
+
+# ── 13c. 参数校验：缺必填/类型错 → -32602，未知工具 → -32601（结构化错误，不泄漏原始异常）──
+def _call_mcp(tool, arguments):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mcp_server.handle_tools_call(None, {"name": tool, "arguments": arguments})
+    return json.loads(buf.getvalue().strip())
+
+_ge = _call_mcp("get_protein", {})
+assert _ge["error"]["code"] == -32602 and "缺少" in _ge["error"]["message"] and "get_protein" in _ge["error"]["message"], \
+    f"缺必填应返 -32602: {_ge}"
+_ge = _call_mcp("get_experiment", {"exp_id": "abc"})
+assert _ge["error"]["code"] == -32602, f"类型错应返 -32602: {_ge}"
+_ge = _call_mcp("convert_concentration", {"value": 1, "from_unit": "uM", "to_unit": "ng/uL"})
+assert _ge["error"]["code"] == -32602 and "mw" in _ge["error"]["message"], f"跨摩尔质量缺 mw 应返 -32602: {_ge}"
+_ge = _call_mcp("nope_tool", {})
+assert _ge["error"]["code"] == -32601, f"未知工具应返 -32601: {_ge}"
+print("13c. MCP 参数校验错误码（-32602 / -32601）OK")
+
+# ── 13d. 实验读取序列脱敏（IP 保护）：get_experiment / get_experiment_raw 剔除 sequence 明文 ──
+_gexp = _call_mcp("get_experiment", {"exp_id": e7["id"]})
+_gexp = json.loads(_gexp["result"]["content"][0]["text"])
+assert "sequence" not in json.dumps(_gexp, ensure_ascii=False), "get_experiment 不得泄漏序列明文"
+assert _gexp["_raw_count"] >= 1 and any(
+    r["data_type"] == "test_trace" and r.get("analysis_version") == "v-test" for r in _gexp["_raw"]), \
+    "get_experiment._raw 应带原始快照元数据（含分析版本）"
+_graw = _call_mcp("get_experiment_raw", {"raw_id": _rn_raw})
+_graw = json.loads(_graw["result"]["content"][0]["text"])
+assert "sequence" not in json.dumps(_graw, ensure_ascii=False), "get_experiment_raw 不得泄漏序列明文"
+assert _graw["payload"]["curves"] == [[0, 1.0], [1, 2.0]], "raw payload 曲线应完整保留"
+print("13d. MCP 实验读取序列脱敏 + 快照读取 OK")
 
 # ── 14. 迁移前自动备份：老库升级时留下迁移前快照（P1 修复回归）──
 import shutil

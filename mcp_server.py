@@ -27,6 +27,7 @@ from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert
 # 新工具必须归入二者之一；读工具若意外触库写入，由 test_models 的"读零写库"
 # 断言拦截（逐工具调用后对比库内容不变）。
 
+SERVER_VERSION = "1.1.0"
 WRITE_TOOLS = {"save_experiment"}
 
 
@@ -42,6 +43,54 @@ def _sanitize(p: dict, include_fp: bool = False) -> dict:
     if include_fp and p.get("sequence"):
         out["sequence_fp"] = hashlib.sha256(p["sequence"].encode()).hexdigest()[:12]
     return out
+
+
+def _strip_sequences(obj):
+    """递归剔除嵌套 dict 里的 sequence 明文（IP 保护兜底）。
+
+    蛋白库走 _sanitize；实验 params/results/raw 存档可能内嵌序列（历史数据 /
+    外部写入），凡 MCP 把实验 payload 交出去的读工具都要过这里——"序列明文
+    绝不出本地计算边界"对实验数据同样成立。
+    """
+    if isinstance(obj, dict):
+        return {k: _strip_sequences(v) for k, v in obj.items() if k != "sequence"}
+    if isinstance(obj, list):
+        return [_strip_sequences(v) for v in obj]
+    return obj
+
+
+class InvalidParams(Exception):
+    """工具参数错误 → JSON-RPC -32602（缺必填 / 类型错 / 语义不满足）。
+
+    与 -32000（内部错误）分开：参数问题不该被当成服务端故障抛给调用方。
+    """
+
+
+def _need(args, tool, *keys):
+    """断言必填参数在场（None / 空串视为缺失），缺失抛 InvalidParams。"""
+    missing = [k for k in keys if args.get(k) in (None, "")]
+    if missing:
+        raise InvalidParams(f"{tool}: 缺少必填参数: {', '.join(missing)}")
+
+
+def _fnum(args, tool, key, default=None):
+    """数值参数：缺失用默认；给了但转不了 float 报 -32602（而非原始 ValueError）。"""
+    if key not in args or args[key] is None:
+        return default
+    try:
+        return float(args[key])
+    except (TypeError, ValueError):
+        raise InvalidParams(f"{tool}: 参数 '{key}' 应为数值，收到 {args[key]!r}")
+
+
+def _inum(args, tool, key, default=None):
+    """整数参数：缺失用默认；给了但转不了 int 报 -32602。"""
+    if key not in args or args[key] is None:
+        return default
+    try:
+        return int(args[key])
+    except (TypeError, ValueError):
+        raise InvalidParams(f"{tool}: 参数 '{key}' 应为整数，收到 {args[key]!r}")
 
 # ── MCP JSON-RPC dispatcher ────────────────────────────────
 
@@ -148,6 +197,37 @@ TOOLS = [
         }
     },
     {
+        "name": "get_experiment",
+        "description": "获取单条实验完整详情：params/results（含蛋白快照）+ 原始数据快照元数据 _raw（含分析版本，BLI/AKTA 曲线可复现）。序列明文按 IP 保护策略剔除",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "exp_id": {"type": "integer", "description": "实验 id"}
+            },
+            "required": ["exp_id"]
+        }
+    },
+    {
+        "name": "get_experiment_raw",
+        "description": "获取单条原始数据快照完整 payload（BLI 传感器曲线 / AKTA 峰轨迹等，用于复现分析）。序列明文按 IP 保护策略剔除",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "raw_id": {"type": "integer", "description": "原始快照 id（get_experiment 的 _raw[].id）"}
+            },
+            "required": ["raw_id"]
+        }
+    },
+    {
+        "name": "list_protein_tags",
+        "description": "列出蛋白库当前全部标签（去重排序），可用于 search_proteins 的标签筛选",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
         "name": "list_research_trees",
         "description": "列出研究脉络森林（v0.1.0）：全部根目标，每棵递归嵌套 children。节点类型 goal(目标)/experiment(实验，含 exp_id 关联或为计划占位)/conclusion(结论)；evidence chain：目标→实验→结论→新目标",
         "inputSchema": {
@@ -195,7 +275,7 @@ def handle_initialize(id_, params):
     return send_response(id_, {
         "protocolVersion": "2024-11-05",
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": "protein-lab", "version": "1.0.0"}
+        "serverInfo": {"name": "protein-lab", "version": SERVER_VERSION}
     })
 
 
@@ -205,7 +285,7 @@ def handle_tools_list(id_, params):
 
 def handle_tools_call(id_, params):
     tool_name = params.get("name", "")
-    args = params.get("arguments", {})
+    args = params.get("arguments", {}) or {}
     # 读写契约（规则 #6）：读工具零写库无运行时拦截——它们内部走 models 可写连接，
     # 任何 assert 都拦不住。真正的防线是 test_models 的"读零写库"断言（逐个调用后
     # 库内容逐字节不变），新增读工具必须在 test 的 read_cases 里注册。
@@ -213,12 +293,14 @@ def handle_tools_call(id_, params):
 
     try:
         if tool_name == "search_proteins":
-            result = models.protein_list(args.get("query", ""))
+            _need(args, tool_name, "query")
+            result = models.protein_list(args["query"])
             # 序列脱敏收口：不返序列明文（_sanitize）
             brief = [_sanitize(r) for r in result]
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(brief, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "get_protein":
+            _need(args, tool_name, "name")
             p = models.protein_get_by_name(args["name"])
             if not p:
                 return send_response(id_, {"content": [{"type": "text", "text": f"未找到蛋白: {args['name']}"}]})
@@ -231,12 +313,15 @@ def handle_tools_call(id_, params):
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(brief, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "calculate_concentration":
-            a280 = float(args["a280"])
-            oxidized = args.get("oxidized", True)
-            path = float(args.get("path_length_cm", 1.0))
+            _need(args, tool_name, "a280")
+            a280 = _fnum(args, tool_name, "a280")
+            oxidized = bool(args.get("oxidized", True))
+            path = _fnum(args, tool_name, "path_length_cm", 1.0)
 
             name = args.get("name")
             sequence = args.get("sequence")
+            if not name and not sequence:
+                raise InvalidParams(f"{tool_name}: 需要提供 name（库内蛋白）或 sequence（直接序列）之一")
 
             if name:
                 p = models.protein_get_by_name(name)
@@ -244,33 +329,33 @@ def handle_tools_call(id_, params):
                     return send_response(id_, {"content": [{"type": "text", "text": f"未找到蛋白: {name}"}]})
                 epsilon = p["ext_ox"] if oxidized else p["ext_red"]
                 mw = p["mw"]
-            elif sequence:
+            else:
                 c = calc_ext_coeff(sequence)
                 epsilon = c["ext_ox"] if oxidized else c["ext_red"]
                 mw = c["mw"]
-            else:
-                return send_response(id_, {"content": [{"type": "text", "text": "需要提供 name 或 sequence"}]})
 
             result = calc_conc(a280, epsilon, mw, path)
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "convert_concentration":
-            value = float(args["value"])
-            from_unit = args["from_unit"]
-            to_unit = args["to_unit"]
-            mw = args.get("mw")
-            result = convert_concentration(value, from_unit, to_unit, mw)
+            _need(args, tool_name, "value", "from_unit", "to_unit")
+            value = _fnum(args, tool_name, "value")
+            try:
+                result = convert_concentration(value, args["from_unit"], args["to_unit"], args.get("mw"))
+            except ValueError as err:
+                raise InvalidParams(f"{tool_name}: {err}") from err  # 未知单位 / 跨摩尔质量缺 mw → 参数错
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps({
-                "value": result, "from_unit": from_unit, "to_unit": to_unit,
-                "mw": mw}, ensure_ascii=False, indent=2)}]})
+                "value": result, "from_unit": args["from_unit"], "to_unit": args["to_unit"],
+                "mw": args.get("mw")}, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "calculate_dilution":
-            stock = float(args["stock_conc_uM"])
-            start = float(args["start_conc_uM"])
-            factor = float(args.get("dilution_factor", 2))
-            steps = int(args.get("n_steps", 8))
-            vol = float(args.get("vol_per_well_uL", 200))
-            dead = float(args.get("dead_vol_uL", 5))
+            _need(args, tool_name, "stock_conc_uM", "start_conc_uM")
+            stock = _fnum(args, tool_name, "stock_conc_uM")
+            start = _fnum(args, tool_name, "start_conc_uM")
+            factor = _fnum(args, tool_name, "dilution_factor", 2)
+            steps = _inum(args, tool_name, "n_steps", 8)
+            vol = _fnum(args, tool_name, "vol_per_well_uL", 200)
+            dead = _fnum(args, tool_name, "dead_vol_uL", 5)
 
             result = calc_dilution_series(stock, start, factor, steps, vol, dead)
             data = {
@@ -285,16 +370,44 @@ def handle_tools_call(id_, params):
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "list_experiments":
-            exp_type = args.get("exp_type", "")
-            limit = int(args.get("limit", 30))
-            result = models.exp_list(exp_type, limit)
-            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]})
+            exp_type = args.get("exp_type", "") or ""
+            limit = _inum(args, tool_name, "limit", 30)
+            rows = models.exp_list(exp_type, limit)
+            # 列表只给轻量行（明细 params/results 用 get_experiment 取），AI 好扫
+            brief = [{k: row.get(k) for k in ("id", "title", "exp_type", "date", "protein_names")}
+                     for row in rows]
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(brief, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "get_experiment":
+            _need(args, tool_name, "exp_id")
+            exp_id = _inum(args, tool_name, "exp_id")
+            exp = models.exp_get(exp_id)
+            if not exp:
+                return send_response(id_, {"content": [{"type": "text", "text": f"未找到实验: {exp_id}"}]})
+            exp["params"] = _strip_sequences(exp.get("params"))
+            exp["results"] = _strip_sequences(exp.get("results"))
+            exp["_raw"] = models.exp_raw_list(exp_id, with_version=True)  # 快照元数据（含分析版本）
+            exp["_raw_count"] = len(exp["_raw"])
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(exp, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "get_experiment_raw":
+            _need(args, tool_name, "raw_id")
+            raw_id = _inum(args, tool_name, "raw_id")
+            raw = models.exp_raw_get(raw_id)
+            if not raw:
+                return send_response(id_, {"content": [{"type": "text", "text": f"未找到原始快照: {raw_id}"}]})
+            raw["payload"] = _strip_sequences(raw.get("payload"))
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(raw, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "list_protein_tags":
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(models.protein_tags(), ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "list_research_trees":
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(research.build_trees(), ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "get_research_node":
-            nid = int(args["node_id"])
+            _need(args, tool_name, "node_id")
+            nid = _inum(args, tool_name, "node_id")
             node = research.get_node_with_subtree(nid)
             if not node:
                 return send_response(id_, {"content": [{"type": "text", "text": f"未找到研究节点: {nid}"}]})
@@ -302,6 +415,11 @@ def handle_tools_call(id_, params):
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(node, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "save_experiment":
+            _need(args, tool_name, "title", "exp_type")
+            exp_type = args["exp_type"]
+            if exp_type not in models.EXP_TYPES:
+                raise InvalidParams(
+                    f"{tool_name}: exp_type 必须是 {', '.join(models.EXP_TYPES)} 之一，收到 {exp_type!r}")
             protein_ids = []
             for name in args.get("protein_names", []):
                 p = models.protein_get_by_name(name)
@@ -309,20 +427,24 @@ def handle_tools_call(id_, params):
                     protein_ids.append(p["id"])
             saved = services.create_experiment(
                 title=args["title"],
-                exp_type=args["exp_type"],
+                exp_type=exp_type,
                 protein_ids=protein_ids,
                 date=args.get("date", ""),
                 params=args.get("params", {}),
                 results=args.get("results", {}),
                 notes=args.get("notes", ""),
             )
+            saved["params"] = _strip_sequences(saved.get("params"))
+            saved["results"] = _strip_sequences(saved.get("results"))
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(saved, ensure_ascii=False, indent=2)}]})
 
         else:
             return send_error(id_, -32601, f"Unknown tool: {tool_name}")
 
+    except InvalidParams as e:
+        return send_error(id_, -32602, str(e))
     except Exception as e:
-        return send_error(id_, -32000, str(e))
+        return send_error(id_, -32000, f"{tool_name}: {e}")
 
 
 # ── Main loop ──────────────────────────────────────────────
@@ -346,8 +468,8 @@ def main():
 
         if method == "initialize":
             handle_initialize(id_, params)
-        elif method == "notifications/initialized":
-            pass  # 无需回复
+        elif method.startswith("notifications/"):
+            pass  # 通知类（initialized/cancelled/progress）按规范不回复
         elif method == "tools/list":
             handle_tools_list(id_, params)
         elif method == "tools/call":
