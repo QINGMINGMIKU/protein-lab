@@ -3405,6 +3405,27 @@ function researchFlowLayout(trees, q, tag, prot) {
   return { cards, edges, width: maxX + RES_FLOW.PAD, height: maxY + RES_FLOW.PAD };
 }
 
+// 结论块按 tag 立场着色：支持/反驳/部分/不确定 → 语义色，其余（含无 tag）灰色
+function resStanceKey(tag) {
+  const m = { 支持: "support", 反驳: "rebut", 部分: "partial", 不确定: "uncertain" };
+  for (const t of String(tag || "").split(",").map(s => s.trim())) {
+    if (m[t]) return m[t];
+  }
+  return "other";
+}
+const RES_STANCE_CHIP = {
+  support: { bg: "#e8f5e9", fg: "#2e7d32" },
+  rebut:   { bg: "#ffebee", fg: "#c62828" },
+  partial: { bg: "#fff3e0", fg: "#e65100" },
+  uncertain: { bg: "#f5f5f5", fg: "#757575" },
+};
+function resTagChip(t) {
+  const c = RES_STANCE_CHIP[resStanceKey(t)];
+  return c
+    ? `<span class="res-tag-chip" style="background:${c.bg};color:${c.fg}">${esc(t)}</span>`
+    : `<span class="res-tag-chip">${esc(t)}</span>`;
+}
+
 function researchFlowCard(node, x, y, dim) {
   const hasKids = (node.children || []).length > 0;
   const expanded = !researchState.collapsed.has(node.id);
@@ -3413,7 +3434,8 @@ function researchFlowCard(node, x, y, dim) {
     : "";
   const sel = researchState.selectedId === node.id ? " sel" : "";
   const dimCls = dim ? " dim" : "";
-  return `<div class="res-flow-card res-flow-${node.node_type}${sel}${dimCls}" style="left:${x}px;top:${y}px" onclick="researchSelect(${node.id})">
+  const stance = node.node_type === "conclusion" ? " res-flow-conc-" + resStanceKey(node.tag) : "";
+  return `<div class="res-flow-card res-flow-${node.node_type}${stance}${sel}${dimCls}" style="left:${x}px;top:${y}px" onclick="researchSelect(${node.id})">
     <div class="res-flow-top">
       <span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>
       ${node.exp_id ? `<span class="res-exp-ico" title="关联实验 #${node.exp_id}">📄</span>` : ""}
@@ -3474,7 +3496,7 @@ function renderResearchDetail(node) {
     <div class="res-detail-meta">
       <span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>
       ${node.free_attach ? '<span class="res-free">⛓ 自由挂载</span>' : ""}
-      ${tags.map(t => `<span class="res-tag-chip">${esc(t)}</span>`).join("")}
+      ${tags.map(t => node.node_type === "conclusion" ? resTagChip(t) : `<span class="res-tag-chip">${esc(t)}</span>`).join("")}
       <span class="res-detail-id">#${node.id}</span>
     </div>
     ${expCard}

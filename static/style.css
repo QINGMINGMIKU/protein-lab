@@ -352,6 +352,17 @@ label textarea { resize: vertical; }
 .res-flow-goal { border-left-color: #4caf79; }
 .res-flow-experiment { border-left-color: #4a90d9; }
 .res-flow-conclusion { border-left-color: #d96aa6; }
+/* 结论块按 tag 立场着色：左缘色条 + 卡片 tag 文字跟随立场；选中态（.sel）仍走蓝色 */
+.res-flow-conclusion.res-flow-conc-support:not(.sel) { border-left-color: #2e7d32; }
+.res-flow-conclusion.res-flow-conc-support:not(.sel) .res-flow-tags { color: #2e7d32; }
+.res-flow-conclusion.res-flow-conc-rebut:not(.sel) { border-left-color: #c62828; }
+.res-flow-conclusion.res-flow-conc-rebut:not(.sel) .res-flow-tags { color: #c62828; }
+.res-flow-conclusion.res-flow-conc-partial:not(.sel) { border-left-color: #e65100; }
+.res-flow-conclusion.res-flow-conc-partial:not(.sel) .res-flow-tags { color: #e65100; }
+.res-flow-conclusion.res-flow-conc-uncertain:not(.sel) { border-left-color: #757575; }
+.res-flow-conclusion.res-flow-conc-uncertain:not(.sel) .res-flow-tags { color: #757575; }
+.res-flow-conclusion.res-flow-conc-other:not(.sel) { border-left-color: #9e9e9e; }
+.res-flow-conclusion.res-flow-conc-other:not(.sel) .res-flow-tags { color: #9e9e9e; }
 .res-flow-top { display: flex; align-items: center; gap: 4px; }
 .res-flow-title {
   font-size: 14px; color: #1a1a2e; line-height: 1.35; margin-top: 7px;
