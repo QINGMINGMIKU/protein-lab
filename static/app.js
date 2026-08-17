@@ -816,10 +816,10 @@ async function saveConcTable() {
   const oxidized = getCurrentOxidized();
 
   const goal = await promptGoalAttach();
-  if (goal === null) return;
+  if (goal === null) { toast("已取消保存"); return; }
 
   try {
-    await API.post("/api/experiments/from-calculation", {
+    const saved = await API.post("/api/experiments/from-calculation", {
       title: title,
       exp_type: "浓度测定",
       protein_ids: ids.map(Number),
@@ -846,7 +846,7 @@ async function saveConcTable() {
       calc_result: [],
       ...goal,
     });
-    toast("已保存为实验记录");
+    toast(saved.goal_node_id ? "已保存 · 已挂研究脉络" : "已保存为实验记录");
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1122,10 +1122,10 @@ async function saveBliTable() {
     || Object.values(bliProteins).map(p => p.name).join(", ") + " BLI 稀释";
 
   const goal = await promptGoalAttach();
-  if (goal === null) return;
+  if (goal === null) { toast("已取消保存"); return; }
 
   try {
-    await API.post("/api/experiments/from-calculation", {
+    const saved = await API.post("/api/experiments/from-calculation", {
       title: title,
       exp_type: "BLI",
       protein_ids: ids.map(Number),
@@ -1136,7 +1136,7 @@ async function saveBliTable() {
       ...goal,
     });
     renderBliResults(dilutionResults);
-    toast("已保存为实验记录");
+    toast(saved.goal_node_id ? "已保存 · 已挂研究脉络" : "已保存为实验记录");
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1654,23 +1654,24 @@ async function loadResearchList(expId) {
   const el = document.getElementById("detailResearchList");
   if (!el) return;
   try {
-    const trees = await API.get("/api/research/trees");
+    const trees = await API.get("/api/research/nodes");
     const links = [];
-    for (const root of trees) collectLinks(root, expId, links);
+    for (const root of trees) collectLinks(root, root, expId, links);
     if (!links.length) { el.textContent = "（暂未关联）"; return; }
-    el.innerHTML = links.map(l => `<a href="/research" target="_blank">${esc(l.goalTitle)}</a>`).join(" · ");
+    el.innerHTML = links.map(l => `<a href="/research?root=${l.goalId}" target="_blank">${esc(l.goalTitle)}</a>`).join(" · ");
   } catch (_) { el.textContent = "（加载失败）"; }
 }
 
-function collectLinks(node, expId, out) {
-  if ((node.node_type === "experiment" && node.exp_id === expId) || (node.children || []).length) {
-    if (node.node_type === "experiment" && node.exp_id === expId) {
-      // 找到对应 experiment 节点 → 沿父链找 goal（向上找最近的目标祖先）
-      // 简化：直接收集 node.title（实际应该追溯到 goal），下一步到 /research 即可看到
-      out.push({ goalTitle: node.title });
-    }
-    for (const c of (node.children || [])) collectLinks(c, expId, out);
+// 沿父链回溯到最近 goal：matchedExperiment 是命中的 experiment 节点，逐层上溯 parent_id
+// 找最近祖先 node_type==='goal'。build_trees 返回的节点不带 parent_id（嵌套 children 隐式），
+// 所以引入 rootAsGoal 路径：在递归路径上缓存"走到当前节点时最近 goal 祖先"，
+// 命中 experiment 节点时直接用这个祖先。
+function collectLinks(node, nearestGoalSoFar, expId, out) {
+  const here = node.node_type === "goal" ? node : nearestGoalSoFar;
+  if (node.node_type === "experiment" && node.exp_id === expId && here) {
+    out.push({ goalId: here.id, goalTitle: here.title });
   }
+  for (const c of (node.children || [])) collectLinks(c, here, expId, out);
 }
 
 async function attachGoalPrompt(expId) {
@@ -2244,10 +2245,10 @@ async function enzymeSaveExp() {
   }
 
   const goal = await promptGoalAttach();
-  if (goal === null) return;
+  if (goal === null) { toast("已取消保存"); return; }
 
   try {
-    await API.post("/api/experiments/from-calculation", {
+    const saved = await API.post("/api/experiments/from-calculation", {
       title, exp_type: "酶活测定",
       protein_ids: Array.from(proteinIds),
       date: todayLocal(),
@@ -2272,7 +2273,7 @@ async function enzymeSaveExp() {
       }],
       ...goal,
     });
-    toast("已保存为实验记录");
+    toast(saved.goal_node_id ? "已保存 · 已挂研究脉络" : "已保存为实验记录");
   } catch (err) { toast(err.message, true); }
 }
 
