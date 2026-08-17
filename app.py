@@ -418,6 +418,15 @@ def api_exp_from_calc():
     calc_params = data.get("calc_params", {})
     calc_result = data.get("calc_result", {})
     params = {"calc_type": data.get("calc_type", ""), **calc_params}
+    # 原始数据快照（与 BLI/AKTA 一致模式）：前端 list[dict] → list[(data_type, payload)]
+    raw_snapshots = None
+    raw_in = data.get("raw_snapshots")
+    if raw_in:
+        if not isinstance(raw_in, list) or any(
+                not (isinstance(x, dict) and isinstance(x.get("data_type"), str) and x.get("payload") is not None)
+                for x in raw_in):
+            return jsonify({"error": "raw_snapshots 格式应为 [{data_type, payload}, ...]"}), 400
+        raw_snapshots = [(x["data_type"], x["payload"]) for x in raw_in]
     try:
         e = services.create_experiment(
             title=data.get("title", ""),
@@ -426,6 +435,7 @@ def api_exp_from_calc():
             date=data.get("date", ""),
             params=params, results=calc_result,
             notes=data.get("notes", ""),
+            raw_snapshots=raw_snapshots,
         )
     except ValueError as err:
         return jsonify({"error": str(err)}), 400
