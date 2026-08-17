@@ -1754,6 +1754,7 @@ function checkPrefill() {
 // ═════════════════════════════════════════════════════
 
 let enzymeData = null;         // {meta, wells: {A1: {times, od}, ...}}
+const ENZYME_ANALYSIS_VERSION = "enzyme-1.0";  // raw 快照分析版本（与 BLI/AKTA 一致约定）
 let enzymeSelection = new Set();
 let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw}}
 let enzymeLastImage = null;    // 最近一次曲线图 base64（供下载）
@@ -2217,6 +2218,7 @@ async function enzymeSaveExp() {
 
   const proteinIds = new Set();
   const wells = {};
+  const rawWells = {};  // raw 快照：每孔**全量**时间序列（不受时间轴过滤影响），保证可复算
   for (const [id, wd] of Object.entries(enzymeData.wells)) {
     const info = enzymeWellInfo[id] || {};
     if (info.protein_id) proteinIds.add(info.protein_id);
@@ -2233,6 +2235,12 @@ async function enzymeSaveExp() {
       od,
       od_range: od.length ? [od[0].toFixed(4), od[od.length - 1].toFixed(4)] : null,
     };
+    rawWells[id] = {
+      name: info.name,
+      ref: info.ref,
+      times: wd.times,   // 全量
+      od: wd.od,         // 全量
+    };
   }
 
   const goal = await promptGoalAttach();
@@ -2248,8 +2256,20 @@ async function enzymeSaveExp() {
         meta: enzymeData.meta,
         wells,
         well_count: Object.keys(enzymeData.wells).length,
+        time_axis: enzymeTimePoints.length
+          ? [enzymeTimePoints[enzymeTimeLo], enzymeTimePoints[enzymeTimeHi]] : null,
       },
       calc_result: {},
+      raw_snapshots: [{
+        data_type: "enzyme_traces",
+        payload: {
+          analysis_version: ENZYME_ANALYSIS_VERSION,
+          meta: enzymeData.meta,
+          wells: rawWells,
+          time_axis: enzymeTimePoints.length
+            ? [enzymeTimePoints[enzymeTimeLo], enzymeTimePoints[enzymeTimeHi]] : null,
+        },
+      }],
       ...goal,
     });
     toast("已保存为实验记录");

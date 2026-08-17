@@ -468,6 +468,58 @@ assert services.attach_goal(99999, _gid) is None, "实验不存在应返 None"
 assert services.attach_goal(_exp_e1["id"], 99999) is None, "goal 不存在应返 None"
 print("20. 从实验自然产生研究脉络（goal_id / new_goal / 未关联 / 失败回滚 / attach_goal）OK")
 
+# ── 21. v0.1.1.1 酶活存档加 raw 快照：原时间序列不可变落库（保证数据可恢复） ──
+_raw21 = {
+    "analysis_version": "enzyme-1.0",
+    "meta": {"sample": "S1"},
+    "wells": {
+        "A1": {"name": "A1", "ref": "", "times": [0, 5, 10, 15, 20], "od": [0.1, 0.2, 0.3, 0.4, 0.5]},
+        "A2": {"name": "A2", "ref": "neg", "times": [0, 5, 10, 15, 20], "od": [0.05, 0.05, 0.05, 0.05, 0.05]},
+    },
+    "time_axis": [5, 15],
+}
+# 存档时过滤的 wells（只保留 5-15 区间）
+_wells_f = {
+    "A1": {"name": "A1", "ref": "", "times": [5, 10, 15], "od": [0.2, 0.3, 0.4]},
+    "A2": {"name": "A2", "ref": "neg", "times": [5, 10, 15], "od": [0.05, 0.05, 0.05]},
+}
+_exp21 = services.create_experiment(
+    title="", exp_type="酶活测定", date="2026-08-17",
+    params={"calc_type": "enzyme", "wells": _wells_f, "time_axis": [5, 15]},
+    results={},
+    raw_snapshots=[("enzyme_traces", _raw21)],
+)
+# 21a. raw 落库：1 条，data_type=enzyme_traces
+_raws = models.exp_raw_list(_exp21["id"])
+assert len(_raws) == 1 and _raws[0]["data_type"] == "enzyme_traces", f"raw 应落 1 条: {_raws}"
+# 21b. raw payload 保留**全量**时间序列（5 个点，含范围外的 0/20）
+_raw_payload = models.exp_raw_get(_raws[0]["id"])["payload"]
+assert _raw_payload["wells"]["A1"]["times"] == [0, 5, 10, 15, 20], f"raw 应存全量: {_raw_payload['wells']['A1']['times']}"
+assert _raw_payload["analysis_version"] == "enzyme-1.0", "raw 应带 analysis_version"
+# 21c. 存档 params.wells 只含过滤后的点（3 个）
+_e21b = models.exp_get(_exp21["id"])
+assert _e21b["params"]["wells"]["A1"]["times"] == [5, 10, 15], f"存档应只含过滤点: {_e21b['params']['wells']['A1']['times']}"
+# 21d. 不可变：raw 永不更新（只插不更）
+_old_payload = _raw_payload
+models.exp_save_raw(_exp21["id"], "enzyme_traces", {"analysis_version": "v2", "wells": {}, "time_axis": None})
+_raws2 = models.exp_raw_list(_exp21["id"])
+assert len(_raws2) == 2, f"应新增 1 条，total=2: {len(_raws2)}"
+_first = models.exp_raw_get(_raws[0]["id"])
+assert _first["payload"] == _old_payload, "第一条 raw 不得被新 raw 覆盖"
+# 21e. 原子性：raw payload 含不可序列化对象（set）→ 整实验回滚，不留孤儿
+_before = {e["id"] for e in models.exp_list()}
+try:
+    services.create_experiment(
+        title="坏raw", exp_type="酶活测定",
+        params={"calc_type": "enzyme"}, results={},
+        raw_snapshots=[("enzyme_traces", {"wells": {"A1": {"times": [1.0, 2.0], "od_set": {0.1, 0.2}}}})
+])
+    raise AssertionError("不可序列化 raw 应失败")
+except (TypeError, ValueError):
+    pass
+assert {e["id"] for e in models.exp_list()} == _before, "raw 失败应回滚实验"
+print("21. 酶活存档加 raw 快照（全量落库 / 不可变 / 原子性）OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")
