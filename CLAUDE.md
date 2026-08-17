@@ -127,12 +127,13 @@ protein_lab/
 - v0.0.8 ✓ 已完成 (2026-08-15) — **BLI 原始数据拟合 UI**：`/api/bli/analyze|plot|fit|save` 四端点 + 计算工具「BLI 分析」tab（上传 ForteBio CSV → 样本摘要/参数面板 → 传感器图/每样本图 → 5 方法 KD 表 → 保存实验）。results 带 `BLI_ANALYSIS_VERSION`，raw→`experiment_raw` `data_type=bli_curves`（只写一次）；会话 `_bli_sessions` 内存缓存（TTL 2h/上限 10）；详情页新增原始数据快照表（`exp_raw_list(with_version=True)` 轻量提取版本号）。
 - v0.0.9 ✓ 已完成 (2026-08-15) — **AKTA 峰图整理**：`akta.py` 纯函数模块——**标准库原生解析 Unicorn zip（无 pycorn 依赖）**：嵌套 zip `rindex(EOCD)+22` 截断 + float32 偏移 47 起解码（pycorn 逻辑，REF 真实样例 zip 验证）；峰检测（SG 平滑 + 5% 分位基线 + scipy find_peaks height/prominence/distance）；峰图（标注 + Fraction 事件竖线）；峰表 Excel 导出。`/api/akta/analyze|plot|export|save` + 计算工具「AKTA 峰图」tab；results 带 `AKTA_ANALYSIS_VERSION`，raw→`experiment_raw` `data_type=akta_traces`；`test_akta.py` 用 REF 两个真实 zip 回归。
 - v0.0.10 ✓ 已发布 (2026-08-16) — **酶活孔分组 + 作图 Excel 宽格式**：`aggregate_groups` 纯函数——同组孔逐时间点取平均（均值曲线 + 误差棒 SD/SEM，图例带 `(n=成员数)`，组内仅 1 孔退化为单孔）；孔位详情面板「组」输入框（datalist 可选已有组，多选孔批量应用）；批量命名同名孔按孔位从左到右、上到下自动加 `_1/_2/_3`；空/错位孔返回 null fit（防 stale R² 标红）；作图 Excel 改宽格式（每孔独立「时间/OD」两列，撞名回落孔位，归档多实验用标题前缀），BLI/AKTA 作图导出复用共享写器 `_write_wide_ws_pairs`。**评审修复**：undo 先 peek 校验成功才 pop（失败保留可重试）/ renderBliKd 返回值落 DOM（KD 表此前不渲染）/ `exp_update` 列表参数序列化 / BLI 空窗口守卫（4 处 IndexError/ValueError）。experiments 列表蛋白列只显示首个 + hover 完整列表、日期/类型列 nowrap。
-- v0.1.0 — **研究脉络**（research narrative，2026-08-16 拍板重计划）：顶层导航第一项大 Tab（/research 默认首页）——目标→实验→结论→新目标证据链；白名单 + 自由挂载逃生舱（单亲树可重挂）；实验块 = 引用（exp_id）/计划占位；树视图（折叠、三色块）+ 链视图（breadcrumb）+ 实验引用卡 + 搜索/标签/蛋白筛选；MCP `list_research_trees` / `get_research_node`。**吸收原 v0.1.1 的 experiment_links**（exp_id 即血缘）。明确不做：状态机/全量审计/画布拖拽/项目批次管理。
-- v0.1.1 — 轻量谱系 + 实验上下文（`used_sample_from` 采样来源标注；experiment_links 已并入 v0.1.0，**供 AI 消费而非管理 workflow**；不做全量 audit）
-- v0.1.2 — MCP 证据包（`get_variant_context`：一个 variant 的全部实验/上下文/可复算入口）
-- v0.1.3 — Comparison：WT vs variant 多实验横切对比 + 判断辅助（Workbench 差异化核心）
-- v0.2.0 — AI 解读层（基于证据包判断 candidate 优先级）
-- 飞书 bot（支线）— 实验室飞书消息通道 → AI（tool-use）→ protein_lab MCP；**序列脱敏硬约束**；MVP 用现有 10 工具（查蛋白/算浓度/归档），价值在 v0.1.2 证据包后显现
+- v0.1.0 ✓ 已完成 (2026-08-17) — **研究脉络**（research narrative，2026-08-16 拍板重计划）：顶层导航第一项大 Tab（/research 默认首页）——目标→实验→结论→新目标证据链；白名单 + 自由挂载逃生舱（单亲树可重挂）；实验块 = 引用（exp_id）/计划占位；根目标列表 → 单根横向流程图（左→右流式、同级纵向并联）+ 链视图（breadcrumb）+ 实验引用卡 + 搜索/标签/蛋白筛选；结论块按 tag 立场着色（支持=绿/反驳=红/部分=橙/不确定=灰——epistemic status 可视化）；MCP `list_research_trees` / `get_research_node`。**吸收原 v0.1.1 的 experiment_links**（exp_id 即血缘）。明确不做：状态机/全量审计/画布拖拽/项目批次管理。
+- v0.1.1 — **从实验自然产生研究脉络（入口生死线，2026-08-17 评价拍板）**：保存实验（Web 归档 / MCP `save_experiment`）时多一步「属于哪个研究目标？」——○已有目标（下拉，研究树 goal 节点）○新建目标 ○暂不关联；`services.create_experiment` 自动挂 Goal→Experiment 节点（exp_id 关联），「暂不关联」零摩擦不建节点。**原则：研究脉络是实验的自然副产物，不是要维护的管理模块**（呼应「四个蛋白不需要 LIMS」）。原轻量谱系 `used_sample_from` 顺延。
+- v0.1.2 — MCP 研究上下文 **`get_research_context(goal_id)`**（2026-08-17 评价拍板，取代原 get_variant_context 优先级）：goal 本体 + 父目标链 + 子树实验（归档 metadata/key results）+ 结论（epistemic status + 来源实验）+ 开放目标；注册 read_cases + 序列脱敏。使能 AI 回答「现在在研究什么 / 哪些结论缺实验支持 / 哪些实验互相矛盾 / 目标验证到什么程度」。`get_variant_context` 变体化顺延。
+- v0.1.3 — Comparison：WT vs variant 多实验横切对比 + 判断辅助（Workbench 差异化核心）+ `used_sample_from` 采样来源标注
+- v0.2.0 — AI 解读层（基于研究上下文判断 candidate 优先级 + **候选结论生成→人类确认**；定位 Research Context 的 AI 消费，**不叫 AI 科学家**）
+- **明确不做（defer，2026-08-17 评价拍板）**：DAG / Evidence Graph——单亲树 + `free_attach` 逃生舱 + 多节点引用同一 exp_id 已覆盖「一实验支持多目标 / 一结论来自多实验」的现实场景；真 DAG 的图编辑/环路/排序代价现在付不起。对外命名统一为 **Research Context / Research Trace**，不是 Autonomous Scientist。
+- 飞书 bot（支线）— 实验室飞书消息通道 → AI（tool-use）→ protein_lab MCP；**序列脱敏硬约束**；MVP 用现有 13 工具（查蛋白/算浓度/归档），价值在 v0.1.2 `get_research_context` 后显现
 - Prism / 出版数据打通（支线，暂缓）— 把 BLI/AKTA 等分析结果导出 `.pzfx`（GraphPad Prism 项目文件，本质 XML/zip），人工在 Prism 里排版出版级图；**明确不做**：无人值守直出版本（用户拍板暂不推进，仅备查）。matplotlib 定位=分析过程即时可视化 + 存档快照，非最终论文图终点。待办先决：数据流打通方案评估（哪个模块导出、如何映射 Prism 数据表）
 
 **设计原则（Workbench 定位）**：
