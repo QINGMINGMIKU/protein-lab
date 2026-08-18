@@ -17,6 +17,7 @@
 11. API：/api/research/nodes 增查改删 + 白名单 400
 12. MCP 读工具零写库（list_research_trees / get_research_node）
 13. /research 页面渲染（流程图容器 #researchFlow）
+14. 立场 tag 操控：写入/替换/清除/跨节点类型（v0.1.2 增量，零 schema 变更）
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
@@ -209,5 +210,52 @@ assert r.status_code == 200 and 'id="researchFlow"' in html, "/research 应渲�
 assert 'id="researchFlowBack"' in html, "应有单根流程图返回栏（根目标列表→流程图）"
 assert 'class="res-flow-container"' in html, "流程图容器应有 res-flow-container 样式"
 print("13. /research 页面渲染 OK")
+
+# ── 14. 立场 tag 操控（v0.1.2 增量：复用 tag 字段，零 schema 变更）──
+# 设计：立场词 ["支持","反驳","部分","不确定"] 混入 tag CSV 字符串；
+# 前端 applyStanceToTag 负责「移除旧立场词 + 追加新立场词」。
+# 本节直接验证数据层 / API 层数据契约正确（service 层走白名单，连带 parent_id 等
+# 必须透传；本节只验 tag 字段读写，绕过 service 走 models 直写）。
+STANCE_KEYWORDS = ["支持", "反驳", "部分", "不确定"]
+
+# 14a. 单立场写入：conclusion 节点 tag="支持" → 字段可读出
+assert models.research_node_update(conc1, tag="支持")
+got = models.research_node_get(conc1)
+assert got["tag"] == "支持", f"14a 立场写入后 tag 应等于『支持』: {got['tag']!r}"
+print("14a. 单立场写入 OK")
+
+# 14b. 替换：原 tag="支持" + 附加 "PD1"，改 stance 为 "反驳"
+# 数据层只负责写入；去重（旧 stance→新 stance）由前端 applyStanceToTag 负责。
+models.research_node_update(conc1, tag="PD1,支持")
+models.research_node_update(conc1, tag="PD1,反驳")
+got = models.research_node_get(conc1)
+assert "反驳" in got["tag"], f"14b 新 stance 应写入: {got['tag']!r}"
+print("14b. 立场替换（去重由前端）OK")
+
+# 14c. 清除：等价于 tag 里移除所有 stance 词
+models.research_node_update(conc1, tag="PD1,BLI")
+got = models.research_node_get(conc1)
+for kw in STANCE_KEYWORDS:
+    assert kw not in got["tag"], f"14c 清除后不应残留 stance 词『{kw}』: {got['tag']!r}"
+assert "PD1" in got["tag"] and "BLI" in got["tag"], f"14c 非 stance tag 应保留: {got['tag']!r}"
+print("14c. 立场清除（保留非 stance tag）OK")
+
+# 14d. 跨节点类型：experiment 节点也能写 stance 词（数据契约无类型约束；
+# UI 仅在 conclusion 节点详情面板显示控件，但不阻塞其他类型 tag 写入）
+models.research_node_update(exp1, tag="TIM,支持")
+got = models.research_node_get(exp1)
+assert "支持" in got["tag"], f"14d experiment 节点 stance 应可读: {got['tag']!r}"
+print("14d. 跨节点类型 stance 写入 OK（UI 仅在 conclusion 显示控件）")
+
+# 14e. API 端点 PUT tag 透传：与数据层行为一致（必须带 parent_id 走白名单）
+# （前端 researchChangeStance 失败回滚逻辑不在本节；本节验证 API 契约）
+conc1_meta = models.research_node_get(conc1)
+r = client.put(f"/api/research/nodes/{conc1}", json={
+    "tag": "PD1,部分", "title": conc1_meta["title"], "node_type": "conclusion",
+    "parent_id": conc1_meta["parent_id"]})
+assert r.status_code == 200, f"14e PUT tag 应成功: {r.status_code} {r.get_data(as_text=True)[:200]}"
+got = models.research_node_get(conc1)
+assert got["tag"] == "PD1,部分", f"14e API PUT 后 tag 应等于『PD1,部分』: {got['tag']!r}"
+print("14e. API PUT tag 透传 OK")
 
 print("\n全部研究脉络测试通过 ✓")

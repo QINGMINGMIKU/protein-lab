@@ -3421,23 +3421,62 @@ function researchRender(force) {
 }
 
 function renderResearchFlow(flowEl, trees, q, tag, prot) {
-  const { cards, edges, width, height } = researchFlowLayout(trees, q, tag, prot);
-  if (!cards.length) {
-    flowEl.innerHTML = '<div class="empty-hint">没有匹配的节点</div>';
-    flowEl.style.width = "";
-    flowEl.style.height = "";
-    return;
+  // lineflow 渲染：纯文本流（DOM 树 + CSS border-left），不用 SVG / 不用绝对定位 / 不用卡片固定宽
+  // 设计见 docs/research-lineflow-design.md
+  const filtering = !!(q || tag || prot);
+  // 过滤态：不在子树的也渲染（dim 类），保留上下文；非过滤态：整棵渲染
+  const html = trees.map(t => renderLineflowTree(t, 0, filtering ? [] : null, q, tag, prot)).join("");
+  flowEl.innerHTML = html || '<div class="empty-hint">没有匹配的节点</div>';
+  flowEl.style.width = "";
+  flowEl.style.height = "";
+}
+
+// 递归渲染一棵树。filterSkip 是显式"过滤跳过"路径（filtering 态用）。
+function renderLineflowTree(node, depth, filterSkip, q, tag, prot) {
+  const skipping = filterSkip && filterSkip.includes(node.id);
+  // 过滤态 + 不命中 → 整棵折叠（不渲染子树，但保留占位让用户能展开看上下文）
+  if (filtering && !researchFilterMatch(node, q, tag, prot)) {
+    return `<li class="lf-row lf-skip" data-id="${node.id}">${lineflowNodeHtml(node, true, q, tag, prot)}</li>`;
   }
-  const svg = edges.length
-    ? `<svg class="res-flow-svg" width="${width}" height="${height}">` +
-      edges.map(e =>
-        `<path d="M ${e.x1} ${e.y1} H ${(e.x1 + e.x2) / 2} V ${e.y2} H ${e.x2}" ` +
-        `fill="none" stroke="${e.color}" stroke-width="2" opacity="0.75"/>`).join("") +
-      "</svg>"
+  const kids = node.children || [];
+  const childHtml = kids.length
+    ? `<ul>${kids.map(c => renderLineflowTree(c, depth + 1, filterSkip, q, tag, prot)).join("")}</ul>`
     : "";
-  flowEl.innerHTML = svg + cards.map(c => researchFlowCard(c.node, c.x, c.y, c.dim)).join("");
-  flowEl.style.width = width + "px";
-  flowEl.style.height = height + "px";
+  // 折叠：<details open> 默认展开
+  const summaryExtra = kids.length ? ` <span class="lf-meta">${kids.length} 子节点</span>` : "";
+  return `<li class="lf-row" data-id="${node.id}">
+    <details open>
+      <summary class="lf-summary">${lineflowNodeHtml(node, false, q, tag, prot)}${summaryExtra}</summary>
+      ${childHtml}
+    </details>
+  </li>`;
+}
+
+// 单节点水平行：type icon + 标题 + stance chip（仅 conclusion）+ 普通 tag chips + free_attach ⛓
+function lineflowNodeHtml(node, isSkip, q, tag, prot) {
+  const typeIcon = { goal: "🎯", experiment: "🧪", conclusion: "✓" }[node.node_type] || "•";
+  const isSel = researchState.selectedId === node.id;
+  const dim = (q || tag || prot) && !researchNodeMatch(node, q, tag, prot) ? " lf-dim" : "";
+  const sel = isSel ? " lf-sel" : "";
+  const skip = isSkip ? " lf-skip" : "";
+  const stance = node.node_type === "conclusion" ? lineflowStanceChip(node.tag) : "";
+  const tags = (node.tag || "").split(",").map(s => s.trim()).filter(Boolean)
+    .filter(t => !["支持", "反驳", "部分", "不确定"].includes(t))  // stance 词单独 chip，不重复
+    .map(t => `<span class="lf-tag">${esc(t)}</span>`).join("");
+  const free = node.free_attach ? `<span class="lf-free" title="自由挂载（逃生舱）">⛓</span>` : "";
+  return `<span class="lf-node lf-node--${node.node_type}${dim}${sel}${skip}" onclick="event.stopPropagation();researchSelect(${node.id})">
+    <span class="lf-type" title="${esc(node.node_type)}">${typeIcon}</span>
+    <span class="lf-title">${esc(node.title)}</span>
+    ${stance}${tags}${free}
+  </span>`;
+}
+
+// 结论 stance chip（仅 conclusion 节点，标题旁的窄色 chip，只标 stance 词）
+function lineflowStanceChip(tag) {
+  const key = resStanceKey(tag);
+  if (key === "other") return "";  // 无 stance 词 = 不画 chip（避免空 chip）
+  const labels = { support: "✓ 支持", rebut: "✗ 反驳", partial: "△ 部分", uncertain: "○ 不确定" };
+  return `<span class="lf-stance lf-stance--${key}">${esc(labels[key])}</span>`;
 }
 
 // ── 根目标列表（/research 默认首页：列全部根目标，点进单根流程图）──
@@ -3615,6 +3654,25 @@ function renderResearchDetail(node) {
     ? `<div class="res-kids"><span class="res-kids-label">直接子节点</span>` +
       kids.map(k => `<span class="res-chain-link" onclick="researchSelect(${k.id})">${esc(k.title)}</span>`).join(" · ") + "</div>"
     : "";
+  // stance 控件：仅 conclusion 节点显示（v0.1.2 增量）
+  // 复用 tag 字段：选 stance → 移除旧 stance 词 + 加入新；选「清除」→ 移除所有 stance 词
+  const currentStance = resStanceKey(node.tag);
+  const currentStanceValue = currentStance === "support" ? "支持"
+    : currentStance === "rebut" ? "反驳"
+    : currentStance === "partial" ? "部分"
+    : currentStance === "uncertain" ? "不确定" : "";
+  const stanceCtrl = node.node_type === "conclusion"
+    ? `<div class="res-stance-ctrl">
+        <span class="res-stance-label">立场</span>
+        <select id="detailStanceSel" data-prev="${esc(currentStanceValue)}" onchange="researchChangeStance(${node.id}, this.value)">
+          <option value=""${currentStanceValue === "" ? " selected" : ""}>（清除）</option>
+          <option value="支持"${currentStanceValue === "支持" ? " selected" : ""}>✓ 支持</option>
+          <option value="反驳"${currentStanceValue === "反驳" ? " selected" : ""}>✗ 反驳</option>
+          <option value="部分"${currentStanceValue === "部分" ? " selected" : ""}>△ 部分</option>
+          <option value="不确定"${currentStanceValue === "不确定" ? " selected" : ""}>○ 不确定</option>
+        </select>
+       </div>`
+    : "";
   document.getElementById("researchDetailContent").innerHTML = `
     <div class="res-detail-meta">
       <span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>
@@ -3622,6 +3680,7 @@ function renderResearchDetail(node) {
       ${tags.map(t => node.node_type === "conclusion" ? resTagChip(t) : `<span class="res-tag-chip">${esc(t)}</span>`).join("")}
       <span class="res-detail-id">#${node.id}</span>
     </div>
+    ${stanceCtrl}
     ${expCard}
     ${node.detail ? `<div class="res-detail-txt">${esc(node.detail)}</div>` : ""}
     ${kidChips}
@@ -3630,6 +3689,34 @@ function renderResearchDetail(node) {
       <button class="btn" onclick="researchEdit(${node.id})">✎ 编辑</button>
       <button class="btn btn-danger" onclick="researchDelete(${node.id})">🗑 删除（含子树）</button>
     </div>`;
+}
+
+// stance 控件保存：复用 tag 字段（零 schema 变更）
+// 选 stance → 移除 tag 里旧的 stance 词 + 加入新；选「清除」→ 移除所有 stance 词；不动 PD1/BLI 等普通 tag
+async function researchChangeStance(nodeId, stanceValue) {
+  const sel = document.getElementById("detailStanceSel");
+  const prevValue = sel ? sel.getAttribute("data-prev") || "" : "";
+  // 先拿到当前 tag（含其他普通 tag，PD1/BLI 等）
+  let curNode;
+  try { curNode = await API.get(`/api/research/nodes/${nodeId}`); }
+  catch (err) { toast(err.message, true); if (sel) sel.value = prevValue; return; }
+  const STANCE_KEYWORDS = ["支持", "反驳", "部分", "不确定"];
+  const parts = String(curNode.tag || "").split(",").map(s => s.trim()).filter(Boolean);
+  const kept = parts.filter(p => !STANCE_KEYWORDS.includes(p));
+  if (stanceValue) kept.push(stanceValue);
+  const newTag = kept.join(",");
+  try {
+    await API.put(`/api/research/nodes/${nodeId}`, { tag: newTag });
+    if (sel) sel.setAttribute("data-prev", stanceValue);
+    await researchLoad();
+    // 重新选中刷新详情面板（detail panel 不会自动重建——研究脉络 load 后 selectedId 保留即可）
+    const refreshed = researchFindNode(nodeId);
+    if (refreshed) renderResearchDetail(refreshed);
+    toast("立场已更新");
+  } catch (err) {
+    toast(err.message, true);
+    if (sel) sel.value = prevValue;  // 失败时回滚 UI
+  }
 }
 
 function researchOpenModal(mode, node, parent) {

@@ -315,7 +315,7 @@ label textarea { resize: vertical; }
 .res-chain-link { color: #4361ee; cursor: pointer; }
 .res-chain-link:hover { text-decoration: underline; }
 
-.res-flow-container { position: relative; overflow: auto; min-height: 220px; }
+.res-flow-container { position: relative; min-height: 220px; }
 .research-flow-back {
   display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
   padding: 8px 14px; background: #f8faff; border: 1px solid #dde3f0; border-radius: 6px;
@@ -396,6 +396,194 @@ label textarea { resize: vertical; }
 .res-detail-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .res-kids { margin-top: 12px; font-size: 13px; }
 .res-kids-label { color: #888; margin-right: 8px; }
+
+/* ── 研究脉络 lineflow（v0.1.2 UI 重设计）─────────────
+   取代旧 .res-flow-card / .res-flow-svg / .res-flow-* 横轴流程图。
+   文本流（ul/details/li）+ CSS border-left 连接线 + stance chip。
+   旧 .res-flow-* 类仍保留以兼容未清理的引用，新代码一律走 .lf-*。 */
+:root {
+  --lf-line-goal: rgba(76, 175, 121, 0.3);
+  --lf-line-experiment: rgba(74, 144, 217, 0.3);
+  --lf-line-conclusion: rgba(217, 106, 166, 0.3);
+  --lf-line-free: rgba(184, 134, 11, 0.4);
+  --lf-accent: #4361ee;
+  --lf-bg-dim: transparent;
+  --lf-bg-hit: rgba(67, 97, 238, 0.08);
+  --lf-bg-selected: rgba(67, 97, 238, 0.1);
+  --lf-tag-bg: #f0f0f3;
+  --lf-tag-bg-strong: #e8ebf3;
+  --lf-line: #c3c8d4;
+}
+
+.lf-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 0;
+}
+.lf-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 0;
+}
+
+/* 每行 = 缩进 + 左竖线（连接线） */
+.lf-row {
+  position: relative;
+  margin: 0;
+  padding: 0;
+}
+/* 父类型决定连接线颜色（goal→{goal,exp} 走 goal 色；experiment→conclusion 走 exp 色；free_attach 单独） */
+.lf-row.lf-parent-goal > details > ul > .lf-row { border-left: 1px solid var(--lf-line-goal); }
+.lf-row.lf-parent-experiment > details > ul > .lf-row { border-left: 1px solid var(--lf-line-experiment); }
+.lf-row.lf-parent-conclusion > details > ul > .lf-row { border-left: 1px solid var(--lf-line-conclusion); }
+.lf-row.lf-parent-free > details > ul > .lf-row { border-left: 1px dashed var(--lf-line-free); }
+
+/* 层级缩进：每深一级 +16px；::before 画水平短横连接子节点到竖线 */
+.lf-tree .lf-row { padding-left: 16px; }
+.lf-tree .lf-row > details > .lf-children { padding-left: 0; }
+.lf-row:not(:last-child) > details > summary > .lf-node-wrap::before,
+.lf-row > details > ul > .lf-row > details > summary > .lf-node-wrap::before {
+  /* 连接线 1：在 summary 节点画到左边竖线的水平横线 */
+}
+
+/* 让 children 容器与父级的连接关系：每行 li 缩进 16px，行首一根竖线（由外层 .lf-parent-* 控制） */
+.lf-row > details > ul > .lf-row {
+  position: relative;
+  padding-left: 16px;
+  margin: 2px 0;
+}
+/* 横线钩（连接子节点到父的竖线） */
+.lf-row > details > ul > .lf-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 12px;
+  height: 1px;
+  background: var(--lf-line);
+}
+
+.lf-row > details > summary {
+  list-style: none;
+  cursor: default;
+  display: block;
+  position: relative;
+}
+.lf-row > details > summary::-webkit-details-marker { display: none; }
+.lf-row > details > summary::before {
+  /* details 自带三角标（替代旧版手画折叠按钮） */
+  content: "▸";
+  position: absolute;
+  left: -14px;
+  top: 2px;
+  font-size: 11px;
+  color: #9aa3b5;
+  transition: transform 0.12s;
+  cursor: pointer;
+  width: 12px;
+  text-align: center;
+}
+.lf-row > details[open] > summary::before { transform: rotate(90deg); }
+
+.lf-node-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  margin: 2px 0;
+  cursor: pointer;
+  max-width: 100%;
+  flex-wrap: wrap;
+  transition: background 0.1s;
+}
+.lf-node-wrap:hover { background: rgba(67, 97, 238, 0.04); }
+.lf-node-wrap.lf-sel {
+  background: var(--lf-bg-selected);
+  box-shadow: inset 3px 0 0 var(--lf-accent);
+}
+.lf-node-wrap.lf-dim { opacity: 0.4; }
+.lf-node-wrap.lf-hit { background: var(--lf-bg-hit); }
+.lf-node-wrap.lf-skip { /* 过滤跳过：仍可见但整行降低权重 */ opacity: 0.6; }
+
+.lf-type {
+  font-size: 13px;
+  flex: none;
+  width: 16px;
+  text-align: center;
+}
+.lf-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1a1a2e;
+  flex: none;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lf-meta {
+  font-size: 11px;
+  color: #9aa3b5;
+  margin-left: 4px;
+}
+.lf-tag {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--lf-tag-bg);
+  color: #5a6478;
+  flex: none;
+}
+.lf-free {
+  font-size: 11px;
+  color: #b8860b;
+  flex: none;
+}
+
+/* 结论 stance chip（关键 UI：v0.1.2 立场色可见信号） */
+.lf-stance {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  margin-left: 2px;
+  font-weight: 500;
+  flex: none;
+}
+.lf-stance--support  { background: #e8f5e9; color: #2e7d32; }
+.lf-stance--rebut    { background: #ffebee; color: #c62828; }
+.lf-stance--partial  { background: #fff3e0; color: #e65100; }
+.lf-stance--uncertain{ background: #f5f5f5; color: #757575; }
+.lf-stance--other    { background: var(--lf-tag-bg); color: #5a6478; }
+
+/* 详情面板里的 stance 控件（v0.1.2 增量：复用 tag 字段，零 schema 变更） */
+.res-stance-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+  padding: 8px 10px;
+  background: #fafbfc;
+  border: 1px solid #eef0f4;
+  border-radius: 6px;
+}
+.res-stance-label {
+  font-size: 12px;
+  color: #888;
+  font-weight: 500;
+}
+.res-stance-ctrl select {
+  padding: 3px 8px;
+  border: 1px solid #dde3f0;
+  border-radius: 4px;
+  font-size: 13px;
+  background: white;
+  cursor: pointer;
+}
+.res-stance-ctrl select:focus {
+  outline: none;
+  border-color: var(--lf-accent);
+}
 
 .res-exp-card {
   border: 1px solid #dde3f0; background: #f8faff; border-radius: 8px;
