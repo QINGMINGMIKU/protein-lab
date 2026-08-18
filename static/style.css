@@ -398,135 +398,110 @@ label textarea { resize: vertical; }
 .res-kids-label { color: #888; margin-right: 8px; }
 
 /* ── 研究脉络 lineflow（v0.1.2 UI 重设计）─────────────
-   取代旧 .res-flow-card / .res-flow-svg / .res-flow-* 横轴流程图。
-   文本流（ul/details/li）+ CSS border-left 连接线 + stance chip。
-   旧 .res-flow-* 类仍保留以兼容未清理的引用，新代码一律走 .lf-*。 */
+   横向直线串联：每层一行 flex，卡片化 + 箭头 → 串联。
+   取代旧 .res-flow-card 横轴流程图与竖向缩进树。 */
 :root {
-  --lf-line-goal: rgba(76, 175, 121, 0.3);
-  --lf-line-experiment: rgba(74, 144, 217, 0.3);
-  --lf-line-conclusion: rgba(217, 106, 166, 0.3);
-  --lf-line-free: rgba(184, 134, 11, 0.4);
+  --lf-line-goal: rgba(76, 175, 121, 0.4);
+  --lf-line-experiment: rgba(74, 144, 217, 0.4);
+  --lf-line-conclusion: rgba(217, 106, 166, 0.4);
+  --lf-line-free: rgba(184, 134, 11, 0.5);
   --lf-accent: #4361ee;
   --lf-bg-dim: transparent;
   --lf-bg-hit: rgba(67, 97, 238, 0.08);
   --lf-bg-selected: rgba(67, 97, 238, 0.1);
   --lf-tag-bg: #f0f0f3;
-  --lf-tag-bg-strong: #e8ebf3;
+  --lf-card-bg: #ffffff;
+  --lf-card-border: #dde3f0;
+  --lf-card-border-goal: #4caf79;
+  --lf-card-border-experiment: #4a90d9;
+  --lf-card-border-conclusion: #d96aa6;
   --lf-line: #c3c8d4;
 }
 
-.lf-tree {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 0;
-}
-.lf-tree ul {
-  list-style: none;
-  margin: 0;
-  padding-left: 0;
-}
-
-/* 每行 = 缩进 + 左竖线（连接线） */
+/* 一棵树 = 一个根节点 .lf-tree-node（含其子层） */
+.lf-tree-node { margin: 4px 0; }
+/* 同一层兄弟并排（flex row），换行向下 */
 .lf-row {
-  position: relative;
-  margin: 0;
-  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0 0 0;  /* 子层无左缩进，由 .lf-stack 控制 */
+  padding-left: 12px;
+  border-left: 2px solid var(--lf-line);  /* 子层入口竖线：父类型色由 .from-{type} 覆盖 */
 }
-/* 父类型决定连接线颜色（goal→{goal,exp} 走 goal 色；experiment→conclusion 走 exp 色；free_attach 单独） */
-.lf-row.lf-parent-goal > details > ul > .lf-row { border-left: 1px solid var(--lf-line-goal); }
-.lf-row.lf-parent-experiment > details > ul > .lf-row { border-left: 1px solid var(--lf-line-experiment); }
-.lf-row.lf-parent-conclusion > details > ul > .lf-row { border-left: 1px solid var(--lf-line-conclusion); }
-/* free_attach 边：虚线，优先级最高（同时挂 lf-parent-{type} 时覆盖实线） */
-.lf-row.lf-parent-free > details > ul > .lf-row { border-left: 1px dashed var(--lf-line-free); }
+/* 父类型色覆盖：行首竖线按父节点类型着色 */
+.lf-row.from-goal { border-left-color: var(--lf-line-goal); }
+.lf-row.from-experiment { border-left-color: var(--lf-line-experiment); }
+.lf-row.from-conclusion { border-left-color: var(--lf-line-conclusion); }
+.lf-row.from-free { border-left-color: var(--lf-line-free); border-left-style: dashed; }
+/* 一个子节点 = 卡片 + 子层 row 的垂直栈 */
+.lf-stack { display: flex; flex-direction: column; align-items: flex-start; margin-right: 4px; }
 
-/* 层级缩进：每深一级 +16px；::before 画水平短横连接子节点到竖线 */
-.lf-tree .lf-row { padding-left: 16px; }
-.lf-tree .lf-row > details > .lf-children { padding-left: 0; }
-.lf-row:not(:last-child) > details > summary > .lf-node-wrap::before,
-.lf-row > details > ul > .lf-row > details > summary > .lf-node-wrap::before {
-  /* 连接线 1：在 summary 节点画到左边竖线的水平横线 */
-}
-
-/* 让 children 容器与父级的连接关系：每行 li 缩进 16px，行首一根竖线（由外层 .lf-parent-* 控制） */
-.lf-row > details > ul > .lf-row {
-  position: relative;
-  padding-left: 16px;
-  margin: 2px 0;
-}
-/* 横线钩（连接子节点到父的竖线） */
-.lf-row > details > ul > .lf-row::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 14px;
-  width: 12px;
-  height: 1px;
-  background: var(--lf-line);
-}
-
-.lf-row > details > summary {
-  list-style: none;
-  cursor: default;
-  display: block;
-  position: relative;
-}
-.lf-row > details > summary::-webkit-details-marker { display: none; }
-.lf-row > details > summary::before {
-  /* details 自带三角标（替代旧版手画折叠按钮） */
-  content: "▸";
-  position: absolute;
-  left: -14px;
-  top: 2px;
-  font-size: 11px;
-  color: #9aa3b5;
-  transition: transform 0.12s;
-  cursor: pointer;
-  width: 12px;
-  text-align: center;
-}
-.lf-row > details[open] > summary::before { transform: rotate(90deg); }
-
-.lf-node-wrap {
+/* 卡片本体 */
+.lf-card {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 6px 10px;
   border-radius: 6px;
-  margin: 2px 0;
+  background: var(--lf-card-bg);
+  border: 1px solid var(--lf-card-border);
+  border-left-width: 3px;
   cursor: pointer;
-  max-width: 100%;
-  flex-wrap: wrap;
-  transition: background 0.1s;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: nowrap;
+  position: relative;
+  transition: box-shadow 0.1s, background 0.1s;
 }
-.lf-node-wrap:hover { background: rgba(67, 97, 238, 0.04); }
-.lf-node-wrap.lf-sel {
+.lf-card:hover { box-shadow: 0 2px 6px rgba(20, 24, 50, 0.08); }
+.lf-card.lf-sel {
   background: var(--lf-bg-selected);
-  box-shadow: inset 3px 0 0 var(--lf-accent);
+  box-shadow: inset 3px 0 0 var(--lf-accent), 0 0 0 1px var(--lf-accent);
 }
-.lf-node-wrap.lf-dim { opacity: 0.4; }
-.lf-node-wrap.lf-hit { background: var(--lf-bg-hit); }
-.lf-node-wrap.lf-skip { /* 过滤跳过：仍可见但整行降低权重 */ opacity: 0.6; }
+.lf-card.lf-dim { opacity: 0.4; }
+.lf-card.lf-skip { opacity: 0.6; }
+
+/* 卡片左缘色条：按节点类型 */
+.lf-card--goal        { border-left-color: var(--lf-card-border-goal); }
+.lf-card--experiment  { border-left-color: var(--lf-card-border-experiment); }
+.lf-card--conclusion  { border-left-color: var(--lf-card-border-conclusion); }
+
+/* 卡片右侧箭头：横向串联的视觉主线，CSS 伪元素在卡片右侧画 "→"。
+   最右卡片不画（用 flex order + last-of-type 或 :last-child）。
+   但 .lf-card 是 inline-flex，箭头是卡片自身 ::after，scope 在卡片内。
+   改设计：箭头放在 .lf-stack 容器里（卡片后的 ::before 兄弟元素）。 */
+.lf-card::after {
+  content: "";
+  display: inline-block;
+  width: 14px;  /* 占位，箭头不画在卡片上，移到容器侧 */
+  flex: none;
+}
+/* 真正箭头：每个 .lf-stack（除同层最后一个）的 ::after 画 → */
+.lf-stack:not(:last-child)::after {
+  content: "→";
+  color: #9aa3b5;
+  font-size: 16px;
+  margin: 0 6px;
+  align-self: center;
+  flex: none;
+}
 
 .lf-type {
-  font-size: 13px;
+  font-size: 14px;
   flex: none;
-  width: 16px;
+  width: 18px;
   text-align: center;
 }
 .lf-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: #1a1a2e;
   flex: none;
-  max-width: 360px;
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lf-meta {
-  font-size: 11px;
-  color: #9aa3b5;
-  margin-left: 4px;
 }
 .lf-tag {
   font-size: 11px;
@@ -537,12 +512,27 @@ label textarea { resize: vertical; }
   flex: none;
 }
 .lf-free {
-  font-size: 11px;
+  font-size: 12px;
   color: #b8860b;
   flex: none;
+  margin-left: 2px;
 }
+.lf-collapse {
+  background: none;
+  border: none;
+  color: #9aa3b5;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 0 0 2px;
+  margin-left: 2px;
+  border-left: 1px solid #eef0f4;
+  padding-left: 6px;
+  flex: none;
+  line-height: 1;
+}
+.lf-collapse:hover { color: var(--lf-accent); }
 
-/* 结论 stance chip（关键 UI：v0.1.2 立场色可见信号） */
+/* 结论 stance chip（v0.1.2 立场色：仅标 stance 词，不污染普通 tag） */
 .lf-stance {
   font-size: 11px;
   padding: 1px 8px;

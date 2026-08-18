@@ -3325,7 +3325,8 @@ function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
 const researchState = {
   trees: [], experiments: [], expMap: {},
   selectedId: null,
-  view: "list", activeRootId: null,   // list=根目标列表（默认首页）；flow=单根流程图
+  collapsed: new Set(),   // lineflow 折叠态：▾ 按钮切换子层显隐
+  view: "list", activeRootId: null,
 };
 
 function researchFirstAllowed(parentType) {
@@ -3367,6 +3368,13 @@ function researchFindNode(id) {
     if (n.children) stack.push(...n.children);
   }
   return null;
+}
+
+// lineflow 卡片角标 ▾ 切换：折叠/展开子层
+function researchToggle(id) {
+  if (researchState.collapsed.has(id)) researchState.collapsed.delete(id);
+  else researchState.collapsed.add(id);
+  researchRender();
 }
 
 // lineflow 折叠走 <details open> 原生，JS 不再管折叠状态。
@@ -3420,7 +3428,7 @@ function renderResearchFlow(flowEl, trees, q, tag, prot) {
   // 设计见 docs/research-lineflow-design.md
   const filtering = !!(q || tag || prot);
   // 过滤态：不在子树的也渲染（dim 类），保留上下文；非过滤态：整棵渲染
-  const html = trees.map(t => renderLineflowTree(t, 0, filtering ? [] : null, q, tag, prot, filtering)).join("");
+  const html = trees.map(t => renderLineflowTree(t, q, tag, prot, filtering)).join("");
   flowEl.innerHTML = html || '<div class="empty-hint">没有匹配的节点</div>';
   flowEl.style.width = "";
   flowEl.style.height = "";
@@ -3429,27 +3437,31 @@ function renderResearchFlow(flowEl, trees, q, tag, prot) {
 // 递归渲染一棵树。filterSkip 是显式"过滤跳过"路径（filtering 态用）。
 // filtering 必须作为参数显式传——之前是 renderResearchFlow 的局部 const，
 // 闭包内取不到导致全树走"过滤态不命中"分支塌成单行（line 3438 死循环 bug）。
-function renderLineflowTree(node, depth, filterSkip, q, tag, prot, filtering) {
-  // 过滤态 + 不命中 → 整棵折叠（不渲染子树，但保留占位让用户能展开看上下文）
-  if (filtering && !researchFilterMatch(node, q, tag, prot)) {
-    return `<li class="lf-row lf-parent-${node.node_type}${node.free_attach ? " lf-parent-free" : ""} lf-skip" data-id="${node.id}">${lineflowNodeHtml(node, true, q, tag, prot)}</li>`;
-  }
+// 横向直线 lineflow：每层一行 flex，卡片化 + 箭头 → 串联
+// 设计：每层同辈并排（flex-direction: row），子层在父下方新行（再 flex + 左缩进）
+// 卡片结构：type icon + 标题 + stance chip（conclusion）+ 普通 tag chips + 折叠角标 ▾
+// 箭头：CSS 伪元素 .lf-stack:not(:last-child)::after 画 "→"
+// 折叠：researchState.collapsed（Set<nodeId>）——子层缺省展开，▾ 切换
+// 返回：仅产本节点的子层 .lf-row HTML（不含本节点卡片——卡片在 caller 已画）
+function renderLineflowChildren(node, q, tag, prot, filtering) {
+  if (filtering && !researchFilterMatch(node, q, tag, prot)) return "";
   const kids = node.children || [];
-  const childHtml = kids.length
-    ? `<ul>${kids.map(c => renderLineflowTree(c, depth + 1, filterSkip, q, tag, prot, filtering)).join("")}</ul>`
-    : "";
-  // 折叠：<details open> 默认展开
-  const summaryExtra = kids.length ? ` <span class="lf-meta">${kids.length} 子节点</span>` : "";
-  return `<li class="lf-row lf-parent-${node.node_type}${node.free_attach ? " lf-parent-free" : ""}" data-id="${node.id}">
-    <details open>
-      <summary class="lf-summary">${lineflowNodeHtml(node, false, q, tag, prot)}${summaryExtra}</summary>
-      ${childHtml}
-    </details>
-  </li>`;
+  if (!kids.length || researchState.collapsed.has(node.id)) return "";
+  const fromCls = node.free_attach ? " from-free" : ` from-${node.node_type}`;
+  return `<div class="lf-row${fromCls}">${kids.map(c =>
+    `<div class="lf-stack" data-id="${c.id}">${lineflowCard(c, false, q, tag, prot)}${renderLineflowChildren(c, q, tag, prot, filtering)}</div>`
+  ).join("")}</div>`;
 }
 
-// 单节点水平行：type icon + 标题 + stance chip（仅 conclusion）+ 普通 tag chips + free_attach ⛓
-function lineflowNodeHtml(node, isSkip, q, tag, prot) {
+function renderLineflowTree(node, q, tag, prot, filtering) {
+  if (filtering && !researchFilterMatch(node, q, tag, prot)) {
+    return `<div class="lf-stack" data-id="${node.id}">${lineflowCard(node, true, q, tag, prot)}</div>`;
+  }
+  return `<div class="lf-tree-node" data-id="${node.id}">${lineflowCard(node, false, q, tag, prot)}${renderLineflowChildren(node, q, tag, prot, filtering)}</div>`;
+}
+
+// 单卡片：type icon + 标题 + stance chip（conclusion）+ 普通 tag chips + 折叠角标 + 自由挂载 ⛓
+function lineflowCard(node, isSkip, q, tag, prot) {
   const typeIcon = { goal: "🎯", experiment: "🧪", conclusion: "✓" }[node.node_type] || "•";
   const isSel = researchState.selectedId === node.id;
   const dim = (q || tag || prot) && !researchNodeMatch(node, q, tag, prot) ? " lf-dim" : "";
@@ -3457,14 +3469,19 @@ function lineflowNodeHtml(node, isSkip, q, tag, prot) {
   const skip = isSkip ? " lf-skip" : "";
   const stance = node.node_type === "conclusion" ? lineflowStanceChip(node.tag) : "";
   const tags = (node.tag || "").split(",").map(s => s.trim()).filter(Boolean)
-    .filter(t => !["支持", "反驳", "部分", "不确定"].includes(t))  // stance 词单独 chip，不重复
+    .filter(t => !["支持", "反驳", "部分", "不确定"].includes(t))
     .map(t => `<span class="lf-tag">${esc(t)}</span>`).join("");
   const free = node.free_attach ? `<span class="lf-free" title="自由挂载（逃生舱）">⛓</span>` : "";
-  return `<span class="lf-node lf-node--${node.node_type}${dim}${sel}${skip}" onclick="event.stopPropagation();researchSelect(${node.id})">
+  const hasKids = (node.children || []).length > 0;
+  const collapsed = researchState.collapsed.has(node.id);
+  const collapseBtn = hasKids
+    ? `<button class="lf-collapse" onclick="event.stopPropagation();researchToggle(${node.id})" title="${collapsed ? "展开" : "折叠"}">${collapsed ? "▸" : "▾"}</button>`
+    : "";
+  return `<div class="lf-card lf-card--${node.node_type}${dim}${sel}${skip}" onclick="researchSelect(${node.id})">
     <span class="lf-type" title="${esc(node.node_type)}">${typeIcon}</span>
     <span class="lf-title">${esc(node.title)}</span>
-    ${stance}${tags}${free}
-  </span>`;
+    ${stance}${tags}${free}${collapseBtn}
+  </div>`;
 }
 
 // 结论 stance chip（仅 conclusion 节点，标题旁的窄色 chip，只标 stance 词）
