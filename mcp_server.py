@@ -248,6 +248,17 @@ TOOLS = [
         }
     },
     {
+        "name": "get_research_context",
+        "description": "研究目标上下文（v0.1.2）：goal 本体 + 父目标链 + 子树实验 key results（完整 params/results + 原始快照元数据 _raw，序列明文剔除）+ 结论 epistemic status（立场 + 来源实验是否归档）+ 开放目标（子树内无结论的目标）。使能 AI 回答：现在在研究什么 / 哪些结论缺实验支持 / 哪些实验互相矛盾 / 目标验证到什么程度",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "integer", "description": "研究目标节点 id（根目标或子目标）"}
+            },
+            "required": ["goal_id"]
+        }
+    },
+    {
         "name": "save_experiment",
         "description": "归档一条实验记录到数据库。可选挂到研究脉络目标下（v0.1.1）：传 goal_id（已有 goal 节点 id）或 new_goal={title,tag}（自动建根 goal 节点 + experiment 节点），二选一，都不传 = 暂不关联",
         "inputSchema": {
@@ -419,6 +430,15 @@ def handle_tools_call(id_, params):
                 return send_response(id_, {"content": [{"type": "text", "text": f"未找到研究节点: {nid}"}]})
             node["chain"] = research.get_chain(nid)
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(node, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "get_research_context":
+            _need(args, tool_name, "goal_id")
+            gid = _inum(args, tool_name, "goal_id")
+            ctx = research.get_research_context(gid)
+            if ctx is None:
+                return send_response(id_, {"content": [{"type": "text", "text": f"未找到目标节点: {gid}"}]})
+            ctx = _strip_sequences(ctx)  # IP 保护兜底：内嵌实验 params/results 一律剔序列明文
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(ctx, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "save_experiment":
             _need(args, tool_name, "title", "exp_type")

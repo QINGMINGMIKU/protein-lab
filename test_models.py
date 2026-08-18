@@ -223,6 +223,7 @@ read_cases = [
     ("list_protein_tags", {}),
     ("list_research_trees", {}),
     ("get_research_node", {"node_id": _rn_id}),
+    ("get_research_context", {"goal_id": _rn_id}),
 ]
 before = _db_dump()
 for tool, args in read_cases:

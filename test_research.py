@@ -15,9 +15,10 @@
 9. 同级排序：sort_order 自动追加
 10. 更新重挂：白名单拦截 + free_attach 放行 + 换父重排
 11. API：/api/research/nodes 增查改删 + 白名单 400
-12. MCP 读工具零写库（list_research_trees / get_research_node）
+12. MCP 读工具零写库（list_research_trees / get_research_node / get_research_context）
 13. /research 页面渲染（流程图容器 #researchFlow）
 14. 立场 tag 操控：写入/替换/清除/跨节点类型（v0.1.2 增量，零 schema 变更）
+15. 研究上下文聚合 get_research_context（v0.1.2）：结构/计划占位/开放目标/stance 映射/边界/序列脱敏
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
@@ -182,12 +183,15 @@ assert r.status_code == 404, "删除后应 404"
 print("11. API 增查改删 OK")
 
 # ── 12. MCP 读工具零写库 ──
-assert {"list_research_trees", "get_research_node"} <= mcp_server.READ_TOOLS, "研究读工具应在 READ_TOOLS"
+assert {"list_research_trees", "get_research_node", "get_research_context"} <= mcp_server.READ_TOOLS, \
+    "研究读工具应在 READ_TOOLS"
 before = dump_db()
 for tool, args in [
     ("list_research_trees", {}),
     ("get_research_node", {"node_id": g}),
     ("get_research_node", {"node_id": 99999}),
+    ("get_research_context", {"goal_id": g}),
+    ("get_research_context", {"goal_id": 99999}),
 ]:
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -200,6 +204,10 @@ for tool, args in [
         assert '"error"' not in out, f"get_research_node 应成功返回: {out[:200]}"
         text = json.loads(json.loads(out.split(chr(10))[0])["result"]["content"][0]["text"])
         assert text.get("children"), "有子节点应带递归子树"
+    if tool == "get_research_context" and args.get("goal_id") == g:
+        assert '"error"' not in out, f"get_research_context 应成功返回: {out[:200]}"
+        text = json.loads(json.loads(out.split(chr(10))[0])["result"]["content"][0]["text"])
+        assert text.get("subtree") is not None, "上下文应带 subtree 聚合块"
     assert dump_db() == before, f"读工具 {tool} 不应写库"
 print("12. MCP 读工具零写库 OK")
 
@@ -257,5 +265,87 @@ assert r.status_code == 200, f"14e PUT tag 应成功: {r.status_code} {r.get_dat
 got = models.research_node_get(conc1)
 assert got["tag"] == "PD1,部分", f"14e API PUT 后 tag 应等于『PD1,部分』: {got['tag']!r}"
 print("14e. API PUT tag 透传 OK")
+
+# ── 15. 研究上下文聚合 get_research_context（v0.1.2）──
+# 数据契约：goal 本体 + 父目标链 + 子树实验 key results + 结论 stance + 开放目标。
+# 测试状态：g 子树含 exp1(无 exp_id)/conc1(tag=PD1,部分,父=exp1)/sub_g(无结论)。
+def _ctx(gid):
+    """直接调 service 层（不走 MCP），返回上下文 dict。"""
+    return research.get_research_context(gid)
+
+# 15a. 结构：goal 本体 / 父链 / 归档实验块（含 exp 明细 + raw 快照元数据）/ 结论 stance
+arch_eid = models.exp_create(title="浓度测定归档", exp_type="浓度测定",
+                             params={"a280": 0.5}, results={"mean_uM": 12.3})
+models.exp_save_raw(arch_eid, "test_trace", {"analysis_version": "v-test"})
+arch_link = research.create_node("experiment", "归档实验", parent_id=g, exp_id=arch_eid)[0]
+ctx_g = _ctx(g)
+assert ctx_g["goal"]["id"] == g and ctx_g["goal"]["node_type_label"] == "目标", \
+    f"goal 本体应为首节点: {ctx_g['goal']}"
+assert ctx_g["parent_chain"][0]["id"] == g and ctx_g["parent_chain"][-1]["id"] == g, \
+    f"根目标的父链应为自身: {ctx_g['parent_chain']}"
+exp_entry = next(x for x in ctx_g["subtree"]["experiments"] if x["node_id"] == arch_link)
+assert not exp_entry["planned"] and exp_entry["exp"]["id"] == arch_eid, \
+    f"归档实验应带 exp 块: {exp_entry}"
+assert exp_entry["exp"]["results"] == {"mean_uM": 12.3} and exp_entry["exp"]["params"] == {"a280": 0.5}, \
+    "key results = 完整 params/results"
+assert exp_entry["exp"]["_raw_count"] == 1 and \
+    exp_entry["exp"]["_raw"][0]["analysis_version"] == "v-test", \
+    f"应带 raw 快照元数据: {exp_entry['exp']['_raw']}"
+conc_entry = next(x for x in ctx_g["subtree"]["conclusions"] if x["node_id"] == conc1)
+assert conc_entry["stance"] == {"key": "partial", "label": "部分"}, \
+    f"结论 stance 应映射 partial: {conc_entry['stance']}"
+assert conc_entry["source_exp_id"] is None and not conc_entry["source_archived"], \
+    "来源实验未归档 → source_archived=False（AI 据此判缺实验支持）"
+print("15a. 上下文结构（goal/父链/实验块/stance）OK")
+
+# 15b. 计划占位：exp_id 空 → planned 标志，无 exp 块
+plan_node = research.create_node("experiment", "计划实验", parent_id=g)[0]
+plan_entry = next(x for x in _ctx(g)["subtree"]["experiments"] if x["node_id"] == plan_node)
+assert plan_entry["planned"] is True and plan_entry["exp_id"] is None and "exp" not in plan_entry, \
+    f"计划占位应只带 planned 标志: {plan_entry}"
+print("15b. 计划占位 OK")
+
+# 15c. 开放目标：子树内无结论的目标；已下结论的目标不算
+fresh_g = research.create_node("goal", "新开放目标")[0]
+assert any(x["id"] == fresh_g for x in _ctx(fresh_g)["open_goals"]), "无结论的目标应标记开放"
+assert all(x["id"] != g for x in ctx_g["open_goals"]), "已下结论的目标不应开放"
+sub_entry = next(x for x in ctx_g["subtree"]["goal_nodes"] if x["id"] == sub_g)
+assert sub_entry["has_conclusion"] is False, "子目标无结论 → has_conclusion=False"
+print("15c. 开放目标 OK")
+
+# 15d. stance 映射：结论 tag 命中立场词 → key/label（跨类型结论也可写，14d 已证）
+sup_conc = research.create_node("conclusion", "支持结论", parent_id=exp1)[0]
+models.research_node_update(sup_conc, tag="PD1,支持")
+sup_entry = next(x for x in _ctx(g)["subtree"]["conclusions"] if x["node_id"] == sup_conc)
+assert sup_entry["stance"] == {"key": "support", "label": "支持"}, \
+    f"支持 应映射 support: {sup_entry['stance']}"
+assert sup_entry["parent_title"] == "实验1改", f"来源父实验标题应带出: {sup_entry['parent_title']}"
+print("15d. stance 映射（支持/部分）OK")
+
+# 15e/15f. 边界：非 goal 报错（MCP 层转 -32602），不存在返回 None
+try:
+    _ctx(exp1)
+    assert False, "非目标节点应 raise ValueError"
+except ValueError as err:
+    assert "不是目标节点" in str(err), f"报错应说明按目标聚合: {err}"
+assert _ctx(99999) is None, "不存在的目标应返回 None"
+print("15e/15f. 非 goal / 不存在边界 OK")
+
+# 15g. 序列脱敏：内嵌实验 params 的 sequence 明文不得出 MCP
+sec_eid = models.exp_create(title="脱敏实验", exp_type="BLI",
+                            params={"sequence": "MKRWASFILLER", "a280": 0.3},
+                            results={"mean_uM": 1.2})
+research.create_node("experiment", "脱敏挂载", parent_id=g, exp_id=sec_eid)
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    mcp_server.handle_tools_call(None, {"name": "get_research_context",
+                                        "arguments": {"goal_id": g}})
+out = buf.getvalue().strip()
+assert '"error"' not in out, f"get_research_context 应成功返回: {out[:200]}"
+text = json.loads(json.loads(out.split(chr(10))[0])["result"]["content"][0]["text"])
+assert "sequence" not in json.dumps(text, ensure_ascii=False), \
+    "get_research_context 不得泄漏序列明文"
+assert text["stats"]["archived"] >= 2, f"stats 应累计归档实验: {text['stats']}"
+print("15g. MCP 序列脱敏 OK")
 
 print("\n全部研究脉络测试通过 ✓")

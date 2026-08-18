@@ -189,3 +189,146 @@ def get_chain(node_id: int) -> list[dict] | None:
         cur = models.research_node_get(pid)
     chain.reverse()
     return chain
+
+
+# ── v0.1.2 研究上下文聚合（MCP get_research_context）──────────────────
+# 立场词（epistemic status）复用 research_nodes.tag CSV 字段，这里只做词→key 映射。
+
+STANCE_KEYWORDS = {"支持": "support", "反驳": "rebut", "部分": "partial", "不确定": "uncertain"}
+STANCE_LABELS = {key: label for label, key in STANCE_KEYWORDS.items()}
+
+
+def _collect_subtree(root_id: int) -> list[dict]:
+    """扁平收集根节点及其全部后代（BFS 栈，仿 models.research_node_delete_subtree）。"""
+    out = []
+    stack = [root_id]
+    while stack:
+        nid = stack.pop()
+        n = models.research_node_get(nid)
+        if not n:
+            continue
+        out.append(n)
+        stack.extend(c["id"] for c in models.research_node_children(nid))
+    return out
+
+
+def _depth_in_subtree(root_id: int, target_id: int) -> int:
+    """target 相对 root 的层级（root 自身 = 0）。沿 parent 链数到 root，防环兜底。"""
+    depth, cur = 0, target_id
+    seen = set()
+    while cur and cur not in seen:
+        seen.add(cur)
+        if cur == root_id:
+            return depth
+        n = models.research_node_get(cur)
+        if not n or n["parent_id"] is None:
+            break
+        cur, depth = n["parent_id"], depth + 1
+    return depth
+
+
+def get_research_context(goal_id: int) -> dict | None:
+    """研究目标上下文聚合（v0.1.2，MCP get_research_context）。
+
+    给 AI 一次拿到「一个研究目标」的证据链：goal 本体 + 父目标链 + 子树实验
+    key results（完整 params/results + raw 快照元数据）+ 结论 epistemic status
+    （立场 + 来源实验是否归档）+ 开放目标（子树内无结论的目标）。
+
+    定位（Workbench）：给数据 + 轻量事实信号，判断留给 AI——不代做结论。
+    返回 None = 目标不存在；节点存在但非 goal → raise ValueError（MCP 层转 -32602）。
+    """
+    root = models.research_node_get(goal_id)
+    if not root:
+        return None
+    if root["node_type"] != "goal":
+        raise ValueError(
+            f"get_research_context: goal_id {goal_id} 不是目标节点"
+            f"（{NODE_TYPE_LABELS.get(root['node_type'], root['node_type'])}），"
+            f"研究上下文按目标聚合")
+
+    nodes = _collect_subtree(goal_id)
+    by_id = {n["id"]: n for n in nodes}
+
+    # ── 子树实验：归档给完整 exp 块（params/results + raw 快照元数据），计划占位只给标志 ──
+    experiments = []
+    for n in nodes:
+        if n["node_type"] != "experiment":
+            continue
+        entry = {"node_id": n["id"], "title": n["title"], "detail": n["detail"],
+                 "tag": n["tag"], "exp_id": n["exp_id"], "planned": n["exp_id"] is None}
+        if n["exp_id"]:
+            e = models.exp_get(n["exp_id"])
+            if e:
+                entry["exp"] = {
+                    "id": e["id"], "title": e["title"], "exp_type": e["exp_type"],
+                    "date": e.get("date", ""), "protein_names": e.get("protein_names", ""),
+                    "params": e.get("params"), "results": e.get("results"),
+                    "notes": e.get("notes", ""),
+                    "_raw": models.exp_raw_list(e["id"], with_version=True),
+                }
+                entry["exp"]["_raw_count"] = len(entry["exp"]["_raw"])
+        experiments.append(entry)
+
+    # ── 结论 epistemic status：立场（tag 首个命中词）+ 来源实验（父节点）──
+    conclusions = []
+    for n in nodes:
+        if n["node_type"] != "conclusion":
+            continue
+        stance_key = ""
+        for kw, key in STANCE_KEYWORDS.items():
+            if kw in (n["tag"] or "").split(","):
+                stance_key = key
+                break
+        parent = by_id.get(n["parent_id"]) if n["parent_id"] is not None else None
+        source_exp_id = (parent["exp_id"] if parent and parent["node_type"] == "experiment"
+                         else None)
+        source_exp = models.exp_get(source_exp_id) if source_exp_id else None
+        conclusions.append({
+            "node_id": n["id"], "title": n["title"], "detail": n["detail"], "tag": n["tag"],
+            "stance": {"key": stance_key, "label": STANCE_LABELS.get(stance_key, "")},
+            "source_exp_id": source_exp_id,
+            "source_archived": source_exp_id is not None,
+            "source_exp_title": source_exp["title"] if source_exp else "",
+            "parent_title": parent["title"] if parent else "",
+        })
+
+    # ── goal 节点：有无结论 / 归档·计划实验计数（开放目标 = 子树内无结论）──
+    goal_nodes = []
+    for n in nodes:
+        if n["node_type"] != "goal":
+            continue
+        sub = _collect_subtree(n["id"])
+        goal_nodes.append({
+            "id": n["id"], "title": n["title"], "detail": n["detail"], "tag": n["tag"],
+            "node_type_label": NODE_TYPE_LABELS["goal"],
+            "has_conclusion": any(x["node_type"] == "conclusion" for x in sub),
+            "archived_experiments": sum(1 for x in sub
+                                        if x["node_type"] == "experiment" and x["exp_id"]),
+            "planned_experiments": sum(1 for x in sub
+                                       if x["node_type"] == "experiment" and not x["exp_id"]),
+        })
+    open_goals = [
+        {"id": gn["id"], "title": gn["title"], "tag": gn["tag"],
+         "depth": _depth_in_subtree(goal_id, gn["id"])}
+        for gn in goal_nodes if not gn["has_conclusion"]
+    ]
+
+    archived = sum(1 for x in experiments if not x["planned"])
+    return {
+        "goal": _node_public(root),
+        "parent_chain": get_chain(goal_id),
+        "subtree": {
+            "goal_nodes": goal_nodes,
+            "experiments": experiments,
+            "conclusions": conclusions,
+        },
+        "open_goals": open_goals,
+        "stats": {
+            "goals": len(goal_nodes),
+            "experiments": len(experiments),
+            "planned": len(experiments) - archived,
+            "archived": archived,
+            "conclusions": len(conclusions),
+            "open_goals": len(open_goals),
+        },
+    }
