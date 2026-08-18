@@ -173,6 +173,33 @@ def delete_node_subtree(node_id: int) -> tuple[int, str]:
     return models.research_node_delete_subtree(node_id), ""
 
 
+def move_node(node_id: int, direction: str) -> tuple[bool, str]:
+    """同级内上移/下移一位（direction: 'up'/'down'）。
+
+    交换后对全部兄弟重排 normalize 成 0..n-1--顺带修复历史 sort_order 撞号
+    （直接 models.research_node_create 建的节点 sort_order 全是 0，
+    撞号时同级显示序退化为按 id 排）。
+    """
+    if direction not in ("up", "down"):
+        return False, "direction 应为 'up' 或 'down'"
+    node = models.research_node_get(node_id)
+    if not node:
+        return False, "节点不存在"
+    sibs = (models.research_node_children(node["parent_id"])
+            if node["parent_id"] is not None else models.research_nodes_root())
+    ids = [s["id"] for s in sibs]
+    if node_id not in ids:
+        return False, "节点不在同级列表中"
+    i = ids.index(node_id)
+    j = i - 1 if direction == "up" else i + 1
+    if j < 0 or j >= len(ids):
+        return False, "已在同级" + ("首位" if direction == "up" else "末位") + "，无法移动"
+    ids[i], ids[j] = ids[j], ids[i]
+    for k, sid in enumerate(ids):
+        models.research_node_update(sid, sort_order=k)
+    return True, ""
+
+
 def _node_public(n: dict) -> dict:
     """节点公开形态：free_attach 归一为 bool，附中文类型标签（供前端/JSON 消费）。"""
     return {**n, "free_attach": bool(n.get("free_attach")),

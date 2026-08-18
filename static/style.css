@@ -33,6 +33,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
 .btn-outline { background: #fff; color: #555; border: 1px solid #d0d0d0; }
 .btn-outline:hover { background: #f0f0f0; }
 .btn-sm { padding: 4px 10px; font-size: 13px; }
+.btn:disabled { opacity: .35; cursor: default; pointer-events: none; }
 .btn-danger { background: #e74c3c; color: #fff; }
 .btn-danger:hover { background: #c0392b; }
 

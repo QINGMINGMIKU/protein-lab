@@ -20,6 +20,7 @@
 14. 立场 tag 操控：写入/替换/清除/跨节点类型（v0.1.2 增量，零 schema 变更）
 15. 研究上下文聚合 get_research_context（v0.1.2）：结构/计划占位/开放目标/stance 映射/边界/序列脱敏
 16. 评审修复（P2-1~P4-7）：stance 双端一致/写入规范化/防环/输入强转/子树统计重构
+17. 同级排序移动 move_node：上移/下移/边界拒绝/sort_order 重排规范化/API 端点
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
@@ -434,5 +435,62 @@ assert all(x["id"] != ng for x in ctx_ng["open_goals"]), "16d 已下结论的根
 assert ctx_ng["stats"]["archived"] == 1 and ctx_ng["stats"]["conclusions"] == 1, \
     f"16d stats: {ctx_ng['stats']}"
 print("16d. 子树统计重构（嵌套/深度/开放）OK")
+
+# ── 17. 同级排序移动 move_node ──
+# 17a. 上移/下移：3 兄弟 c1,c2,c3 -> c2 上移 -> c2,c1,c3 -> c3 下移到首位后...
+mg = research.create_node("goal", "排序父")[0]
+c1 = research.create_node("goal", "c1", parent_id=mg)[0]
+c2 = research.create_node("goal", "c2", parent_id=mg)[0]
+c3 = research.create_node("goal", "c3", parent_id=mg)[0]
+def _sib_ids(pid):
+    return [n["id"] for n in models.research_node_children(pid)]
+ok, err = research.move_node(c2, "up")
+assert ok and not err, f"17a c2 上移应成功: {err}"
+assert _sib_ids(mg) == [c2, c1, c3], f"17a 上移后应为 c2,c1,c3: {_sib_ids(mg)}"
+ok, err = research.move_node(c3, "up")
+assert ok and not err, f"17a c3 上移应成功: {err}"
+assert _sib_ids(mg) == [c2, c3, c1], f"17a 上移后应为 c2,c3,c1: {_sib_ids(mg)}"
+ok, err = research.move_node(c1, "up")
+assert ok and not err, f"17a c1 上移应成功: {err}"
+assert _sib_ids(mg) == [c2, c1, c3], f"17a c1 上移回原位: {_sib_ids(mg)}"
+print("17a. 同级上移/下移 OK")
+
+# 17b. 边界：首位再上移 / 末位再下移 -> 拒绝；非法 direction -> 拒绝
+ok, err = research.move_node(c2, "up")
+assert ok is False and "首位" in err, f"17b 首位上移应拒绝: {err}"
+ok, err = research.move_node(c3, "down")
+assert ok is False and "末位" in err, f"17b 末位下移应拒绝: {err}"
+ok, err = research.move_node(c2, "left")
+assert ok is False and "direction" in err, f"17b 非法方向应拒绝: {err}"
+ok, err = research.move_node(99999, "up")
+assert ok is False and "不存在" in err, f"17b 不存在节点应拒绝: {err}"
+print("17b. 边界/非法输入拒绝 OK")
+
+# 17c. sort_order 重排规范化：交换后全部兄弟 normalize 成 0..n-1
+# （直接 models 建的节点 sort_order 撞号全 0，一次 move 后应修复）
+orders = [n["sort_order"] for n in models.research_node_children(mg)]
+assert orders == [0, 1, 2], f"17c 移动后 sort_order 应规范化 0,1,2: {orders}"
+print("17c. sort_order 重排规范化 OK")
+
+# 17d. API 端点：PUT /move 成功 + 错误 400
+r = client.put(f"/api/research/nodes/{c2}/move", json={"direction": "down"})
+assert r.status_code == 200 and r.get_json()["id"] == c2, \
+    f"17d API move 应成功: {r.status_code} {r.get_data(as_text=True)[:150]}"
+assert _sib_ids(mg) == [c1, c2, c3], f"17d API 下移后序: {_sib_ids(mg)}"
+r = client.put(f"/api/research/nodes/{c3}/move", json={"direction": "down"})
+assert r.status_code == 400 and "末位" in r.get_json()["error"], "17d API 末位下移应 400"
+r = client.put(f"/api/research/nodes/{c1}/move", json={"direction": "x"})
+assert r.status_code == 400 and "direction" in r.get_json()["error"], "17d API 非法方向应 400"
+print("17d. API /move 端点 OK")
+
+# 17e. 根节点同级移动（根列表排序）：roots 间上移生效
+roots_before = [r_["id"] for r_ in models.research_nodes_root()]
+target = roots_before[-1]
+ok, err = research.move_node(target, "up")
+assert ok and not err, f"17e 根上移应成功: {err}"
+roots_after = [r_["id"] for r_ in models.research_nodes_root()]
+assert roots_after == roots_before[:-2] + [target, roots_before[-2]], \
+    f"17e 根列表序应交换末两位: {roots_before} -> {roots_after}"
+print("17e. 根节点同级移动 OK")
 
 print("\n全部研究脉络测试通过 ✓")

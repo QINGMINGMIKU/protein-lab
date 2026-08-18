@@ -3370,6 +3370,26 @@ function researchFindNode(id) {
   return null;
 }
 
+// 同级兄弟列表：根节点 -> 树列表；子节点 -> 父的 children（排序用）
+function researchSiblings(node) {
+  if (!node || node.parent_id == null) return researchState.trees;
+  const p = researchFindNode(node.parent_id);
+  return (p && p.children) || [];
+}
+
+// 同级上移/下移：PUT /move 交换 + 重排 sort_order，成功后整树重载
+async function researchMove(id, dir) {
+  try {
+    await API.put(`/api/research/nodes/$glm-5.3_common/move`, { direction: dir });
+    await researchLoad();
+    if (researchState.selectedId === id) {
+      const n = researchFindNode(id);
+      if (n) renderResearchDetail(n);
+    }
+    toast("已移动");
+  } catch (err) { toast(err.message, true); }
+}
+
 // lineflow 卡片角标 ▾ 切换：折叠/展开子层
 function researchToggle(id) {
   if (researchState.collapsed.has(id)) researchState.collapsed.delete(id);
@@ -3503,10 +3523,15 @@ function researchRootStats(root) {
 function researchRootCard(root) {
   const { nodes, exps } = researchRootStats(root);
   const tags = (root.tag || "").split(",").map(s => s.trim()).filter(Boolean);
+  const idx = researchState.trees.findIndex(t => t.id === root.id);
   return `<div class="res-root-card" onclick="researchOpenRoot(${root.id})">
     <div class="res-root-top">
       <span class="res-root-count">${nodes} 节点 · ${exps} 实验</span>
       <span class="res-root-actions">
+        <button class="btn btn-sm" ${idx <= 0 ? "disabled" : ""}
+                onclick="event.stopPropagation();researchMove(${root.id}, 'up')" title="上移">↑</button>
+        <button class="btn btn-sm" ${idx < 0 || idx >= researchState.trees.length - 1 ? "disabled" : ""}
+                onclick="event.stopPropagation();researchMove(${root.id}, 'down')" title="下移">↓</button>
         <button class="btn btn-sm" onclick="event.stopPropagation();researchEdit(${root.id})">编辑</button>
         <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();researchDelete(${root.id})">删除</button>
       </span>
@@ -3626,6 +3651,15 @@ function renderResearchDetail(node) {
         </select>
        </div>`
     : "";
+  // 同级排序：↑/↓ 上移下移（首位/末位禁用；sibling 序取自 researchState 缓存树）
+  const cachedNode = researchFindNode(node.id) || node;
+  const sibs = researchSiblings(cachedNode);
+  const sIdx = sibs.findIndex(s => s.id === node.id);
+  const moveCtrl = `
+      <button class="btn btn-sm" ${sIdx <= 0 ? "disabled" : ""}
+              onclick="researchMove(${node.id}, 'up')" title="同级上移">↑</button>
+      <button class="btn btn-sm" ${sIdx < 0 || sIdx >= sibs.length - 1 ? "disabled" : ""}
+              onclick="researchMove(${node.id}, 'down')" title="同级下移">↓</button>`;
   document.getElementById("researchDetailContent").innerHTML = `
     <div class="res-detail-meta">
       <span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>
@@ -3638,6 +3672,7 @@ function renderResearchDetail(node) {
     ${node.detail ? `<div class="res-detail-txt">${esc(node.detail)}</div>` : ""}
     ${kidChips}
     <div class="res-detail-actions">
+      ${moveCtrl}
       <button class="btn btn-primary" onclick="researchAddChild(${node.id})">加子节点</button>
       <button class="btn" onclick="researchEdit(${node.id})">编辑</button>
       <button class="btn btn-danger" onclick="researchDelete(${node.id})">删除子树</button>

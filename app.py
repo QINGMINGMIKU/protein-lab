@@ -158,6 +158,16 @@ def api_research_node_delete(nid):
     return jsonify({"ok": True, "deleted": count})
 
 
+@app.route("/api/research/nodes/<int:nid>/move", methods=["PUT"])
+def api_research_node_move(nid):
+    """同级内上移/下移一位（direction: 'up'|'down'），交换后重排 sort_order。"""
+    data = request.get_json() or {}
+    ok, err = research.move_node(nid, data.get("direction", ""))
+    if not ok:
+        return jsonify({"error": err}), 400
+    return jsonify(research.get_node_with_subtree(nid))
+
+
 # ═══════════════════════════════════════════════════════════
 #  Proteins API
 # ═══════════════════════════════════════════════════════════
