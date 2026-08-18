@@ -3637,17 +3637,30 @@ function renderResearchDetail(node) {
 async function researchChangeStance(nodeId, stanceValue) {
   const sel = document.getElementById("detailStanceSel");
   const prevValue = sel ? sel.getAttribute("data-prev") || "" : "";
-  // 先拿到当前 tag（含其他普通 tag，PD1/BLI 等）
-  let curNode;
-  try { curNode = await API.get(`/api/research/nodes/${nodeId}`); }
-  catch (err) { toast(err.message, true); if (sel) sel.value = prevValue; return; }
+  // 复用 researchState 缓存的节点（避免额外 GET）；cache miss 时再 GET
+  let curNode = researchFindNode(nodeId);
+  if (!curNode) {
+    try { curNode = await API.get(`/api/research/nodes/${nodeId}`); }
+    catch (err) { toast(err.message, true); if (sel) sel.value = prevValue; return; }
+  }
   const STANCE_KEYWORDS = ["支持", "反驳", "部分", "不确定"];
   const parts = String(curNode.tag || "").split(",").map(s => s.trim()).filter(Boolean);
   const kept = parts.filter(p => !STANCE_KEYWORDS.includes(p));
   if (stanceValue) kept.push(stanceValue);
   const newTag = kept.join(",");
   try {
-    await API.put(`/api/research/nodes/${nodeId}`, { tag: newTag });
+    // update_node 是全量更新（白名单 + title 必填），挂立场时必须带上 node_type / title /
+    // parent_id 等 leaf 字段，否则 title="" 被 400 挡。设计：tag 是 leaf 字段，但 API
+    // 没开 PATCH 端点，前端必须传齐其他字段。
+    await API.put(`/api/research/nodes/${nodeId}`, {
+      tag: newTag,
+      node_type: curNode.node_type,
+      title: curNode.title,
+      detail: curNode.detail || "",
+      parent_id: curNode.parent_id,
+      exp_id: curNode.exp_id,
+      free_attach: !!curNode.free_attach,
+    });
     if (sel) sel.setAttribute("data-prev", stanceValue);
     await researchLoad();
     // 重新选中刷新详情面板（detail panel 不会自动重建——研究脉络 load 后 selectedId 保留即可）
