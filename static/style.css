@@ -333,7 +333,7 @@ label textarea { resize: vertical; }
 }
 .res-layout:has(> .res-detail-side.hidden) { grid-template-columns: minmax(0, 1fr); }
 .res-detail-side {
-  width: 340px;
+  width: 400px;  /* 容纳 actions 一横排：↑↓ + 加子节点/编辑/删除子树 不换行 */
   position: sticky;
   top: 16px;
   max-height: calc(100vh - 32px);
