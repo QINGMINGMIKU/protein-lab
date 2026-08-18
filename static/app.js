@@ -3380,7 +3380,7 @@ function researchSiblings(node) {
 // 同级上移/下移：PUT /move 交换 + 重排 sort_order，成功后整树重载
 async function researchMove(id, dir) {
   try {
-    await API.put(`/api/research/nodes/$glm-5.3_common/move`, { direction: dir });
+    await API.put(`/api/research/nodes/${id}/move`, { direction: dir });
     await researchLoad();
     if (researchState.selectedId === id) {
       const n = researchFindNode(id);
