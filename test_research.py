@@ -19,6 +19,7 @@
 13. /research 页面渲染（流程图容器 #researchFlow）
 14. 立场 tag 操控：写入/替换/清除/跨节点类型（v0.1.2 增量，零 schema 变更）
 15. 研究上下文聚合 get_research_context（v0.1.2）：结构/计划占位/开放目标/stance 映射/边界/序列脱敏
+16. 评审修复（P2-1~P4-7）：stance 双端一致/写入规范化/防环/输入强转/子树统计重构
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
@@ -136,16 +137,20 @@ assert rel == [s1, s2, s3], f"同级应按 sort_order 升序: {order}"
 print("9. 同级排序 OK")
 
 # ── 10. 更新重挂：白名单拦截 + free_attach 放行 + 换父重排 ──
+# 重挂目标 conclusion 用旁路节点（非 exp1 子树成员）——评审修复 P2-2 起防环拦截：
+# 若仍用 conc1（exp1 自己的子节点），重挂即成环，白名单/防环两个语义会纠缠。
+other_exp = research.create_node("experiment", "旁路实验", parent_id=g)[0]
+other_conc = research.create_node("conclusion", "旁路结论", parent_id=other_exp)[0]
 # 把 conclusion 重挂到另一个 experiment 下（合法）
 ok, err = research.update_node(conc1, "conclusion", "结论1改", parent_id=exp1)
 assert ok and not err, f"conclusion 重挂 experiment 应放行: {err}"
 # 把 experiment 重挂到 conclusion 下（白名单拦截）
-ok, err = research.update_node(exp1, "experiment", "实验1改", parent_id=conc1)
+ok, err = research.update_node(exp1, "experiment", "实验1改", parent_id=other_conc)
 assert ok is False and "白名单" in err, f"experiment 挂 conclusion 应拦截: {err}"
-# 加逃生舱后放行
-ok, err = research.update_node(exp1, "experiment", "实验1改", parent_id=conc1, free_attach=True)
+# 加逃生舱后放行（目标非 exp1 后代 → 不构成环）
+ok, err = research.update_node(exp1, "experiment", "实验1改", parent_id=other_conc, free_attach=True)
 assert ok and not err, f"free_attach 重挂应放行: {err}"
-assert models.research_node_get(exp1)["parent_id"] == conc1, "应已重挂到 conclusion 下"
+assert models.research_node_get(exp1)["parent_id"] == other_conc, "应已重挂到 conclusion 下"
 # 重挂回 g（goal）→ 应排在 g 子节点末尾
 ok, err = research.update_node(exp1, "experiment", "实验1改", parent_id=g)
 assert ok and not err, f"重挂回 goal 应放行: {err}"
@@ -347,5 +352,85 @@ assert "sequence" not in json.dumps(text, ensure_ascii=False), \
     "get_research_context 不得泄漏序列明文"
 assert text["stats"]["archived"] >= 2, f"stats 应累计归档实验: {text['stats']}"
 print("15g. MCP 序列脱敏 OK")
+
+# ── 16. 评审修复（P2-1~P4-7）──
+# P2-1 stance 双端一致：服务端 res_stance_key 镜像前端（按 tag 序 + 逐项 trim）。
+# 16a1. 写入规范化：create 存 tag 前逐项 trim 去空
+norm = research.create_node("experiment", "规范化实验", parent_id=g, tag=" 支持 , PD1")[0]
+assert models.research_node_get(norm)["tag"] == "支持,PD1", \
+    f"16a1 create 应规范化 tag: {models.research_node_get(norm)['tag']!r}"
+
+# 16a2. 读取端 trim：直写遗留脏数据（逗号后带空格，绕过规范化）仍能识别立场
+legacy = research.create_node("conclusion", "遗留空格结论", parent_id=exp1)[0]
+models.research_node_update(legacy, tag="数据, 支持")
+legacy_e = next(x for x in _ctx(g)["subtree"]["conclusions"] if x["node_id"] == legacy)
+assert legacy_e["stance"] == {"key": "support", "label": "支持"}, \
+    f"16a2 带空格 tag 应识别为 support: {legacy_e['stance']}"
+
+# 16a3. 多立场词优先级：按 tag 序取第一个（与前端 resStanceKey 一致，非关键词序）
+multi = research.create_node("conclusion", "多立场结论", parent_id=exp1, tag="不确定, 支持")[0]
+multi_e = next(x for x in _ctx(g)["subtree"]["conclusions"] if x["node_id"] == multi)
+assert multi_e["stance"] == {"key": "uncertain", "label": "不确定"}, \
+    f"16a3 多立场词应按 tag 序取『不确定』: {multi_e['stance']}"
+
+# 16a4. 无立场词 → 空 stance（key/label 均为空串）
+plain = research.create_node("conclusion", "无立场结论", parent_id=exp1, tag="数据")[0]
+plain_e = next(x for x in _ctx(g)["subtree"]["conclusions"] if x["node_id"] == plain)
+assert plain_e["stance"] == {"key": "", "label": ""}, f"16a4 无立场词应空: {plain_e['stance']}"
+print("16a. stance 双端一致（规范化/带空格/多词/无词）OK")
+
+# P2-2 防环：update_node 不允许挂到自身或后代（用白名单合法的 goal→goal 场景，
+# 否则白名单会先拦；防环是逃生舱放行路径上的硬兜底）
+ca = research.create_node("goal", "环测试A")[0]
+cb = research.create_node("goal", "环测试B", parent_id=ca)[0]
+cc = research.create_node("experiment", "环测试C", parent_id=cb)[0]
+ok, err = research.update_node(ca, node_type="goal", title="环测试A", parent_id=ca)
+assert ok is False and "成环" in err, f"16b 自挂应拒绝: {err}"
+ok, err = research.update_node(ca, node_type="goal", title="环测试A", parent_id=cb)
+assert ok is False and "成环" in err, f"16b 挂到后代应拒绝: {err}"
+# 防环失败后树仍正常（级联收集不因本次尝试受影响）
+assert research.get_chain(cb)[-1]["id"] == cb, "16b 防环后树应保持正常"
+print("16b. 重挂防环（自挂/后代）OK")
+
+# P3-3 输入强转：字符串 parent_id / free_attach="false" 语义正确；非法值明确报错
+str_parent = research.create_node("goal", "字符串父测试", parent_id=str(ca),
+                                  free_attach="false")[0]
+p = models.research_node_get(str_parent)
+assert p["parent_id"] == ca, f"16c 字符串 parent_id 应强转 int: {p['parent_id']!r}"
+assert p["free_attach"] == 0, f"16c free_attach='false' 应为 False: {p['free_attach']!r}"
+roots = research.build_trees()
+assert not any(r["id"] == str_parent for r in roots), "16c 字符串 parent_id 不应成孤立根"
+ca_root = next(r for r in roots if r["id"] == ca)
+assert any(c["id"] == str_parent for c in ca_root["children"]), \
+    f"16c 应正常挂在 ca 下: {[c['id'] for c in ca_root['children']]}"
+ok, err = research.create_node("goal", "坏父", parent_id="abc")
+assert ok is None and "应为整数" in err, f"16c 非法 parent_id 应报错: {err}"
+# P3-4 exp_id=0 拒绝；字符串 exp_id 强转成功
+ok, err = research.create_node("experiment", "零exp", parent_id=ca, exp_id=0)
+assert ok is None and "关联实验" in err, f"16c exp_id=0 应拒绝: {err}"
+ok, err = research.create_node("experiment", "字符串exp", parent_id=ca, exp_id=str(arch_eid))
+assert ok and not err, f"16c 字符串 exp_id 应强转成功: {err}"
+print("16c. 输入强转（字符串 id/free_attach/exp_id=0）OK")
+
+# P4-5 子树统计重构：嵌套 goal 树计数正确、深度正确、已下结论的不算开放
+ng = research.create_node("goal", "嵌套根")[0]
+ng2 = research.create_node("goal", "嵌套子", parent_id=ng)[0]
+ng_exp = research.create_node("experiment", "嵌套实验", parent_id=ng2, exp_id=arch_eid)[0]
+ng_conc = research.create_node("conclusion", "嵌套结论", parent_id=ng_exp, tag="支持")[0]
+ng3 = research.create_node("goal", "嵌套开放", parent_id=ng)[0]
+ctx_ng = _ctx(ng)
+assert ctx_ng["stats"]["goals"] == 3, f"16d 嵌套 goal 计数: {ctx_ng['stats']['goals']}"
+ng_root = next(x for x in ctx_ng["subtree"]["goal_nodes"] if x["id"] == ng)
+ng_sub = next(x for x in ctx_ng["subtree"]["goal_nodes"] if x["id"] == ng2)
+assert ng_root["has_conclusion"] is True and ng_sub["has_conclusion"] is True, \
+    "16d 嵌套子树应检出结论"
+assert ng_root["archived_experiments"] == 1 and ng_sub["archived_experiments"] == 1, \
+    f"16d 归档计数: {ng_root['archived_experiments']}"
+og = next(x for x in ctx_ng["open_goals"] if x["id"] == ng3)
+assert og["depth"] == 1, f"16d 开放目标 depth 应=1: {og}"
+assert all(x["id"] != ng for x in ctx_ng["open_goals"]), "16d 已下结论的根不应开放"
+assert ctx_ng["stats"]["archived"] == 1 and ctx_ng["stats"]["conclusions"] == 1, \
+    f"16d stats: {ctx_ng['stats']}"
+print("16d. 子树统计重构（嵌套/深度/开放）OK")
 
 print("\n全部研究脉络测试通过 ✓")

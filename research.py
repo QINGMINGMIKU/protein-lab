@@ -24,6 +24,38 @@ WHITELIST = {
 }
 
 
+def _as_bool(v) -> bool:
+    """宽松布尔强转：True/"true"/"1"/"yes"/"on" → True，其余 → False。
+
+    评审修复（P3-3）：API 边界可能收到字符串 "false"——`bool("false")` 是 True
+    会误触白名单逃生舱，这里按真实语义解析。
+    """
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("true", "1", "yes", "on")
+
+
+def _coerce_id(v, field: str):
+    """parent_id/exp_id 强转 int；None/''→None；非法→ValueError（调用方转 err）。
+
+    评审修复（P3-3）：字符串 "5" 直接存库会成 TEXT，build_trees 按 int 键拼树时
+    对不上（by_id.get("5") miss）→ 节点显示成孤立根。这里统一收口强转。
+    """
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field} 应为整数，收到 {v!r}")
+
+
+def _normalize_tag(tag) -> str:
+    """标签规范化：逐项 trim 去空，逗号连接（立场词匹配依赖无空格存储）。"""
+    if not tag:
+        return ""
+    return ",".join(t.strip() for t in str(tag).split(",") if t.strip())
+
+
 def _parent_label(t: str | None) -> str:
     return NODE_TYPE_LABELS.get(t or "", t or "根")
 
@@ -57,24 +89,30 @@ def create_node(node_type: str, title: str, detail: str = "",
                 parent_id: int = None, exp_id: int = None, tag: str = "",
                 free_attach: bool = False) -> tuple[int | None, str]:
     """新建研究节点。返回 (node_id, "") 或 (None, error)。"""
+    try:
+        parent_id = _coerce_id(parent_id, "parent_id")
+        exp_id = _coerce_id(exp_id, "exp_id")
+    except ValueError as e:
+        return None, str(e)
     if node_type not in RESEARCH_NODE_TYPES:
         return None, f"未知节点类型: {node_type}"
     if not title or not title.strip():
         return None, "标题不能为空"
-    if exp_id and not models.exp_get(exp_id):
+    # exp_id=0 也进校验（P3-4：0 会被 `if exp_id and` 当 falsy 绕过，静默存库当计划占位）
+    if exp_id is not None and not models.exp_get(exp_id):
         return None, f"关联实验 {exp_id} 不存在"
     parent = models.research_node_get(parent_id) if parent_id is not None else None
     if parent_id is not None and parent is None:
         return None, f"父节点 {parent_id} 不存在"
-    err = _check_new_edge(parent, node_type, bool(free_attach))
+    err = _check_new_edge(parent, node_type, _as_bool(free_attach))
     if err:
         return None, err
     sibs = (models.research_node_children(parent_id) if parent
             else models.research_nodes_root())
     nid = models.research_node_create(
         node_type=node_type, title=title.strip(), detail=detail,
-        parent_id=parent_id, exp_id=exp_id, tag=tag,
-        free_attach=bool(free_attach), sort_order=_sort_tail(sibs))
+        parent_id=parent_id, exp_id=exp_id, tag=_normalize_tag(tag),
+        free_attach=_as_bool(free_attach), sort_order=_sort_tail(sibs))
     return nid, ""
 
 
@@ -82,6 +120,11 @@ def update_node(node_id: int, node_type: str, title: str, detail: str = "",
                 parent_id: int = None, exp_id: int = None, tag: str = "",
                 free_attach: bool = False) -> tuple[bool, str]:
     """全量更新研究节点（前端提交完整对象）。重挂（父变化）时重校验白名单并重排。"""
+    try:
+        parent_id = _coerce_id(parent_id, "parent_id")
+        exp_id = _coerce_id(exp_id, "exp_id")
+    except ValueError as e:
+        return False, str(e)
     node = models.research_node_get(node_id)
     if not node:
         return False, "节点不存在"
@@ -89,14 +132,27 @@ def update_node(node_id: int, node_type: str, title: str, detail: str = "",
         return False, f"未知节点类型: {node_type}"
     if not title or not title.strip():
         return False, "标题不能为空"
-    if exp_id and not models.exp_get(exp_id):
+    # exp_id=0 也进校验（P3-4，同 create_node）
+    if exp_id is not None and not models.exp_get(exp_id):
         return False, f"关联实验 {exp_id} 不存在"
     parent = models.research_node_get(parent_id) if parent_id is not None else None
     if parent_id is not None and parent is None:
         return False, f"父节点 {parent_id} 不存在"
-    err = _check_new_edge(parent, node_type, bool(free_attach))
+    err = _check_new_edge(parent, node_type, _as_bool(free_attach))
     if err:
         return False, err
+    # 防环（P2-2）：新父不能是自身或其任何后代——沿新父链上溯，遇 node_id 即环。
+    # 白名单可能被 free_attach 逃生舱打破，防环是其上的硬兜底；否则树成环后
+    # _collect_subtree / research_node_delete_subtree 死循环、/api/research/nodes 序列化 500
+    # （get_chain/_depth_in_subtree 已有 seen，这里补齐）。
+    if parent_id != node.get("parent_id") and parent_id is not None:
+        cur, seen = parent_id, set()
+        while cur is not None and cur not in seen:
+            if cur == node_id:
+                return False, "不能把节点挂到自身或其子树下（会成环）"
+            seen.add(cur)
+            p = models.research_node_get(cur)
+            cur = p["parent_id"] if p else None
     if parent_id != node.get("parent_id"):
         sibs = (models.research_node_children(parent_id) if parent
                 else models.research_nodes_root())
@@ -105,8 +161,8 @@ def update_node(node_id: int, node_type: str, title: str, detail: str = "",
         sort_order = node.get("sort_order", 0)
     models.research_node_update(
         node_id, node_type=node_type, title=title.strip(), detail=detail,
-        parent_id=parent_id, exp_id=exp_id, tag=tag,
-        free_attach=bool(free_attach), sort_order=sort_order)
+        parent_id=parent_id, exp_id=exp_id, tag=_normalize_tag(tag),
+        free_attach=_as_bool(free_attach), sort_order=sort_order)
     return True, ""
 
 
@@ -198,12 +254,32 @@ STANCE_KEYWORDS = {"支持": "support", "反驳": "rebut", "部分": "partial", 
 STANCE_LABELS = {key: label for label, key in STANCE_KEYWORDS.items()}
 
 
+def res_stance_key(tag: str) -> str:
+    """立场词 → key。镜像 static/app.js resStanceKey：按 tag 序取第一个命中词（逐项 trim），
+    无命中返回 ''。
+
+    评审修复（P2-1）：旧实现按关键词序遍历且不 trim——(a) `数据, 支持`（逗号后空格）
+    拆出 `["数据"," 支持"]` 匹配不到 → MCP 报空立场而 UI 显示「支持」；(b) 多立场词
+    `不确定, 支持` 旧实现优先取「支持」（关键词序），前端按 tag 序取「不确定」。
+    这里与前端逐字对齐。
+    """
+    for t in (tag or "").split(","):
+        t = t.strip()
+        if t in STANCE_KEYWORDS:
+            return STANCE_KEYWORDS[t]
+    return ""
+
+
 def _collect_subtree(root_id: int) -> list[dict]:
-    """扁平收集根节点及其全部后代（BFS 栈，仿 models.research_node_delete_subtree）。"""
+    """扁平收集根节点及其全部后代（BFS 栈，seen 防环兜底，仿 research_node_delete_subtree）。"""
     out = []
     stack = [root_id]
+    seen = set()
     while stack:
         nid = stack.pop()
+        if nid in seen:
+            continue
+        seen.add(nid)
         n = models.research_node_get(nid)
         if not n:
             continue
@@ -274,11 +350,7 @@ def get_research_context(goal_id: int) -> dict | None:
     for n in nodes:
         if n["node_type"] != "conclusion":
             continue
-        stance_key = ""
-        for kw, key in STANCE_KEYWORDS.items():
-            if kw in (n["tag"] or "").split(","):
-                stance_key = key
-                break
+        stance_key = res_stance_key(n["tag"])
         parent = by_id.get(n["parent_id"]) if n["parent_id"] is not None else None
         source_exp_id = (parent["exp_id"] if parent and parent["node_type"] == "experiment"
                          else None)
@@ -293,11 +365,27 @@ def get_research_context(goal_id: int) -> dict | None:
         })
 
     # ── goal 节点：有无结论 / 归档·计划实验计数（开放目标 = 子树内无结论）──
+    # 子树统计用本地 children_map DFS，避免对每个 goal 重复 _collect_subtree
+    # （P4-5：旧实现对每个 goal 一轮全子树 DB 查询，O(G×N) 次连接且根查两遍）。
+    children_map: dict[int | None, list[int]] = {}
+    for n in nodes:
+        children_map.setdefault(n["parent_id"], []).append(n["id"])
+
+    def _subtree_ids(root_id: int) -> set[int]:
+        seen, stack = set(), [root_id]
+        while stack:
+            nid = stack.pop()
+            if nid in seen:
+                continue
+            seen.add(nid)
+            stack.extend(children_map.get(nid, []))
+        return seen
+
     goal_nodes = []
     for n in nodes:
         if n["node_type"] != "goal":
             continue
-        sub = _collect_subtree(n["id"])
+        sub = [by_id[i] for i in _subtree_ids(n["id"])]
         goal_nodes.append({
             "id": n["id"], "title": n["title"], "detail": n["detail"], "tag": n["tag"],
             "node_type_label": NODE_TYPE_LABELS["goal"],

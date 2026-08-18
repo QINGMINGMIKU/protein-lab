@@ -154,8 +154,11 @@ def _attach_goal_node(exp_id: int, exp_title: str,
     if not goal_id and not new_goal:
         raise ValueError("需要 goal_id 或 new_goal 之一")
     if goal_id is not None:
-        if not models.research_node_get(goal_id):
+        g = models.research_node_get(goal_id)
+        if not g:
             raise ValueError(f"goal 节点 {goal_id} 不存在")
+        if g.get("node_type") != "goal":
+            raise ValueError(f"节点 {goal_id} 不是目标节点（{g.get('node_type')}），只能挂到目标下")
         parent_id = goal_id
     else:
         ng_title = (new_goal.get("title") or "").strip()

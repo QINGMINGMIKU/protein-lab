@@ -659,8 +659,12 @@ def research_node_delete_subtree(node_id: int) -> int:
     conn = get_db()
     stack = [node_id]
     ids = []
+    seen = set()
     while stack:
         nid = stack.pop()
+        if nid in seen:  # 防环兜底：历史/异常数据成环时避免 ids 无限增长
+            continue
+        seen.add(nid)
         ids.append(nid)
         rows = conn.execute("SELECT id FROM research_nodes WHERE parent_id=?",
                             (nid,)).fetchall()
