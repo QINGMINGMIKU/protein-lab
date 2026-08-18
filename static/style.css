@@ -455,15 +455,21 @@ label textarea { resize: vertical; }
 .lf-card--experiment  { border-left-color: var(--lf-card-border-experiment); }
 .lf-card--conclusion  { border-left-color: var(--lf-card-border-conclusion); }
 
-/* 淡灰箭头：每个 .lf-stack（除同层最后一个）的 ::after 画 →（UI 优化轮拍板保留） */
-.lf-stack:not(:last-child)::after {
+/* 淡灰箭头：同层非最后一个 stack 的卡片右侧画 →，垂直居中。
+   不能挂在 .lf-stack::after 上——stack 是纵向 flex（卡片+子层），伪元素会排到栈底。
+   改挂卡片自身 ::after 绝对定位（.lf-card 已 position:relative），
+   占位空间由非末 stack 的 margin-right 让出。 */
+.lf-stack:not(:last-child) > .lf-card::after {
   content: "→";
+  position: absolute;
+  left: calc(100% + 5px);
+  top: 50%;
+  transform: translateY(-50%);
   color: #9aa3b5;
   font-size: 16px;
-  margin: 0 6px;
-  align-self: center;
-  flex: none;
+  line-height: 1;
 }
+.lf-stack:not(:last-child) { margin-right: 30px; }
 
 .lf-title {
   font-size: 13px;
