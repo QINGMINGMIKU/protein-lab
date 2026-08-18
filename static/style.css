@@ -462,9 +462,9 @@ label textarea { resize: vertical; }
 .lf-stack:not(:last-child) > .lf-card::after {
   content: "→";
   position: absolute;
-  left: calc(100% + 5px);
+  left: calc(100% + 19px);  /* 间隙中点：row gap 8 + margin 30 = 38px，取半 */
   top: 50%;
-  transform: translateY(-50%);
+  transform: translate(-50%, -50%);  /* 字形中心对准间隙中点，宽度自适应 */
   color: #9aa3b5;
   font-size: 16px;
   line-height: 1;
