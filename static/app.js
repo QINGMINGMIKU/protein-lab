@@ -3377,9 +3377,6 @@ function researchToggle(id) {
   researchRender();
 }
 
-// lineflow 折叠走 <details open> 原生，JS 不再管折叠状态。
-// researchToggle / researchState.collapsed 已删。
-
 // lineflow 配色由 CSS 变量统一管理（--lf-line-goal/experiment/conclusion/free），
 // 旧横向流程图常量 RES_FLOW / RES_FLOW_EDGE 在 v0.1.2 lineflow 替换中已删，保留此处说明。
 
@@ -3460,9 +3457,9 @@ function renderLineflowTree(node, q, tag, prot, filtering) {
   return `<div class="lf-tree-node" data-id="${node.id}">${lineflowCard(node, false, q, tag, prot)}${renderLineflowChildren(node, q, tag, prot, filtering)}</div>`;
 }
 
-// 单卡片：type icon + 标题 + stance chip（conclusion）+ 普通 tag chips + 折叠角标 + 自由挂载 ⛓
+// 单卡片（去 emoji 版）：标题 + stance chip（conclusion）+ 普通 tag chips + 折叠角标 + 自由挂载标
+// 类型不靠 icon——左缘色条（.lf-card--{type}）+ hover tooltip（node_type_label）表达
 function lineflowCard(node, isSkip, q, tag, prot) {
-  const typeIcon = { goal: "🎯", experiment: "🧪", conclusion: "✓" }[node.node_type] || "•";
   const isSel = researchState.selectedId === node.id;
   const dim = (q || tag || prot) && !researchNodeMatch(node, q, tag, prot) ? " lf-dim" : "";
   const sel = isSel ? " lf-sel" : "";
@@ -3471,14 +3468,13 @@ function lineflowCard(node, isSkip, q, tag, prot) {
   const tags = (node.tag || "").split(",").map(s => s.trim()).filter(Boolean)
     .filter(t => !["支持", "反驳", "部分", "不确定"].includes(t))
     .map(t => `<span class="lf-tag">${esc(t)}</span>`).join("");
-  const free = node.free_attach ? `<span class="lf-free" title="自由挂载（逃生舱）">⛓</span>` : "";
+  const free = node.free_attach ? `<span class="lf-free" title="自由挂载（逃生舱）">自由</span>` : "";
   const hasKids = (node.children || []).length > 0;
   const collapsed = researchState.collapsed.has(node.id);
   const collapseBtn = hasKids
     ? `<button class="lf-collapse" onclick="event.stopPropagation();researchToggle(${node.id})" title="${collapsed ? "展开" : "折叠"}">${collapsed ? "▸" : "▾"}</button>`
     : "";
-  return `<div class="lf-card lf-card--${node.node_type}${dim}${sel}${skip}" onclick="researchSelect(${node.id})">
-    <span class="lf-type" title="${esc(node.node_type)}">${typeIcon}</span>
+  return `<div class="lf-card lf-card--${node.node_type}${dim}${sel}${skip}" title="${esc(node.node_type_label || node.node_type)}" onclick="researchSelect(${node.id})">
     <span class="lf-title">${esc(node.title)}</span>
     ${stance}${tags}${free}${collapseBtn}
   </div>`;
@@ -3509,11 +3505,10 @@ function researchRootCard(root) {
   const tags = (root.tag || "").split(",").map(s => s.trim()).filter(Boolean);
   return `<div class="res-root-card" onclick="researchOpenRoot(${root.id})">
     <div class="res-root-top">
-      <span class="res-badge res-badge-goal">目标</span>
       <span class="res-root-count">${nodes} 节点 · ${exps} 实验</span>
       <span class="res-root-actions">
-        <button class="btn btn-sm" title="编辑" onclick="event.stopPropagation();researchEdit(${root.id})">✎</button>
-        <button class="btn btn-sm btn-danger" title="删除（含子树）" onclick="event.stopPropagation();researchDelete(${root.id})">🗑</button>
+        <button class="btn btn-sm" onclick="event.stopPropagation();researchEdit(${root.id})">编辑</button>
+        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();researchDelete(${root.id})">删除</button>
       </span>
     </div>
     <div class="res-root-title">${esc(root.title)}</div>
@@ -3550,8 +3545,8 @@ function researchBackToList() {
 }
 
 // lineflow 重设计后，旧的横向流程图布局 researchFlowLayout + researchFlowCard 已删。
-// 旧 .res-flow-card / .res-flow-svg 样式在 style.css 中保留以兼容，但新代码不再生成。
-// 结论 stance 配色由 CSS .lf-stance--* 接管，lineflowNodeHtml 直接调 resStanceKey 取 key。
+// 旧 .res-flow-card / .res-flow-svg 等死样式已从 style.css 移除（v0.1.2 UI 优化轮）。
+// 结论 stance 配色由 CSS .lf-stance--* 接管，lineflowCard 直接调 resStanceKey 取 key。
 function resStanceKey(tag) {
   const m = { 支持: "support", 反驳: "rebut", 部分: "partial", 不确定: "uncertain" };
   for (const t of String(tag || "").split(",").map(s => s.trim())) {
@@ -3601,12 +3596,12 @@ function renderResearchDetail(node) {
   if (node.experiment) {
     const e = node.experiment;
     expCard = `<div class="res-exp-card">
-      <div class="res-exp-card-head">📄 关联实验</div>
+      <div class="res-exp-card-head">关联实验</div>
       <a class="res-exp-card-title" href="/experiments/${e.id}">${esc(e.title)}</a>
       <div class="res-exp-card-meta">${esc(e.exp_type)} · ${esc(e.date || "")} · #${e.id}</div>
     </div>`;
   } else if (node.node_type === "experiment") {
-    expCard = `<div class="res-exp-card res-exp-placeholder">📋 计划占位（尚未归档实验，留作后续执行）</div>`;
+    expCard = `<div class="res-exp-card res-exp-placeholder">计划占位（未归档实验）</div>`;
   }
   const kidChips = kids.length
     ? `<div class="res-kids"><span class="res-kids-label">直接子节点</span>` +
@@ -3634,7 +3629,7 @@ function renderResearchDetail(node) {
   document.getElementById("researchDetailContent").innerHTML = `
     <div class="res-detail-meta">
       <span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>
-      ${node.free_attach ? '<span class="res-free">⛓ 自由挂载</span>' : ""}
+      ${node.free_attach ? '<span class="res-free">自由挂载</span>' : ""}
       ${tags.map(t => node.node_type === "conclusion" ? resTagChip(t) : `<span class="res-tag-chip">${esc(t)}</span>`).join("")}
       <span class="res-detail-id">#${node.id}</span>
     </div>
@@ -3643,9 +3638,9 @@ function renderResearchDetail(node) {
     ${node.detail ? `<div class="res-detail-txt">${esc(node.detail)}</div>` : ""}
     ${kidChips}
     <div class="res-detail-actions">
-      <button class="btn btn-primary" onclick="researchAddChild(${node.id})">+ 加子节点</button>
-      <button class="btn" onclick="researchEdit(${node.id})">✎ 编辑</button>
-      <button class="btn btn-danger" onclick="researchDelete(${node.id})">🗑 删除（含子树）</button>
+      <button class="btn btn-primary" onclick="researchAddChild(${node.id})">加子节点</button>
+      <button class="btn" onclick="researchEdit(${node.id})">编辑</button>
+      <button class="btn btn-danger" onclick="researchDelete(${node.id})">删除子树</button>
     </div>`;
 }
 

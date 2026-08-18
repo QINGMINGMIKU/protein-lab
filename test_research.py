@@ -222,6 +222,8 @@ html = r.get_data(as_text=True)
 assert r.status_code == 200 and 'id="researchFlow"' in html, "/research 应渲染流程图容器"
 assert 'id="researchFlowBack"' in html, "应有单根流程图返回栏（根目标列表→流程图）"
 assert 'class="res-flow-container"' in html, "流程图容器应有 res-flow-container 样式"
+# v0.1.2 UI 优化轮：左树右详情两栏（flow + sticky 详情侧栏同处 .res-layout）
+assert 'class="res-layout"' in html and 'res-detail-side' in html, "应有左树右详情两栏布局"
 print("13. /research 页面渲染 OK")
 
 # ── 14. 立场 tag 操控（v0.1.2 增量：复用 tag 字段，零 schema 变更）──

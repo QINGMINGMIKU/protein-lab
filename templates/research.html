@@ -32,20 +32,21 @@
   <span id="researchFlowBackTitle" class="research-flow-back-title"></span>
 </div>
 
-<!-- ── 根目标列表 / 单根流程图（默认首页=列表）── -->
-<div id="researchFlow" class="res-flow-container"></div>
+<!-- ── 根目标列表 / 单根流程图（默认首页=列表）──
+     左树右详情两栏：flow 占主列，详情面板 sticky 右侧（隐藏时整列塌缩）── -->
+<div class="res-layout">
+  <div id="researchFlow" class="res-flow-container"></div>
+  <aside id="researchDetail" class="panel hidden res-detail-side">
+    <div class="panel-header">
+      <h2 id="researchDetailTitle"></h2>
+      <button class="btn btn-sm" onclick="researchCloseDetail()">✕</button>
+    </div>
+    <div id="researchDetailContent"></div>
+  </aside>
+</div>
 <div id="researchEmpty" class="empty-hint hidden">
   还没有研究节点。<br>
   <button class="btn btn-primary" onclick="researchAddRoot()" style="margin-top:10px">开始：新增根目标</button>
-</div>
-
-<!-- ── 节点详情面板 ── -->
-<div id="researchDetail" class="panel hidden">
-  <div class="panel-header">
-    <h2 id="researchDetailTitle"></h2>
-    <button class="btn btn-sm" onclick="researchCloseDetail()">✕</button>
-  </div>
-  <div id="researchDetailContent"></div>
 </div>
 
 <!-- ── 节点编辑弹窗 ── -->
