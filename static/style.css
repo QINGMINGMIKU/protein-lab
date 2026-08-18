@@ -436,6 +436,7 @@ label textarea { resize: vertical; }
 .lf-row.lf-parent-goal > details > ul > .lf-row { border-left: 1px solid var(--lf-line-goal); }
 .lf-row.lf-parent-experiment > details > ul > .lf-row { border-left: 1px solid var(--lf-line-experiment); }
 .lf-row.lf-parent-conclusion > details > ul > .lf-row { border-left: 1px solid var(--lf-line-conclusion); }
+/* free_attach 边：虚线，优先级最高（同时挂 lf-parent-{type} 时覆盖实线） */
 .lf-row.lf-parent-free > details > ul > .lf-row { border-left: 1px dashed var(--lf-line-free); }
 
 /* 层级缩进：每深一级 +16px；::before 画水平短横连接子节点到竖线 */

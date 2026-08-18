@@ -3324,7 +3324,7 @@ function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
 // ═════════════════════════════════════════════════════
 const researchState = {
   trees: [], experiments: [], expMap: {},
-  selectedId: null, collapsed: new Set(),
+  selectedId: null,
   view: "list", activeRootId: null,   // list=根目标列表（默认首页）；flow=单根流程图
 };
 
@@ -3369,16 +3369,11 @@ function researchFindNode(id) {
   return null;
 }
 
-function researchToggle(id) {
-  if (researchState.collapsed.has(id)) researchState.collapsed.delete(id);
-  else researchState.collapsed.add(id);
-  researchRender();
-}
+// lineflow 折叠走 <details open> 原生，JS 不再管折叠状态。
+// researchToggle / researchState.collapsed 已删。
 
-// 横向流程图布局常量：CARD_W/CARD_H 节点卡片，COL_GAP 列间距，ROW_H 行距，PAD 边距
-const RES_FLOW = { CARD_W: 232, CARD_H: 92, COL_GAP: 48, ROW_H: 104, PAD: 12 };
-// 连接线按父节点类型着色
-const RES_FLOW_EDGE = { goal: "#4caf79", experiment: "#4a90d9", conclusion: "#d96aa6" };
+// lineflow 配色由 CSS 变量统一管理（--lf-line-goal/experiment/conclusion/free），
+// 旧横向流程图常量 RES_FLOW / RES_FLOW_EDGE 在 v0.1.2 lineflow 替换中已删，保留此处说明。
 
 function researchRender(force) {
   const q = (document.getElementById("researchQuery").value || "").trim();
@@ -3425,26 +3420,27 @@ function renderResearchFlow(flowEl, trees, q, tag, prot) {
   // 设计见 docs/research-lineflow-design.md
   const filtering = !!(q || tag || prot);
   // 过滤态：不在子树的也渲染（dim 类），保留上下文；非过滤态：整棵渲染
-  const html = trees.map(t => renderLineflowTree(t, 0, filtering ? [] : null, q, tag, prot)).join("");
+  const html = trees.map(t => renderLineflowTree(t, 0, filtering ? [] : null, q, tag, prot, filtering)).join("");
   flowEl.innerHTML = html || '<div class="empty-hint">没有匹配的节点</div>';
   flowEl.style.width = "";
   flowEl.style.height = "";
 }
 
 // 递归渲染一棵树。filterSkip 是显式"过滤跳过"路径（filtering 态用）。
-function renderLineflowTree(node, depth, filterSkip, q, tag, prot) {
-  const skipping = filterSkip && filterSkip.includes(node.id);
+// filtering 必须作为参数显式传——之前是 renderResearchFlow 的局部 const，
+// 闭包内取不到导致全树走"过滤态不命中"分支塌成单行（line 3438 死循环 bug）。
+function renderLineflowTree(node, depth, filterSkip, q, tag, prot, filtering) {
   // 过滤态 + 不命中 → 整棵折叠（不渲染子树，但保留占位让用户能展开看上下文）
   if (filtering && !researchFilterMatch(node, q, tag, prot)) {
-    return `<li class="lf-row lf-skip" data-id="${node.id}">${lineflowNodeHtml(node, true, q, tag, prot)}</li>`;
+    return `<li class="lf-row lf-parent-${node.node_type}${node.free_attach ? " lf-parent-free" : ""} lf-skip" data-id="${node.id}">${lineflowNodeHtml(node, true, q, tag, prot)}</li>`;
   }
   const kids = node.children || [];
   const childHtml = kids.length
-    ? `<ul>${kids.map(c => renderLineflowTree(c, depth + 1, filterSkip, q, tag, prot)).join("")}</ul>`
+    ? `<ul>${kids.map(c => renderLineflowTree(c, depth + 1, filterSkip, q, tag, prot, filtering)).join("")}</ul>`
     : "";
   // 折叠：<details open> 默认展开
   const summaryExtra = kids.length ? ` <span class="lf-meta">${kids.length} 子节点</span>` : "";
-  return `<li class="lf-row" data-id="${node.id}">
+  return `<li class="lf-row lf-parent-${node.node_type}${node.free_attach ? " lf-parent-free" : ""}" data-id="${node.id}">
     <details open>
       <summary class="lf-summary">${lineflowNodeHtml(node, false, q, tag, prot)}${summaryExtra}</summary>
       ${childHtml}
@@ -3536,38 +3532,9 @@ function researchBackToList() {
   researchRender();
 }
 
-function researchFlowLayout(trees, q, tag, prot) {
-  // DFS 访问序布局：x=depth 列、y=全局访问行 → 同层兄弟纵向并联、子树连续占行，天然无重叠。
-  const filtering = !!(q || tag || prot);
-  const cards = [], edges = [];
-  let row = 0, maxX = 0, maxY = 0;
-  const visit = (node, col) => {
-    if (filtering && !researchFilterMatch(node, q, tag, prot)) return -1; // 无匹配的子树整棵隐藏
-    const x = RES_FLOW.PAD + col * (RES_FLOW.CARD_W + RES_FLOW.COL_GAP);
-    const y = RES_FLOW.PAD + row * RES_FLOW.ROW_H;
-    const myRow = row++;
-    cards.push({ node, x, y, dim: filtering && !researchNodeMatch(node, q, tag, prot) });
-    maxX = Math.max(maxX, x + RES_FLOW.CARD_W);
-    maxY = Math.max(maxY, y + RES_FLOW.CARD_H);
-    const kids = (filtering || !researchState.collapsed.has(node.id)) ? (node.children || []) : [];
-    for (const k of kids) {
-      const childRow = visit(k, col + 1);
-      if (childRow < 0) continue;
-      edges.push({
-        x1: x + RES_FLOW.CARD_W,
-        y1: y + RES_FLOW.CARD_H / 2,
-        x2: RES_FLOW.PAD + (col + 1) * (RES_FLOW.CARD_W + RES_FLOW.COL_GAP),
-        y2: RES_FLOW.PAD + childRow * RES_FLOW.ROW_H + RES_FLOW.CARD_H / 2,
-        color: RES_FLOW_EDGE[node.node_type] || "#c3c8d4",
-      });
-    }
-    return myRow;
-  };
-  for (const root of trees) visit(root, 0);
-  return { cards, edges, width: maxX + RES_FLOW.PAD, height: maxY + RES_FLOW.PAD };
-}
-
-// 结论块按 tag 立场着色：支持/反驳/部分/不确定 → 语义色，其余（含无 tag）灰色
+// lineflow 重设计后，旧的横向流程图布局 researchFlowLayout + researchFlowCard 已删。
+// 旧 .res-flow-card / .res-flow-svg 样式在 style.css 中保留以兼容，但新代码不再生成。
+// 结论 stance 配色由 CSS .lf-stance--* 接管，lineflowNodeHtml 直接调 resStanceKey 取 key。
 function resStanceKey(tag) {
   const m = { 支持: "support", 反驳: "rebut", 部分: "partial", 不确定: "uncertain" };
   for (const t of String(tag || "").split(",").map(s => s.trim())) {
@@ -3586,32 +3553,6 @@ function resTagChip(t) {
   return c
     ? `<span class="res-tag-chip" style="background:${c.bg};color:${c.fg}">${esc(t)}</span>`
     : `<span class="res-tag-chip">${esc(t)}</span>`;
-}
-
-function researchFlowCard(node, x, y, dim) {
-  const hasKids = (node.children || []).length > 0;
-  const expanded = !researchState.collapsed.has(node.id);
-  const toggle = hasKids
-    ? `<button class="res-flow-collapse" onclick="event.stopPropagation();researchToggle(${node.id})" title="${expanded ? "折叠" : "展开"}">${expanded ? "▾" : "▸"}</button>`
-    : "";
-  const sel = researchState.selectedId === node.id ? " sel" : "";
-  const dimCls = dim ? " dim" : "";
-  const stance = node.node_type === "conclusion" ? " res-flow-conc-" + resStanceKey(node.tag) : "";
-  return `<div class="res-flow-card res-flow-${node.node_type}${stance}${sel}${dimCls}" style="left:${x}px;top:${y}px" onclick="researchSelect(${node.id})">
-    <div class="res-flow-top">
-      <span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>
-      ${node.exp_id ? `<span class="res-exp-ico" title="关联实验 #${node.exp_id}">📄</span>` : ""}
-      ${node.free_attach ? `<span class="res-free" title="自由挂载（逃生舱）">⛓</span>` : ""}
-      ${toggle}
-      <span class="res-flow-actions">
-        <button class="btn btn-sm" title="加子节点" onclick="event.stopPropagation();researchAddChild(${node.id})">＋</button>
-        <button class="btn btn-sm" title="编辑" onclick="event.stopPropagation();researchEdit(${node.id})">✎</button>
-        <button class="btn btn-sm btn-danger" title="删除（含子树）" onclick="event.stopPropagation();researchDelete(${node.id})">🗑</button>
-      </span>
-    </div>
-    <div class="res-flow-title">${esc(node.title)}</div>
-    <div class="res-flow-tags">${esc(node.tag || "")}</div>
-  </div>`;
 }
 
 async function researchSelect(id) {
