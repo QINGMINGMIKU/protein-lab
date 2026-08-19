@@ -523,6 +523,30 @@ except (TypeError, ValueError):
 assert {e["id"] for e in models.exp_list()} == _before, "raw 失败应回滚实验"
 print("21. 酶活存档加 raw 快照（全量落库 / 不可变 / 原子性）OK")
 
+# ── 22. 详情页兜底渲染：自由格式中文键可读 + kv 表 + 研究脉络挂载点 ──
+# 背景：MCP save_experiment 归档的自由格式实验（中文键、无 calc_type）走兜底分支；
+# Flask 3 默认 app.json.ensure_ascii=True 会把中文渲染成 \uXXXX 转义（"渲染失败"观感）。
+_e22 = services.create_experiment(
+    title="自由格式中文键", exp_type="其他",
+    params={"体系": "每孔 200 uL", "温度": 25},
+    results={"结论": "正常"},
+)
+_r22 = client.get(f"/experiments/{_e22['id']}")
+assert _r22.status_code == 200, _r22.status_code
+_h22 = _r22.get_data(as_text=True)
+assert "每孔 200 uL" in _h22, "中文参数值应以明文渲染（ensure_ascii=False）"
+assert "\\u4f53\\u7cfb" not in _h22, "中文不得渲染成 \\uXXXX 转义"
+assert "<th>体系</th>" in _h22, "自由格式参数应渲染键值表"
+assert f'data-exp-id="{_e22["id"]}"' in _h22, "详情页研究脉络块应带 data-exp-id 供 init() 挂载"
+# 22b. tojson 仍 HTML 安全（< > & 转义不受 ensure_ascii 开关影响）
+_e22b = services.create_experiment(
+    title="xss 探针", exp_type="其他",
+    params={"k": "<script>alert(1)</script>"}, results={},
+)
+_h22b = client.get(f"/experiments/{_e22b['id']}").get_data(as_text=True)
+assert "<script>alert(1)" not in _h22b, "参数值中的 HTML 不得原样输出"
+print("22. 详情页兜底渲染（中文可读 / kv 表 / data-exp-id / HTML 安全）OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")

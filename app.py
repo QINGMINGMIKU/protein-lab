@@ -29,6 +29,11 @@ app = Flask(__name__,
             template_folder=paths.resource_path("templates"),
             static_folder=paths.resource_path("static"))
 
+# 详情页原始 JSON 兜底用 tojson 渲染中文键值；Flask 3 默认 ensure_ascii=True
+# 会把中文全部转成 \uXXXX 转义，MCP 自由格式归档（中文键）完全不可读。
+# tojson 的 HTML 安全转义（< > & '）不受此开关影响。
+app.json.ensure_ascii = False
+
 
 # ── 静态资源版本号（缓存破坏）───────────────────────────────
 # 取 app.js / style.css 的修改时间戳做 ?v= 参数：改前端代码后浏览器自动拉新文件，

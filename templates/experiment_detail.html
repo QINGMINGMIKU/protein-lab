@@ -24,14 +24,14 @@
   </div>
 </div>
 
-<!-- v0.1.1 研究脉络：研究脉络区块由 showExpDetail 在 /experiments/<id> 页面动态渲染，
-     此模板页（/experiments/<id>/detail）只做 SSR 兜底（初始不显式 block）。 -->
+<!-- v0.1.1 研究脉络：列表页由 showExpDetail 动态渲染；
+     独立详情页（/experiments/<id>）由 app.js init() 读 data-exp-id 后调 loadResearchList。 -->
 {% if show_research_block | default(false) %}
 <div class="panel" style="margin-bottom:20px">
   <div class="info-grid">
     <dt>研究脉络</dt>
     <dd>
-      <div id="detailResearchList" style="display:inline">（加载中…）</div>
+      <div id="detailResearchList" data-exp-id="{{ exp.id }}" style="display:inline">（加载中…）</div>
       <button class="btn btn-sm btn-outline" onclick="attachGoalPrompt({{ exp.id }})" style="margin-left:8px">+ 关联到其他目标</button>
     </dd>
   </div>
@@ -293,14 +293,35 @@
 {# 兜底：仅当类型无法识别（或浓度/BLI 缺蛋白数据无法渲染表格）时才显示原始 JSON；酶活/Weblogo/AKTA/BLI 各自渲染，不在此列 #}
 {% set known = calc_type in ["concentration", "dilution", "enzyme", "weblogo", "akta", "bli_fit"] or exp.exp_type in ["AKTA", "BLI"] or (exp.exp_type == "浓度测定" and not proteins and (params.get("mw_da") or params.get("epsilon_red"))) %}
 {% if not known or (calc_type in ["concentration", "dilution"] and not proteins) %}
+{# 自由格式实验（多为 MCP save_experiment 归档，中文键）：键值表优先，原始 JSON 折叠保留 #}
+{% macro kv_table(data) %}
+<table class="calc-table">
+  <tbody>
+  {% for k, v in data.items() %}
+  <tr>
+    <th>{{ k }}</th>
+    <td>{% if v is string or v is number or v is boolean %}{{ v }}{% elif v is none %}-{% else %}<code style="font-size:12px;word-break:break-all">{{ v | tojson }}</code>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
   <div class="calc-card">
     <h2>实验参数</h2>
-    <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ params | tojson(indent=2) if params else "{}" }}</pre>
+    {% if params %}{{ kv_table(params) }}{% endif %}
+    <details style="margin-top:8px">
+      <summary style="font-size:12px;color:#888;cursor:pointer">原始 JSON</summary>
+      <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ params | tojson(indent=2) if params else "{}" }}</pre>
+    </details>
   </div>
   <div class="calc-card">
     <h2>实验结果</h2>
-    <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ results | tojson(indent=2) if results else "{}" }}</pre>
+    {% if results %}{{ kv_table(results) }}{% endif %}
+    <details style="margin-top:8px">
+      <summary style="font-size:12px;color:#888;cursor:pointer">原始 JSON</summary>
+      <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ results | tojson(indent=2) if results else "{}" }}</pre>
+    </details>
   </div>
 </div>
 {% endif %}

@@ -3894,5 +3894,10 @@ function init() {
   if (document.querySelector("#researchFlow")) {
     researchInit();
   }
+  // 独立实验详情页（/experiments/<id>）：渲染研究脉络关联（列表页走 showExpDetail）
+  const rl = document.getElementById("detailResearchList");
+  if (rl && rl.dataset.expId) {
+    loadResearchList(parseInt(rl.dataset.expId, 10));
+  }
 }
 init();
