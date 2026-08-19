@@ -1322,6 +1322,13 @@ function safeJson(s) {
   try { return JSON.parse(s); } catch (_) { return {}; }
 }
 
+// 取实验**最新**一条原始快照 id（_raw_ids 按 id 升序 = 创建序，最后一条=最近一次分析）。
+// 多次重挂/重分析后应载入最新状态（旧快照保留可复现，但计算入口看当前）。
+function latestRawId(exp) {
+  const raws = (exp && exp._raw_ids) || [];
+  return raws[raws.length - 1];
+}
+
 async function applyCopyAndSwitch() {
   if (!copyCache) { toast("请先选择实验", true); return; }
   const params = typeof copyCache.params === "string" ? JSON.parse(copyCache.params) : copyCache.params || {};
@@ -1392,7 +1399,7 @@ async function applyCopyAndSwitch() {
 
   if (isBliExp(copyCache)) {
     // 复制到 BLI 分析 Tab — 从实验原始快照重建会话（曲线数据在 experiment_raw，规则 #8 可复现）
-    const rid = (copyCache._raw_ids || [])[0];
+    const rid = latestRawId(copyCache);
     if (!rid) { toast("该实验无原始快照可复制", true); return; }
     try {
       const raw = await API.get(`/api/experiments/${copyCache.id}/raw/${rid}`);
@@ -1425,7 +1432,7 @@ async function applyCopyAndSwitch() {
 
   if (isAktaExp(copyCache)) {
     // 复制到 AKTA Tab — 从实验原始快照重建会话（曲线数据在 experiment_raw）
-    const rid = (copyCache._raw_ids || [])[0];
+    const rid = latestRawId(copyCache);
     if (!rid) { toast("该实验无原始快照可复制", true); return; }
     try {
       const raw = await API.get(`/api/experiments/${copyCache.id}/raw/${rid}`);
@@ -1481,6 +1488,17 @@ async function applyCopyAndSwitch() {
   }
   document.querySelector(".tab-btn[data-tab='conc']").click();
   toast("已加载蛋白列表，可修改 A280 后重新计算");
+}
+
+// 详情页「载入计算工具」深链：/calculator?load_exp=<id> → 把该实验载入对应计算 tab
+// （复用从实验复制的 applyCopyAndSwitch：BLI/AKTA 读最新 raw 快照重建会话，酶活/浓度读 params 重建）
+async function loadExpIntoCalc(expId) {
+  try {
+    const exp = await API.get(`/api/experiments/${expId}`);
+    if (!exp || exp.error) { toast("载入实验数据失败", true); return; }
+    copyCache = exp;
+    await applyCopyAndSwitch();
+  } catch (err) { toast(err.message || "载入实验数据失败", true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -3282,6 +3300,11 @@ function init() {
   if (document.querySelector("#bliTable") || document.querySelector("#bliProteinSearch")) {
     const dilSel = document.getElementById("dilUnitSel");
     if (dilSel) dilSel.value = dilUnit;
+  }
+  // 详情页「载入计算工具」深链：/calculator?load_exp=<id> → 恢复对应计算 tab 数据
+  const loadExpId = parseInt(new URLSearchParams(location.search).get("load_exp"), 10);
+  if (loadExpId && document.querySelector("#concTable")) {
+    loadExpIntoCalc(loadExpId);
   }
 }
 init();

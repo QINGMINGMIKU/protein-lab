@@ -489,6 +489,33 @@ _j23bad = client.post("/api/experiments/from-calculation", json={
     "calc_params": {}, "calc_result": {}, "exp_id": "abc"})
 assert _j23bad.status_code == 400, _j23bad.get_json()
 print("23. 数据重挂（resave 覆盖/追加/保留 + 端点 exp_id 分支）OK")
+
+# ── 24. 详情页「载入计算工具」入口 ──
+# 用户拍板：详情页删掉 raw 快照表状态，只留一个「已加载好对应数据的计算页面」入口。
+# 有分析数据（raw 快照 / 可重建 params）→ 显示按钮，跳 /calculator?load_exp=<id>；
+# 纯记录实验不显示；raw 快照表块已整体移除。
+_e24b = services.create_experiment(
+    title="BLI 载入", exp_type="BLI",
+    params={"calc_type": "bli_fit", "source": "a.csv"},
+    results={"samples": {"WT": {"kd": 100}}},
+    raw_snapshots=[("bli_curves", {"analysis_version": "0.0.8", "curves": []})],
+)
+_h24b = client.get(f"/experiments/{_e24b['id']}").get_data(as_text=True)
+assert f'href="/calculator?load_exp={_e24b["id"]}"' in _h24b, "BLI 实验应显示载入计算工具按钮"
+assert "原始数据快照" not in _h24b, "raw 快照表应已从详情页移除"
+_e24n = services.create_experiment(title="纯记录", exp_type="其他",
+                                   params={"k": "v"}, results={})
+_h24n = client.get(f"/experiments/{_e24n['id']}").get_data(as_text=True)
+assert "载入计算工具" not in _h24n, "纯记录实验不应显示载入按钮"
+_p24 = _seed_protein("载入浓度")
+_e24c = services.create_experiment(
+    title="浓度载入", exp_type="浓度测定", protein_ids=[_p24],
+    params={"calc_type": "concentration",
+            "proteins": [{"id": _p24, "name": "载入浓度", "a280": 0.5}]},
+    results={})
+_h24c = client.get(f"/experiments/{_e24c['id']}").get_data(as_text=True)
+assert f'href="/calculator?load_exp={_e24c["id"]}"' in _h24c, "浓度实验应显示载入按钮"
+print("24. 详情页载入计算工具入口（按钮显隐 / raw 表移除）OK")
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")
