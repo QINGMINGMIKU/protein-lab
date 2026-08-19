@@ -5,10 +5,18 @@
 {% set results = exp.results if exp.results is mapping else {} %}
 {% set calc_type = params.get("calc_type", "") %}
 {% set proteins = params.get("proteins", []) %}
+{# 可载入计算工具：分析型实验（有分析 raw 快照，或 params 可重建）→ 显示「载入计算工具」入口，
+   点击跳 /calculator?load_exp=<id>，由 calculator 页消费并自动恢复对应 tab 数据。 #}
+{% set has_calc_raw = raws and raws|selectattr("data_type","in",["enzyme_traces","bli_curves","akta_traces"])|list %}
+{% set has_calc_params = (calc_type in ["concentration","dilution"] and proteins) or (calc_type == "enzyme" and params.get("wells")) %}
+{% set loadable = has_calc_raw or has_calc_params %}
 
 <div class="page-header">
   <h1>{{ exp.title }}</h1>
   <div style="display:flex;gap:8px">
+    {% if loadable %}
+    <a class="btn btn-primary" href="/calculator?load_exp={{ exp.id }}">🧮 载入计算工具</a>
+    {% endif %}
     <a class="btn btn-outline" href="/api/experiments/{{ exp.id }}/export">📥 导出 Excel</a>
     <button class="btn btn-outline" onclick="editExpDetail({{ exp.id }})">✏️ 编辑</button>
     <button class="btn btn-sm btn-danger" onclick="deleteExpDetail({{ exp.id }})">🗑 删除</button>
@@ -370,28 +378,6 @@
 {% endif %}
 
 <a href="/experiments" style="display:inline-block;margin-top:8px;color:#888;font-size:14px">← 返回实验列表</a>
-
-<!-- ═══════════════════════════════════════════════ -->
-<!--  原始数据快照（experiment_raw，只写一次）        -->
-<!-- ═══════════════════════════════════════════════ -->
-{% if raws %}
-<div class="calc-card" style="margin-bottom:20px">
-  <h2>原始数据快照 <span style="font-size:12px;color:#888;font-weight:400">（experiment_raw，只写一次、从不覆盖；删实验不删快照）</span></h2>
-  <table class="calc-table">
-    <thead><tr><th>#</th><th>数据类型</th><th>记录时间</th><th>分析版本</th></tr></thead>
-    <tbody>
-    {% for r in raws %}
-      <tr>
-        <td>{{ r.id }}</td>
-        <td><code>{{ r.data_type }}</code></td>
-        <td>{{ r.created_at }}</td>
-        <td>{{ ("v" ~ r.analysis_version) if r.analysis_version else "-" }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
 
 <script>
 // 下载详情页图片，文件名用实验标题（已保存时通常即自动命名）
