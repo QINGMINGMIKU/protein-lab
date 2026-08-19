@@ -564,6 +564,82 @@ assert "box-shadow:none" in _h22d, "嵌套 dict 应渲染子表格"
 assert "1YPI_WT" in _h22d, "嵌套子表应含值"
 print("22. 详情页兜底渲染（中文可读 / kv 表 / data-exp-id / HTML 安全 / AKTA 无峰表 / 嵌套子表）OK")
 
+# ── 23. 数据重挂（services.resave_experiment + 端点 exp_id 分支）──
+# 背景：三个分析流（酶活/BLI/AKTA）存档可选「挂载到已有同类实验」（前端 promptExpMount）。
+# 汇总/占位实验从原始数据重新分析后把结构化结果挂回去——覆盖 params/results + 追加 raw 快照，
+# 实验身份/日期/研究树节点不变；protein 绑定缺失时保留（不能误清空）。
+_g23 = models.research_node_create(node_type="goal", title="重挂目标", tag="")
+_p23 = _seed_protein("重挂蛋白")
+_e23 = services.create_experiment(
+    title="酶活占位", exp_type="酶活测定", protein_ids=[_p23],
+    params={"calc_type": "enzyme", "meta": {"sample": "old"}},
+    results={"wells": {"A1": {"slope": 0.01}}},
+    notes="原备注", goal_id=_g23,
+)
+assert _e23["goal_node_id"], "占位实验应已挂研究节点"
+# 23a. resave 覆盖 params/results、追加 raw、身份/日期/notes/蛋白绑定/研究节点不变
+_r23 = services.resave_experiment(
+    _e23["id"],
+    params={"calc_type": "enzyme", "meta": {"sample": "new"}},
+    results={"wells": {"A1": {"slope": 0.5}}},
+    raw_snapshots=[("enzyme_traces", {"analysis_version": "v9",
+                                      "wells": {"A1": {"slope": 0.5}}})],
+)
+assert _r23["id"] == _e23["id"] and _r23["title"] == "酶活占位", "重挂不改实验身份/标题"
+assert _r23["exp_type"] == "酶活测定" and _r23["date"] == _e23["date"], "重挂不改类型/日期"
+assert _r23["params"]["meta"]["sample"] == "new", "重挂应覆盖 params"
+assert _r23["results"]["wells"]["A1"]["slope"] == 0.5, "重挂应覆盖 results"
+assert _r23["notes"] == "原备注", "notes 未传时保留"
+assert _r23["protein_ids"] == [_p23], "protein_ids 未传时应保留原绑定（不能清空）"
+_rawn23 = [n for n in models.research_nodes_all() if n.get("exp_id") == _e23["id"]]
+assert len(_rawn23) == 1 and _rawn23[0]["id"] == _e23["goal_node_id"], \
+    f"研究节点应仍关联同一实验: {_rawn23}"
+_rawn23raw = models.exp_raw_list(_e23["id"])
+assert len(_rawn23raw) == 1 and _rawn23raw[0]["data_type"] == "enzyme_traces", _rawn23raw
+assert _rawn23raw[0]["id"] == _r23["_raw_ids"][0], "返回应附 _raw_ids"
+# 23b. 追加 raw 只写不更：再重挂一次 → 2 行，首行 payload 不变
+_r23b = services.resave_experiment(
+    _e23["id"], params={"calc_type": "enzyme"}, results={},
+    raw_snapshots=[("enzyme_traces", {"analysis_version": "v10"})])
+_rawn23b = models.exp_raw_list(_e23["id"])
+assert len(_rawn23b) == 2, f"追加 raw 应新行: {_rawn23b}"
+assert models.exp_raw_get(_rawn23raw[0]["id"])["payload"]["analysis_version"] == "v9", "旧 raw 不可变"
+assert _r23b["_raw_ids"] == [x["id"] for x in _rawn23b], "_raw_ids 应含全部快照"
+# 23c. notes / protein_ids 显式传时更新（与缺失=保留区分）
+_r23c = services.resave_experiment(_e23["id"], params={}, results={},
+                                   notes="新备注", protein_ids=[])
+assert _r23c["notes"] == "新备注", "notes 显式传时应更新"
+assert _r23c["protein_ids"] == [], "protein_ids 显式传 [] 时应换绑"
+# 23d. 不存在的实验 → ValueError
+try:
+    services.resave_experiment(99999, params={}, results={})
+    raise AssertionError("resave 不存在的实验应抛 ValueError")
+except ValueError as _e23err:
+    assert "不存在" in str(_e23err)
+# 23e. 端点级：from-calculation 带 exp_id → 200 重挂；不带 → 201 新建；非法 → 400
+_api23 = services.create_experiment(
+    title="端点占位", exp_type="酶活测定",
+    params={"calc_type": "enzyme", "meta": {"sample": "占位"}}, results={})
+_j23r = client.post("/api/experiments/from-calculation", json={
+    "title": "忽略", "exp_type": "酶活测定", "calc_type": "enzyme",
+    "calc_params": {"meta": {"sample": "重算"}},
+    "calc_result": {"wells": {"A1": {"slope": 2.0}}},
+    "exp_id": _api23["id"],
+})
+assert _j23r.status_code == 200, (_j23r.status_code, _j23r.get_json())
+_j23 = _j23r.get_json()
+assert _j23["id"] == _api23["id"] and _j23["title"] == "端点占位", "端点重挂保持身份与标题"
+assert _j23["params"]["meta"]["sample"] == "重算", "端点重挂应覆盖 params"
+_j23new = client.post("/api/experiments/from-calculation", json={
+    "title": "新建实验", "exp_type": "酶活测定", "calc_type": "enzyme",
+    "calc_params": {"meta": {"sample": "a"}}, "calc_result": {}})
+assert _j23new.status_code == 201, (_j23new.status_code, _j23new.get_json())
+_j23bad = client.post("/api/experiments/from-calculation", json={
+    "title": "x", "exp_type": "酶活测定", "calc_type": "enzyme",
+    "calc_params": {}, "calc_result": {}, "exp_id": "abc"})
+assert _j23bad.status_code == 400, _j23bad.get_json()
+print("23. 数据重挂（resave 覆盖/追加/保留/节点不变 + 端点 exp_id 分支）OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")
