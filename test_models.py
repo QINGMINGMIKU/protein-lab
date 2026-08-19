@@ -536,7 +536,7 @@ assert _r22.status_code == 200, _r22.status_code
 _h22 = _r22.get_data(as_text=True)
 assert "每孔 200 uL" in _h22, "中文参数值应以明文渲染（ensure_ascii=False）"
 assert "\\u4f53\\u7cfb" not in _h22, "中文不得渲染成 \\uXXXX 转义"
-assert "<th>体系</th>" in _h22, "自由格式参数应渲染键值表"
+assert "<th style=\"vertical-align:top\">体系</th>" in _h22, "自由格式参数应渲染键值表"
 assert f'data-exp-id="{_e22["id"]}"' in _h22, "详情页研究脉络块应带 data-exp-id 供 init() 挂载"
 # 22b. tojson 仍 HTML 安全（< > & 转义不受 ensure_ascii 开关影响）
 _e22b = services.create_experiment(
@@ -545,7 +545,24 @@ _e22b = services.create_experiment(
 )
 _h22b = client.get(f"/experiments/{_e22b['id']}").get_data(as_text=True)
 assert "<script>alert(1)" not in _h22b, "参数值中的 HTML 不得原样输出"
-print("22. 详情页兜底渲染（中文可读 / kv 表 / data-exp-id / HTML 安全）OK")
+# 22c. exp_type=AKTA 但 results 无 peaks（汇总型实验）不得整页空白——known 门要真有数据才算已渲染
+_e22c = services.create_experiment(
+    title="AKTA 汇总无峰表", exp_type="AKTA",
+    params={"峰位": "主峰 23 mL", "结论": "表达量关联"},
+    results={"结论": "wt 较高"},
+)
+_h22c = client.get(f"/experiments/{_e22c['id']}").get_data(as_text=True)
+assert "实验参数</h2>" in _h22c, "AKTA 汇总实验无 peaks 时应落入 kv 区（known 门修复），当前整页空白"
+assert "主峰 23 mL" in _h22c, "kv 区应展示参数值"
+# 22d. 嵌套 dict 渲染成子表格，不是一行巨型 JSON
+_e22d = services.create_experiment(
+    title="嵌套参数", exp_type="其他",
+    params={"蛋白": {"id": 1, "name": "1YPI_WT", "mw": 53309.8}}, results={},
+)
+_h22d = client.get(f"/experiments/{_e22d['id']}").get_data(as_text=True)
+assert "box-shadow:none" in _h22d, "嵌套 dict 应渲染子表格"
+assert "1YPI_WT" in _h22d, "嵌套子表应含值"
+print("22. 详情页兜底渲染（中文可读 / kv 表 / data-exp-id / HTML 安全 / AKTA 无峰表 / 嵌套子表）OK")
 
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)

@@ -3862,7 +3862,14 @@ async function researchLoad() {
   researchFillProteinFilter();
   researchRender();
 }
-function researchInit() { researchLoad().catch(() => {}); }
+async function researchInit() {
+  try {
+    await researchLoad();
+    // 深链支持：/research?root=<goalId>（实验详情页研究脉络链接）→ 定位到对应目标树
+    const rid = parseInt(new URLSearchParams(location.search).get("root"), 10);
+    if (rid && researchFindNode(rid)) researchOpenRoot(rid);
+  } catch (_) {}
+}
 
 // ═════════════════════════════════════════════════════
 //  Init
