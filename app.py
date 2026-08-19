@@ -410,6 +410,15 @@ def api_exp_create():
     return jsonify(e), 201
 
 
+def _coerce_exp_id(v) -> int | None:
+    """可选重挂目标实验 id（三个分析 save 共用）。None / '' / 0 = 新建；非法返 400。"""
+    if v in (None, "", 0, "0"):
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"exp_id 应为整数，收到 {v!r}")
+
 @app.route("/api/experiments/from-calculation", methods=["POST"])
 def api_exp_from_calc():
     """从计算工具一键保存为实验"""
@@ -433,6 +442,20 @@ def api_exp_from_calc():
     if raw_snapshots:
         raw_snapshots = [(dt, _json_safe(p)) for dt, p in raw_snapshots]
     try:
+        target_id = _coerce_exp_id(data.get("exp_id"))
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    try:
+        if target_id is not None:
+            # 数据重挂：覆盖已有实验的 params/results + 追加 raw 快照（实验身份/研究节点不变）
+            e = services.resave_experiment(
+                target_id,
+                params=params, results=_json_safe(calc_result),
+                protein_ids=(data.get("protein_ids") or None),
+                notes=data.get("notes"),
+                raw_snapshots=raw_snapshots,
+            )
+            return jsonify(e), 200
         e = services.create_experiment(
             title=data.get("title", ""),
             exp_type=data.get("exp_type", ""),
@@ -1490,6 +1513,20 @@ def api_bli_save():
         "curves": list(all_curves),
     })
     try:
+        target_id = _coerce_exp_id(body.get("exp_id"))
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    try:
+        if target_id is not None:
+            exp = services.resave_experiment(
+                target_id,
+                params=params,
+                results=_json_safe(results),
+                protein_ids=(body.get("protein_ids") or None),
+                notes=body.get("notes"),
+                raw_snapshots=[("bli_curves", raw_payload)],
+            )
+            return jsonify(exp), 200
         exp = services.create_experiment(
             title=body.get("title", ""),
             exp_type="BLI",
@@ -2008,6 +2045,20 @@ def api_akta_save():
         "meta": sess.get("meta", {}),
     })
     try:
+        target_id = _coerce_exp_id(body.get("exp_id"))
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    try:
+        if target_id is not None:
+            exp = services.resave_experiment(
+                target_id,
+                params=params,
+                results=_json_safe(results),
+                protein_ids=(body.get("protein_ids") or None),
+                notes=body.get("notes"),
+                raw_snapshots=[("akta_traces", raw_payload)],
+            )
+            return jsonify(exp), 200
         exp = services.create_experiment(
             title=_akta_auto_title(body.get("title", ""), body.get("source", "")),
             exp_type="AKTA",

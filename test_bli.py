@@ -450,6 +450,21 @@ raw1_after = models.exp_raw_get(raws[0]["id"])
 assert raw1_after["payload"]["curves"] == raw1["payload"]["curves"], "raw 不可变（只插不更）"
 print(f"bli save OK: exp#{saved['id']} raw#{raws[0]['id']} version={BLI_ANALYSIS_VERSION}")
 
+# 7d2. 数据重挂：带 exp_id → 200，覆盖 results + 追加 raw（只写不更），实验身份不变
+_mresp = client.post("/api/bli/save", json={
+    "session_id": sid, "exp_id": saved["id"], "title": "忽略",
+    "t_assoc": 100, "t_dissoc": 400})
+assert _mresp.status_code == 200, (_mresp.status_code, _mresp.get_json())
+_mount = _mresp.get_json()
+assert _mount["id"] == saved["id"] and _mount["title"] == "BLI API 测试", \
+    f"重挂不改实验身份/标题: {_mount['title']}"
+assert _mount["results"].get("BLI_ANALYSIS_VERSION") == BLI_ANALYSIS_VERSION
+_rawn_m = models.exp_raw_list(saved["id"])
+assert len(_rawn_m) == 2, f"重挂应追加 raw 新行: {_rawn_m}"
+assert models.exp_raw_get(raws[0]["id"])["payload"]["curves"] == raw1["payload"]["curves"], \
+    "重挂后旧 raw 不可变"
+print(f"bli save 重挂 OK: exp#{saved['id']} raw 1→2")
+
 # 7e. 会话失效：不存在的 session_id → 400
 resp = client.post("/api/bli/plot", json={"session_id": "nope"})
 assert resp.status_code == 400

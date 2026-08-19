@@ -250,6 +250,21 @@ raw1_after = models.exp_raw_get(raws[0]["id"])
 assert raw1_after["payload"]["channel"] == raw1["payload"]["channel"], "raw 不可变"
 print(f"akta save OK: exp#{saved['id']} raw#{raws[0]['id']} version={AKTA_ANALYSIS_VERSION}")
 
+# 5d3. 数据重挂：带 exp_id → 200，覆盖 results + 追加 raw（只写不更），实验身份不变
+_mresp = client.post("/api/akta/save", json={
+    "session_id": sid, "exp_id": saved["id"], "title": "忽略", "channel": "UV",
+    "min_height": 5, "smooth_window": 11})
+assert _mresp.status_code == 200, (_mresp.status_code, _mresp.get_json())
+_mount = _mresp.get_json()
+assert _mount["id"] == saved["id"] and _mount["title"] == "AKTA API 测试", \
+    f"重挂不改实验身份/标题: {_mount['title']}"
+assert _mount["results"].get("AKTA_ANALYSIS_VERSION") == AKTA_ANALYSIS_VERSION
+_rawn_m = models.exp_raw_list(saved["id"])
+assert len(_rawn_m) == 2, f"重挂应追加 raw 新行: {_rawn_m}"
+assert models.exp_raw_get(raws[0]["id"])["payload"]["channel"] == raw1["payload"]["channel"], \
+    "重挂后旧 raw 不可变"
+print(f"akta save 重挂 OK: exp#{saved['id']} raw 1→2")
+
 # 5d2. 自动命名：title 留空时用 zip 包名（去 .zip 扩展名，含日期/描述部分保留）
 resp = client.post("/api/akta/save", json={
     "session_id": sid, "channel": "UV", "min_height": 5, "smooth_window": 11,

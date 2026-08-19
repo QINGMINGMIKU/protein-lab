@@ -117,3 +117,26 @@ def create_experiment(title: str, exp_type: str, protein_ids: list[int] = None,
             date=date, params=params, results=results, notes=notes,
         )
     return models.exp_get(eid)
+
+def resave_experiment(exp_id: int, params: dict, results: dict,
+                      raw_snapshots: list[tuple[str, object]] = None,
+                      protein_ids: list[int] = None, notes: str = None) -> dict:
+    """把分析结果**重挂**到已有实验：覆盖 params/results、追加 raw 快照（只写不更）。
+
+    实验身份 / 日期 / 研究树节点保持原样——供「从原始数据重新分析后，把结构化结果
+    挂回汇总/占位实验」让死记录活过来（数据治理后 MCP 自由格式归档重挂 wells/曲线）。
+    与 create_experiment 不同：不自动命名、不改 exp_type/date、不建研究节点。
+    返回 exp dict（附 _raw_ids）。"""
+    e = models.exp_get(exp_id)
+    if not e:
+        raise ValueError(f"实验 {exp_id} 不存在")
+    params = _enrich_protein_snapshot(params or {}, results or {}, protein_ids)
+    kwargs = {"params": params, "results": results or {}}
+    if notes is not None:
+        kwargs["notes"] = notes
+    models.exp_update(exp_id, protein_ids=protein_ids, **kwargs)
+    for dt, payload in (raw_snapshots or []):
+        models.exp_save_raw(exp_id, dt, payload)
+    out = models.exp_get(exp_id)
+    out["_raw_ids"] = [r["id"] for r in models.exp_raw_list(exp_id)]
+    return out

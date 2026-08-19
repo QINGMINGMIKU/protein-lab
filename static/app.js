@@ -1543,6 +1543,29 @@ function closeExpModal() {
   document.querySelectorAll("#proteinCheckboxes input[type=checkbox]").forEach(cb => cb.checked = false);
 }
 
+// 公共：三个分析存档流（酶活/BLI/AKTA）复用：弹「保存为新建，还是挂载到已有同类实验？」
+// 默认 0 = 新建（当前行为）；选 1-N = 重挂到已有实验（覆盖结构化结果 + 追加原始快照，
+// 实验身份 / 日期 / 研究树节点保持原样）。返回 {exp_id} / {}（新建）/ null（取消=不保存）
+async function promptExpMount(expType) {
+  let list = [];
+  try { list = await API.get(`/api/experiments?type=${encodeURIComponent(expType)}&limit=50`); }
+  catch (_) { return {}; }
+  const lines = ["0. (新建实验 — 默认)"];
+  list.forEach((e, i) => {
+    const t = e.title || `实验 #${e.id}`;
+    lines.push(`${i + 1}. [${e.id}] ${t}${e.date ? "  ·  " + e.date : ""}`);
+  });
+  if (!list.length) lines.push("", "（暂无同类实验可挂载）");
+  lines.push("", "选 1-N 挂到已有实验（研究脉络节点不变），回车新建");
+  const ans = prompt(`保存方式？实验类型「${expType}」\n\n` + lines.join("\n"), "0");
+  if (ans === null) return null;  // 取消保存
+  const t = ans.trim();
+  if (!t || t === "0") return {};
+  const n = parseInt(t, 10);
+  if (!isNaN(n) && n >= 1 && n <= list.length) return { exp_id: list[n - 1].id };
+  return {};
+}
+
 async function saveExperiment(e) {
   e.preventDefault();
   const form = document.getElementById("expForm");
@@ -2114,9 +2137,14 @@ async function downloadEnzymePlot() {
 
 async function enzymeSaveExp() {
   if (!enzymeData) { toast("请先上传数据", true); return; }
-  const autoName = await getAutoName("酶活测定");
-  const title = prompt("实验名称:", autoName || enzymeData.meta.sample || "酶活测定");
-  if (!title) return;
+  const mount = await promptExpMount("酶活测定");
+  if (mount === null) { toast("已取消保存"); return; }
+  let title = "";
+  if (!mount.exp_id) {
+    const autoName = await getAutoName("酶活测定");
+    title = prompt("实验名称:", autoName || enzymeData.meta.sample || "酶活测定");
+    if (!title) return;
+  }
 
   const proteinIds = new Set();
   const wells = {};
@@ -2169,8 +2197,9 @@ async function enzymeSaveExp() {
             ? [enzymeTimePoints[enzymeTimeLo], enzymeTimePoints[enzymeTimeHi]] : null,
         },
       }],
+      ...mount,
     });
-    toast("已保存为实验记录");
+    toast(mount.exp_id ? "已重挂到实验 #" + mount.exp_id + "（追加原始快照）" : "已保存为实验记录");
   } catch (err) { toast(err.message, true); }
 }
 
@@ -2864,17 +2893,24 @@ function renderBliKd(sample, res) {
 
 async function bliSaveExp() {
   if (!bliSession) { toast("请先上传数据", true); return; }
-  const autoName = await getAutoName("BLI");
-  const title = prompt("实验名称:", autoName || "BLI 分析");
-  if (!title) return;
+  const mount = await promptExpMount("BLI");
+  if (mount === null) { toast("已取消保存"); return; }
+  let title = "";
+  if (!mount.exp_id) {
+    const autoName = await getAutoName("BLI");
+    title = prompt("实验名称:", autoName || "BLI 分析");
+    if (!title) return;
+  }
   try {
     await API.post("/api/bli/save", {
       ...bliParams(),
       title,
       date: todayLocal(),
       source: document.getElementById("bliFile").files[0]?.name || "",
+      ...mount,
     });
-    toast("已保存为实验记录（含原始曲线快照）");
+    toast(mount.exp_id ? `已重挂到实验 #${mount.exp_id}（追加原始曲线快照）`
+      : "已保存为实验记录（含原始曲线快照）");
   } catch (err) { toast(err.message, true); }
 }
 
@@ -3195,19 +3231,26 @@ async function aktaExport() {
 async function aktaSaveExp() {
   const run = aktaRuns[aktaCurrentRun];
   if (!run || run.error || !run.channel) { toast("请先选择文件/通道", true); return; }
-  const autoName = await getAutoName("AKTA");
-  // 默认名优先用 zip 包名（去 .zip 扩展名），其次系统自动命名
-  const zipBase = (run.name || "").replace(/\.zip$/i, "");
-  const title = prompt("实验名称:", zipBase || autoName || "AKTA 峰图");
-  if (!title) return;
+  const mount = await promptExpMount("AKTA");
+  if (mount === null) { toast("已取消保存"); return; }
+  let title = "";
+  if (!mount.exp_id) {
+    const autoName = await getAutoName("AKTA");
+    // 默认名优先用 zip 包名（去 .zip 扩展名），其次系统自动命名
+    const zipBase = (run.name || "").replace(/\.zip$/i, "");
+    title = prompt("实验名称:", zipBase || autoName || "AKTA 峰图");
+    if (!title) return;
+  }
   try {
     await API.post("/api/akta/save", {
       ...aktaParams(run),
       title,
       date: todayLocal(),
       source: run.name || "",
+      ...mount,
     });
-    toast("已保存为实验记录（含原始曲线快照）");
+    toast(mount.exp_id ? `已重挂到实验 #${mount.exp_id}（追加原始曲线快照）`
+      : "已保存为实验记录（含原始曲线快照）");
   } catch (err) { toast(err.message, true); }
 }
 
