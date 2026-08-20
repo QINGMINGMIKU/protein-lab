@@ -33,7 +33,7 @@ jobs:
       - name: Run tests
         env:
           MPLBACKEND: Agg
-        run: python test_models.py && python test_bli.py && python test_akta.py
+        run: python test_models.py && python test_bli.py && python test_akta.py && python test_research.py && python test_ui.py
 
       - name: Build with PyInstaller
         run: pyinstaller protein_lab.spec --noconfirm

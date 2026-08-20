@@ -12,8 +12,9 @@ from paths import app_base_dir, resource_path
 def find_cjk_font() -> str | None:
     """返回第一个可用的 CJK 字体路径，找不到返回 None。"""
     candidates = [
-        resource_path("fonts/NotoSansSC-Regular.otf"),          # 打包的 Noto（dev+EXE 都有）
-        os.path.join(app_base_dir(), "..", "fonts", "simhei.ttf"),  # 旧 dev 回退（跨工作区）
+        resource_path("static/fonts/NotoSansSC-Regular.otf"),  # web + matplotlib
+        resource_path("fonts/NotoSansSC-Regular.otf"),          # legacy pack path
+        os.path.join(app_base_dir(), "..", "fonts", "simhei.ttf"),
         "C:/Windows/Fonts/simhei.ttf",                          # Windows 系统字体
         "C:/Windows/Fonts/msyh.ttc",
         "/System/Library/Fonts/PingFang.ttc",                   # macOS 系统字体
@@ -30,7 +31,8 @@ def find_cjk_font_bold() -> str | None:
     400 并打印 "Failed to find font weight bold" 告警。有则注册后粗体真正渲染。
     """
     candidates = [
-        resource_path("fonts/NotoSansSC-Bold.otf"),             # 打包的 Noto Bold（可选）
+        resource_path("static/fonts/NotoSansSC-Bold.otf"),
+        resource_path("fonts/NotoSansSC-Bold.otf"),
         "C:/Windows/Fonts/msyhbd.ttc",                          # 系统 YaHei Bold
     ]
     return next((p for p in candidates if p and os.path.exists(p)), None)

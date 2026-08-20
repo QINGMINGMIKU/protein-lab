@@ -13,59 +13,61 @@
 
 <div class="page-header">
   <h1>{{ exp.title }}</h1>
-  <div style="display:flex;gap:8px">
+  <div class="page-actions">
     {% if loadable %}
-    <a class="btn btn-primary" href="/calculator?load_exp={{ exp.id }}">🧮 载入计算工具</a>
+    <a class="btn btn-primary" href="/calculator?load_exp={{ exp.id }}"><span data-i18n="detail.load_tool">Load into workbench</span></a>
     {% endif %}
-    <a class="btn btn-outline" href="/api/experiments/{{ exp.id }}/export">📥 导出 Excel</a>
-    <button class="btn btn-outline" onclick="editExpDetail({{ exp.id }})">✏️ 编辑</button>
-    <button class="btn btn-sm btn-danger" onclick="deleteExpDetail({{ exp.id }})">🗑 删除</button>
+    <a class="btn btn-outline" href="/api/experiments/{{ exp.id }}/export"><span data-i18n="detail.export_xlsx">Export Excel</span></a>
+    <button class="btn btn-outline" onclick="editExpDetail({{ exp.id }})"><span data-i18n="detail.edit">Edit</span></button>
+    <button class="btn btn-sm btn-danger" onclick="deleteExpDetail({{ exp.id }})"><span data-i18n="detail.delete">Delete</span></button>
   </div>
 </div>
 
-<div class="panel" style="margin-bottom:20px">
+<section class="detail-section panel" style="margin-bottom:20px">
+  <h2 data-i18n="detail.summary">Summary</h2>
   <div class="info-grid">
-    <dt>类型</dt><dd><span class="badge" id="detailExpType">{{ exp.exp_type }}</span></dd>
-    <dt>日期</dt><dd id="detailExpDate">{{ exp.date or "-" }}</dd>
-    <dt>关联蛋白</dt><dd>{{ exp.protein_names or "无" }}</dd>
-    <dt>备注</dt><dd id="detailExpNotes">{{ exp.notes or "-" }}</dd>
+    <dt data-i18n="detail.type">Type</dt><dd><span class="badge" id="detailExpType">{{ exp.exp_type }}</span></dd>
+    <dt data-i18n="detail.date">Date</dt><dd id="detailExpDate">{{ exp.date or "-" }}</dd>
+    <dt data-i18n="detail.proteins">Proteins</dt><dd>{{ exp.protein_names or "-" }}</dd>
+    <dt data-i18n="detail.notes">Notes</dt><dd id="detailExpNotes">{{ exp.notes or "-" }}</dd>
   </div>
-</div>
+</section>
 
 <!-- v0.1.1 研究脉络：列表页由 showExpDetail 动态渲染；
      独立详情页（/experiments/<id>）由 app.js init() 读 data-exp-id 后调 loadResearchList。 -->
 {% if show_research_block | default(false) %}
-<div class="panel" style="margin-bottom:20px">
+<section class="detail-section panel" style="margin-bottom:20px">
+  <h2 data-i18n="detail.research">Research Trace</h2>
   <div class="info-grid">
-    <dt>研究脉络</dt>
+    <dt data-i18n="detail.research">Research Trace</dt>
     <dd>
-      <div id="detailResearchList" data-exp-id="{{ exp.id }}" style="display:inline">（加载中…）</div>
-      <button class="btn btn-sm btn-outline" onclick="attachGoalPrompt({{ exp.id }})" style="margin-left:8px">+ 关联到其他目标</button>
+      <div id="detailResearchList" data-exp-id="{{ exp.id }}" style="display:inline"></div>
+      <button class="btn btn-sm btn-outline" onclick="attachGoalPrompt({{ exp.id }})" style="margin-left:8px" data-i18n="detail.attach_goal">Attach to another goal</button>
     </dd>
   </div>
-</div>
+</section>
 {% endif %}
 
 <!-- 编辑实验弹窗：替换原先依赖 prompt() 的改标题（prompt 在部分环境被拦截会静默失效） -->
 <div id="editModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>编辑实验</h3>
+      <h3 data-i18n="detail.edit_title">Edit experiment</h3>
       <button class="btn btn-sm btn-outline" onclick="closeEditModal()">✕</button>
     </div>
-    <label>标题 <input type="text" id="editTitle" maxlength="200"></label>
+    <label><span data-i18n="archive.field_title">Title</span> <input type="text" id="editTitle" maxlength="200"></label>
     <div class="form-row">
-      <label>类型
+      <label><span data-i18n="archive.field_type">Type</span>
         <select id="editType">
           {% for t in exp_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
         </select>
       </label>
-      <label>日期 <input type="date" id="editDate"></label>
+      <label><span data-i18n="archive.field_date">Date</span> <input type="date" id="editDate"></label>
     </div>
-    <label>备注 <textarea id="editNotes" rows="3"></textarea></label>
+    <label><span data-i18n="archive.notes">Notes</span> <textarea id="editNotes" rows="3"></textarea></label>
     <div class="form-actions">
-      <button class="btn btn-outline" onclick="closeEditModal()">取消</button>
-      <button class="btn btn-primary" onclick="saveEditModal()">保存</button>
+      <button class="btn btn-outline" onclick="closeEditModal()" data-i18n="common.cancel">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditModal()" data-i18n="common.save">Save</button>
     </div>
   </div>
 </div>
@@ -75,13 +77,13 @@
 <!-- ═══════════════════════════════════════════════ -->
 {% if calc_type == "concentration" and proteins %}
 <div class="calc-card" style="margin-bottom:20px">
-  <h2>浓度计算</h2>
+  <h2 data-i18n="detail.conc_title">Concentration</h2>
   <div class="table-scroll" style="margin-top:12px">
     <table class="calc-table">
       <thead><tr>
-        <th>蛋白</th><th>MW (Da)</th><th>ε</th><th>Abs 0.1%</th>
-        <th>A₂₈₀</th><th class="col-result">浓度 (μM)</th><th class="col-result">浓度 (mg/mL)</th>
-        <th>目标浓度 (μM)</th><th>目标体积 (μL)</th><th class="col-result">取母液 (μL)</th><th class="col-result">加缓冲液 (μL)</th>
+        <th data-i18n="workbench.col_protein">Protein</th><th data-i18n="workbench.col_mw">MW (Da)</th><th>ε</th><th data-i18n="workbench.col_abs">Abs 0.1%</th>
+        <th data-i18n="workbench.col_a280">A₂₈₀</th><th class="col-result" data-i18n="workbench.col_conc">Concentration</th><th class="col-result" data-i18n="workbench.col_conc">Concentration</th>
+        <th data-i18n="workbench.col_target_c">Target concentration</th><th data-i18n="workbench.col_target_v">Target volume (μL)</th><th class="col-result" data-i18n="workbench.col_stock">Take stock (μL)</th><th class="col-result" data-i18n="workbench.col_buffer">Add buffer (μL)</th>
       </tr></thead>
       <tbody>
       {% for p in proteins %}
@@ -107,12 +109,12 @@
 <!-- 旧格式（v0.0.x）单蛋白 A280 浓度：无 calc_type/proteins，results 为 measurements/mean -->
 {% set abs01 = (10 * (params.get("epsilon_red") or 0) / params.get("mw_da")) if params.get("mw_da") else 0 %}
 <div class="calc-card" style="margin-bottom:20px">
-  <h2>浓度计算 <span style="font-size:12px;color:#888;font-weight:400">（旧版格式）</span></h2>
+  <h2><span data-i18n="detail.conc_title">Concentration</span> <span style="font-size:12px;color:#888;font-weight:400" data-i18n="detail.legacy">(legacy format)</span></h2>
   <div class="table-scroll" style="margin-top:12px">
     <table class="calc-table">
       <thead><tr>
-        <th>蛋白</th><th>MW (Da)</th><th>ε (reduced)</th><th>Abs 0.1%</th>
-        <th>A₂₈₀</th><th class="col-result">浓度 (μM)</th><th class="col-result">浓度 (mg/mL)</th><th>测量次数</th>
+        <th data-i18n="workbench.col_protein">Protein</th><th data-i18n="workbench.col_mw">MW (Da)</th><th>ε (reduced)</th><th data-i18n="workbench.col_abs">Abs 0.1%</th>
+        <th data-i18n="workbench.col_a280">A₂₈₀</th><th class="col-result" data-i18n="workbench.col_conc">Concentration</th><th class="col-result" data-i18n="workbench.col_conc">Concentration</th><th data-i18n="detail.measurements">Replicates</th>
       </tr></thead>
       <tbody>
         <tr>
@@ -136,22 +138,22 @@
 <!-- ═══════════════════════════════════════════════ -->
 {% if calc_type == "dilution" and proteins %}
 <div class="calc-card" style="margin-bottom:20px">
-  <h2>BLI 梯度稀释</h2>
+  <h2 data-i18n="detail.dilution_title">BLI serial dilution</h2>
   {% for p in proteins %}
     {% set pr = results.get(p.id|string) if results else none %}
     <div class="result-box" style="margin-top:14px">
       <strong>{{ p.name }}</strong>
-      &nbsp; 母液 {{ p.stock_uM }} μM &nbsp;|&nbsp; {{ p.factor }}× 稀释 &nbsp;|&nbsp; {{ p.steps }} 步
+      &nbsp; {{ p.stock_uM }} μM stock &nbsp;|&nbsp; {{ p.factor }}× &nbsp;|&nbsp; {{ p.steps }} steps
       {% if pr and pr.steps %}
       <table style="margin-top:8px">
-        <thead><tr><th>#</th><th>浓度 (μM)</th><th>总体积 (μL)</th><th>取上步 (μL)</th><th>缓冲液 (μL)</th></tr></thead>
+        <thead><tr><th>#</th><th data-i18n="workbench.col_conc">Concentration</th><th data-i18n="workbench.total_vol">Total volume (μL)</th><th data-i18n="workbench.from_prev">From previous (μL)</th><th data-i18n="workbench.col_buffer">Add buffer (μL)</th></tr></thead>
         <tbody>
         {% for s in pr.steps %}
           <tr><td>{{ s.step }}</td><td>{{ s.conc_uM }}</td><td>{{ s.total_vol_uL }}</td><td>{{ s.stock_vol_uL }}</td><td>{{ s.buffer_vol_uL }}</td></tr>
         {% endfor %}
         </tbody>
       </table>
-      <p style="margin-top:4px;font-size:12px;color:#888">第一步总需求 ≈ {{ pr.steps[0].total_vol_uL }} μL</p>
+      <p style="margin-top:4px;font-size:12px;color:#888">≈ {{ pr.steps[0].total_vol_uL }} μL</p>
       {% endif %}
     </div>
   {% endfor %}
@@ -168,15 +170,15 @@
 {% set wells = params.get("wells") or params.get("well_info") or {} %}
 {% set emeta = params.get("meta", {}) %}
 <div class="calc-card" style="margin-bottom:20px">
-  <h2>酶活测定</h2>
+  <h2 data-i18n="detail.enzyme_title">Enzyme activity</h2>
   <p style="color:#888;font-size:13px;margin:4px 0 12px">
     {{ emeta.sample or "" }} | {{ emeta.wavelength or "?" }} nm | {{ params.well_count or wells.keys()|length }} 孔
   </p>
   <div class="table-scroll">
     <table class="calc-table">
       <thead><tr>
-        <th>井</th><th>命名</th><th>参考</th><th>ng/mL</th><th>μM</th>
-        <th>OD 范围</th><th>ΔOD/min</th><th>R²</th>
+        <th data-i18n="workbench.well">Well</th><th data-i18n="workbench.well_name">Name</th><th data-i18n="workbench.ref">Reference</th><th>ng/mL</th><th>μM</th>
+        <th data-i18n="workbench.od_range">OD range</th><th data-i18n="workbench.slope">ΔOD/min</th><th data-i18n="workbench.r2">R²</th>
       </tr></thead>
       <tbody>
       {% for id, w in wells|dictsort %}
@@ -184,7 +186,7 @@
           <td>{{ id }}</td>
           <td>{{ w.name or "-" }}</td>
           <td>
-            {% if w.ref == "blank" %}空白{% elif w.ref == "neg" %}阴性{% elif w.ref == "pos" %}阳性{% else %}样品{% endif %}
+            {% if w.ref == "blank" %}<span data-i18n="workbench.blank">Blank</span>{% elif w.ref == "neg" %}<span data-i18n="workbench.neg">Negative</span>{% elif w.ref == "pos" %}<span data-i18n="workbench.pos">Positive</span>{% else %}<span data-i18n="workbench.sample_well">Sample</span>{% endif %}
           </td>
           <td>{{ w.conc_ng_ml if w.conc_ng_ml != None else "-" }}</td>
           <td>{{ w.conc_uM if w.conc_uM != None else "-" }}</td>
@@ -209,10 +211,10 @@
   <p style="color:#888;font-size:13px;margin-bottom:12px">{{ proteins|length }} 条序列</p>
   <img src="{{ img }}" style="max-width:100%;border-radius:8px" alt="Weblogo">
   <div style="margin-top:8px">
-    <button class="btn btn-sm btn-outline" onclick="downloadDetailImage()">📥 下载 PNG</button>
+    <button class="btn btn-sm btn-outline" onclick="downloadDetailImage()" data-i18n="detail.download_png">Download PNG</button>
   </div>
   {% else %}
-  <p style="color:#888">无图像数据</p>
+  <p style="color:#888" data-i18n="detail.no_image">No image data</p>
   {% endif %}
 </div>
 {% endif %}
@@ -222,14 +224,14 @@
 <!-- ═══════════════════════════════════════════════ -->
 {% if exp.exp_type == "BLI" and results.get("samples") %}
 <div class="calc-card" style="margin-bottom:20px">
-  <h2>BLI KD 拟合结果
-    <span style="font-size:12px;color:#888;font-weight:400">分析版本 v{{ results.get("BLI_ANALYSIS_VERSION", "?") }}</span>
+  <h2><span data-i18n="detail.bli_kd_title">BLI KD fit</span>
+    <span style="font-size:12px;color:#888;font-weight:400">v{{ results.get("BLI_ANALYSIS_VERSION", "?") }}</span>
   </h2>
   {% set params_bli = params %}
   <p style="font-size:13px;color:#555;margin-bottom:8px">
-    相界：assoc {{ "%g"|format(params_bli.get("t_assoc")) if params_bli.get("t_assoc") else "自动检测" }} s →
-    dissoc {{ "%g"|format(params_bli.get("t_dissoc")) if params_bli.get("t_dissoc") else "自动检测" }} s
-    {% if params_bli.get("ns_sensor") %} · NS 扣除 {{ params_bli.get("ns_sensor") }}{% endif %}
+    <span data-i18n="detail.phase">Phase boundary</span>: assoc {{ "%g"|format(params_bli.get("t_assoc")) if params_bli.get("t_assoc") else "auto" }} s →
+    dissoc {{ "%g"|format(params_bli.get("t_dissoc")) if params_bli.get("t_dissoc") else "auto" }} s
+    {% if params_bli.get("ns_sensor") %} · NS {{ params_bli.get("ns_sensor") }}{% endif %}
   </p>
   {% for sid, sres in results.get("samples", {}).items() %}
     {% if sres is mapping and sres.get("phase") %}
@@ -241,7 +243,7 @@
       </div>
       {% if not sres.get("error") %}
       <table class="calc-table">
-        <thead><tr><th>方法</th><th>KD (nM)</th><th>kon (1/M·s)</th><th>koff (1/s)</th></tr></thead>
+        <thead><tr><th data-i18n="workbench.method">Method</th><th>KD (nM)</th><th>kon (1/M·s)</th><th>koff (1/s)</th></tr></thead>
         <tbody>
         {% for m in ["standard", "split", "joint", "steady", "mixed"] %}
           {% set mv = sres.get(m) %}
@@ -252,7 +254,7 @@
               <td>{{ "%.3g"|format(mv.get("kon")) if mv.get("kon") != None else "—" }}</td>
               <td>{{ "%.3g"|format(mv.get("koff")) if mv.get("koff") != None else "—" }}</td>
             {% else %}
-              <td colspan="3" style="color:#888">拟合失败</td>
+              <td colspan="3" style="color:#888" data-i18n="detail.fit_failed">Fit failed</td>
             {% endif %}
           </tr>
         {% endfor %}
@@ -270,15 +272,16 @@
 <!-- ═══════════════════════════════════════════════ -->
 {% if exp.exp_type == "AKTA" and results.get("peaks") %}
 <div class="calc-card" style="margin-bottom:20px">
-  <h2>AKTA 峰检测结果
-    <span style="font-size:12px;color:#888;font-weight:400">分析版本 v{{ results.get("AKTA_ANALYSIS_VERSION", "?") }}</span>
+  <h2><span data-i18n="detail.akta_title">AKTA peak detection</span>
+    <span style="font-size:12px;color:#888;font-weight:400">v{{ results.get("AKTA_ANALYSIS_VERSION", "?") }}</span>
   </h2>
   <p style="font-size:13px;color:#555;margin-bottom:8px">
-    通道 {{ params.get("channel", "?") }} · 检测到 {{ results.get("n_peaks", results.get("peaks")|length) }} 个峰
-    {% if params.get("xmin") or params.get("xmax") %}（体积 {{ params.get("xmin", 0) }}–{{ params.get("xmax") or "∞" }} mL）{% endif %}
+    <span data-i18n="detail.channel">Channel</span> {{ params.get("channel", "?") }}
+    {% if params.get("xmin") or params.get("xmax") %} ({{ params.get("xmin", 0) }}–{{ params.get("xmax") or "∞" }} mL){% endif %}
   </p>
+  <div class="table-scroll">
   <table class="calc-table">
-    <thead><tr><th>#</th><th>峰位 (mL)</th><th>峰高 (mAU)</th><th>面积 (mAU·mL)</th><th>起 (mL)</th><th>止 (mL)</th></tr></thead>
+    <thead><tr><th>#</th><th data-i18n="workbench.apex">Apex (mL)</th><th data-i18n="workbench.height">Height (mAU)</th><th data-i18n="workbench.area">Area (mAU·mL)</th><th data-i18n="workbench.start">Start (mL)</th><th data-i18n="workbench.end">End (mL)</th></tr></thead>
     <tbody>
     {% for p in results.get("peaks", []) %}
       <tr>
@@ -292,6 +295,7 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endif %}
 
@@ -334,7 +338,7 @@
         <tr>{% for kk in cols %}<td>{{ kv_sub(item.get(kk), depth+1) }}</td>{% endfor %}</tr>
       {%- endfor %}
       {%- if v | length > 20 %}
-        <tr><td colspan="{{ cols | length }}" style="color:#888">… 还有 {{ v | length - 20 }} 行</td></tr>
+        <tr><td colspan="{{ cols | length }}" style="color:#888">… {{ v | length - 20 }}</td></tr>
       {%- endif %}
       </tbody>
     </table>
@@ -359,25 +363,47 @@
 {% endmacro %}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
   <div class="calc-card">
-    <h2>实验参数</h2>
+    <h2 data-i18n="detail.params">Parameters</h2>
     {% if params %}{{ kv_table(params) }}{% endif %}
     <details style="margin-top:8px">
-      <summary style="font-size:12px;color:#888;cursor:pointer">原始 JSON</summary>
+      <summary style="font-size:12px;color:#888;cursor:pointer" data-i18n="detail.raw_json">Raw JSON</summary>
       <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ params | tojson(indent=2) if params else "{}" }}</pre>
     </details>
   </div>
   <div class="calc-card">
-    <h2>实验结果</h2>
+    <h2 data-i18n="detail.results">Results</h2>
     {% if results %}{{ kv_table(results) }}{% endif %}
     <details style="margin-top:8px">
-      <summary style="font-size:12px;color:#888;cursor:pointer">原始 JSON</summary>
+      <summary style="font-size:12px;color:#888;cursor:pointer" data-i18n="detail.raw_json">Raw JSON</summary>
       <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ results | tojson(indent=2) if results else "{}" }}</pre>
     </details>
   </div>
 </div>
 {% endif %}
 
-<a href="/experiments" style="display:inline-block;margin-top:8px;color:#888;font-size:14px">← 返回实验列表</a>
+{% if raws %}
+<section class="detail-section">
+  <details class="advanced">
+    <summary data-i18n="detail.raw_snapshot">Raw snapshot</summary>
+    <div class="table-scroll" style="margin-top:12px">
+      <table class="calc-table">
+        <thead><tr><th>id</th><th>type</th><th>created</th></tr></thead>
+        <tbody>
+        {% for r in raws %}
+          <tr>
+            <td class="mono">{{ r.id }}</td>
+            <td class="mono">{{ r.data_type }}</td>
+            <td class="mono">{{ r.created_at }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+{% endif %}
+
+<a href="/experiments" style="display:inline-block;margin-top:8px;color:var(--graphite);font-size:14px" data-i18n="detail.back">Back to archive</a>
 
 <script>
 // 下载详情页图片，文件名用实验标题（已保存时通常即自动命名）
@@ -416,7 +442,7 @@ function closeEditModal() {
 // 保存编辑：PUT title/exp_type/date/notes，就地更新页面展示
 async function saveEditModal() {
   const title = document.getElementById("editTitle").value.trim();
-  if (!title) { toast("标题不能为空", true); return; }
+  if (!title) { toast(typeof t === "function" ? t("detail.title_required") : "Title is required", true); return; }
   try {
     const exp = await API.put(`/api/experiments/${_editExpId}`, {
       title,
@@ -429,15 +455,23 @@ async function saveEditModal() {
     document.getElementById("detailExpDate").textContent = exp.date || "-";
     document.getElementById("detailExpNotes").textContent = exp.notes || "-";
     closeEditModal();
-    toast("已更新");
+    toast(typeof t === "function" ? t("detail.updated") : "Updated");
   } catch (err) { toast(err.message, true); }
 }
 
 async function deleteExpDetail(id) {
-  if (!confirm("确定删除该实验？")) return;
+  const ok = window.BigoUI
+    ? await BigoUI.confirm({
+        title: (window.BigoI18n && BigoI18n.t("detail.delete")) || "Delete",
+        message: (window.BigoI18n && BigoI18n.t("detail.confirm_delete")) || "Delete this experiment?",
+        impact: (window.BigoI18n && BigoI18n.t("archive.confirm_delete_impact")) || "",
+        danger: true,
+      })
+    : confirm("Delete this experiment?");
+  if (!ok) return;
   try {
     await API.del(`/api/experiments/${id}`);
-    toast("已删除");
+    toast(typeof t === "function" ? t("detail.deleted") : "Deleted");
     window.location.href = "/experiments";
   } catch (err) { toast(err.message, true); }
 }

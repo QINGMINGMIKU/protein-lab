@@ -40,11 +40,14 @@ app.json.ensure_ascii = False
 # 不再被旧缓存坑（新增 tab 的按钮调新函数，旧 JS 缓存里没有 → 点击无效）。
 @app.context_processor
 def inject_static_version():
-    import time as _time
     try:
-        app_js = os.path.getmtime(os.path.join(app.static_folder, "app.js"))
-        style_css = os.path.getmtime(os.path.join(app.static_folder, "style.css"))
-        version = str(int(max(app_js, style_css)))
+        names = ("app.js", "style.css", "i18n.js", "ui-shell.js")
+        mtimes = []
+        for name in names:
+            path = os.path.join(app.static_folder, name)
+            if os.path.exists(path):
+                mtimes.append(os.path.getmtime(path))
+        version = str(int(max(mtimes))) if mtimes else "0"
     except OSError:
         version = "0"
     return {"static_version": version}

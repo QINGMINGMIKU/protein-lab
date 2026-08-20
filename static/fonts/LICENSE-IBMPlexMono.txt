@@ -1,0 +1,2 @@
+IBM Plex Mono, SIL Open Font License 1.1.
+https://github.com/IBM/plex

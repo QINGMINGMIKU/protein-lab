@@ -1,24 +1,56 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Protein Lab</title>
+<title>Bigo.bio BDA Workbench</title>
 <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
 </head>
 <body>
-<nav class="topbar">
-  <a href="/research" class="brand">🧬 Protein Lab</a>
-  <div class="nav-links">
-    <a href="/research" class="{% if request.path == '/research' or request.path == '/' %}active{% endif %}">研究脉络</a>
-    <a href="/proteins" class="{% if request.path == '/proteins' %}active{% endif %}">蛋白库</a>
-    <a href="/calculator" class="{% if request.path == '/calculator' %}active{% endif %}">计算工具</a>
-    <a href="/experiments" class="{% if request.path == '/experiments' %}active{% endif %}">实验归档</a>
+<div class="grid-guides" aria-hidden="true">
+  <span></span><span></span><span></span><span></span><span></span>
+</div>
+<a class="skip-link" href="#main" data-i18n="a11y.skip">Skip to content</a>
+<header class="topbar">
+  <a href="/research" class="brand">
+    <span class="brand-mark" data-i18n="nav.brand">Bigo.bio</span>
+    <span class="brand-product" data-i18n="nav.product">BDA Workbench</span>
+  </a>
+  <nav class="nav-links" aria-label="Primary">
+    <a href="/research" class="{% if request.path == '/research' or request.path == '/' %}active{% endif %}" data-i18n="nav.research">Research Trace</a>
+    <a href="/proteins" class="{% if request.path == '/proteins' %}active{% endif %}" data-i18n="nav.proteins">Protein Library</a>
+    <a href="/calculator" class="{% if request.path == '/calculator' %}active{% endif %}" data-i18n="nav.workbench">BDA Workbench</a>
+    <a href="/experiments" class="{% if request.path.startswith('/experiments') %}active{% endif %}" data-i18n="nav.archive">Evidence Archive</a>
+    <div class="lang-switch" id="langSwitch" role="group" data-i18n-aria="nav.lang">
+      <button type="button" data-locale-btn="en" aria-pressed="true" data-i18n="nav.lang.en">EN</button>
+      <button type="button" data-locale-btn="zh-CN" aria-pressed="false" data-i18n="nav.lang.zh">中文</button>
+    </div>
+  </nav>
+  <button type="button" class="btn-icon menu-toggle" id="menuToggle" aria-controls="siteMenu" aria-expanded="false" data-i18n-aria="nav.menu">
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 4h14M2 9h14M2 14h14" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+  </button>
+</header>
+<div id="siteMenu" aria-hidden="true">
+  <div class="menu-head">
+    <span class="brand-mark" data-i18n="nav.brand">Bigo.bio</span>
+    <button type="button" class="btn-icon" data-menu-close data-i18n-aria="nav.close">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
   </div>
-</nav>
-<main>
+  <a href="/research" data-menu-close data-i18n="nav.research">Research Trace</a>
+  <a href="/proteins" data-menu-close data-i18n="nav.proteins">Protein Library</a>
+  <a href="/calculator" data-menu-close data-i18n="nav.workbench">BDA Workbench</a>
+  <a href="/experiments" data-menu-close data-i18n="nav.archive">Evidence Archive</a>
+  <div class="lang-switch" role="group">
+    <button type="button" data-locale-btn="en" data-i18n="nav.lang.en">EN</button>
+    <button type="button" data-locale-btn="zh-CN" data-i18n="nav.lang.zh">中文</button>
+  </div>
+</div>
+<main id="main">
 {% block content %}{% endblock %}
 </main>
+<script src="/static/i18n.js?v={{ static_version }}"></script>
+<script src="/static/ui-shell.js?v={{ static_version }}"></script>
 <script src="/static/app.js?v={{ static_version }}"></script>
 </body>
 </html>

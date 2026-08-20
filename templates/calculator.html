@@ -1,17 +1,29 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h1>计算工具</h1>
-
-<!-- ── Tab 导航 ── -->
-<nav class="tab-nav">
-  <button class="tab-btn active" data-tab="conc">蛋白浓度</button>
-  <button class="tab-btn" data-tab="dilution">BLI 浓度梯度</button>
-  <button class="tab-btn" data-tab="bli">BLI 分析</button>
-  <button class="tab-btn" data-tab="akta">AKTA 峰图</button>
-  <button class="tab-btn" data-tab="weblogo">Weblogo</button>
-  <button class="tab-btn" data-tab="enzyme">酶活计算</button>
-  <button class="tab-btn" data-tab="copy">从实验复制</button>
+<div class="page-header">
+  <h1 data-i18n="workbench.title">BDA Workbench</h1>
+</div>
+<nav class="tool-groups" aria-label="Tools">
+  <div class="tool-group">
+    <span class="tool-group-label" data-i18n="workbench.group.prepare">Prepare</span>
+    <button class="tab-btn active" data-tab="conc" data-i18n="workbench.tab.conc">Concentration</button>
+    <button class="tab-btn" data-tab="dilution" data-i18n="workbench.tab.dilution">BLI Dilution</button>
+  </div>
+  <div class="tool-group">
+    <span class="tool-group-label" data-i18n="workbench.group.analyze">Analyze</span>
+    <button class="tab-btn" data-tab="bli" data-i18n="workbench.tab.bli">BLI</button>
+    <button class="tab-btn" data-tab="akta" data-i18n="workbench.tab.akta">AKTA</button>
+    <button class="tab-btn" data-tab="enzyme" data-i18n="workbench.tab.enzyme">Enzyme Activity</button>
+  </div>
+  <div class="tool-group">
+    <span class="tool-group-label" data-i18n="workbench.group.sequence">Sequence</span>
+    <button class="tab-btn" data-tab="weblogo" data-i18n="workbench.tab.weblogo">Weblogo</button>
+  </div>
+  <div class="tool-group">
+    <span class="tool-group-label" data-i18n="workbench.group.reuse">Reuse</span>
+    <button class="tab-btn" data-tab="copy" data-i18n="workbench.tab.copy">Load from Archive</button>
+  </div>
 </nav>
 
 <!-- ══════════════════════════════════════════════════ -->
@@ -22,18 +34,18 @@
   <div class="protein-picker">
     <div class="picker-controls">
       <div class="picker-header">
-        <input type="text" id="proteinSearch" placeholder="搜索蛋白名称..." oninput="searchProteins()" autocomplete="off">
+        <input type="text" id="proteinSearch" data-i18n-placeholder="workbench.search_protein" placeholder="Search protein name…" oninput="searchProteins()" autocomplete="off">
         <div id="searchResults" class="search-dropdown hidden"></div>
         <div id="calcTagFilter" class="tag-filter-bar" style="margin-top:6px"></div>
       </div>
-      <div class="cys-inline">Cys:
+      <div class="cys-inline"><span data-i18n="workbench.cys">Cys</span>:
         <select id="concOxidized" onchange="updateTableExtCoeff()">
-          <option value="1">氧化态 (二硫键, -S-S-)</option>
-          <option value="0" selected>还原态 (游离巯基, -SH)</option>
+          <option value="1" data-i18n-option="workbench.cys_ox">Oxidized (disulfide, -S-S-)</option>
+          <option value="0" selected data-i18n-option="workbench.cys_red">Reduced (free thiol, -SH)</option>
         </select>
-        <span class="cys-hint" title="氧化态: 含二硫键的分泌蛋白/膜蛋白/氧化环境&#10;还原态: 胞内蛋白/含DTT或TCEP的缓冲液">?</span>
+        <span class="cys-hint" data-i18n-title="workbench.cys_help" title="Oxidized: secreted/membrane proteins. Reduced: intracellular or DTT/TCEP buffer.">?</span>
       </div>
-      <div class="cys-inline">浓度单位:
+      <div class="cys-inline"><span data-i18n="workbench.conc_unit">Concentration unit</span>:
         <select id="concUnitSel" onchange="changeConcUnit()">
           <option value="M">M</option>
           <option value="uM" selected>uM</option>
@@ -52,31 +64,31 @@
     <table id="concTable" class="calc-table">
       <thead>
         <tr>
-          <th>蛋白</th>
-          <th>MW (Da)</th>
-          <th>ε (M⁻¹cm⁻¹)</th>
-          <th>Abs 0.1%</th>
-          <th>A₂₈₀</th>
-          <th>光程 (cm)</th>
-          <th class="col-result">浓度 (μM)</th>
-          <th class="col-result">浓度 (mg/mL)</th>
-          <th>目标浓度 (μM)</th>
-          <th>目标体积 (μL)</th>
-          <th class="col-result">取母液 (μL)</th>
-          <th class="col-result">加缓冲液 (μL)</th>
+          <th data-i18n="workbench.col_protein">Protein</th>
+          <th data-i18n="workbench.col_mw">MW (Da)</th>
+          <th data-i18n="workbench.col_eps">ε (M⁻¹cm⁻¹)</th>
+          <th data-i18n="workbench.col_abs">Abs 0.1%</th>
+          <th data-i18n="workbench.col_a280">A₂₈₀</th>
+          <th data-i18n="workbench.col_path">Path (cm)</th>
+          <th class="col-result" data-i18n="workbench.col_conc">Concentration</th>
+          <th class="col-result" data-i18n="workbench.col_conc">Concentration</th>
+          <th data-i18n="workbench.col_target_c">Target concentration</th>
+          <th data-i18n="workbench.col_target_v">Target volume (μL)</th>
+          <th class="col-result" data-i18n="workbench.col_stock">Take stock (μL)</th>
+          <th class="col-result" data-i18n="workbench.col_buffer">Add buffer (μL)</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        <tr class="empty-row"><td colspan="13">请在上方搜索并添加蛋白</td></tr>
+        <tr class="empty-row"><td colspan="13" data-i18n="workbench.empty_conc">Search above and add a protein</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="tab-actions">
-    <input type="text" id="concExpName" placeholder="实验名称（可选）" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
-    <button class="btn btn-primary" onclick="calcAllRows()">全部计算</button>
-    <button class="btn btn-outline" onclick="saveConcTable()">💾 保存为实验</button>
+    <input type="text" id="concExpName" data-i18n-placeholder="workbench.exp_name" placeholder="Experiment name (optional)" style="flex:1;max-width:300px;padding:8px 12px;border:1px dashed var(--rule);font-size:14px">
+    <button class="btn btn-primary" onclick="calcAllRows()" data-i18n="workbench.calc_all">Calculate all</button>
+    <button class="btn btn-outline" onclick="saveConcTable()" data-i18n="workbench.save_exp">Save as experiment</button>
   </div>
 </div>
 
@@ -86,11 +98,11 @@
 <div id="tab-dilution" class="tab-panel hidden">
   <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
     <select id="bliImportExp" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;min-width:200px" onchange="onBliImportExpChange()">
-      <option value="">-- 从浓度实验导入 --</option>
+      <option value="" data-i18n-option="workbench.import_conc">-- Import from concentration experiment --</option>
     </select>
-    <button class="btn btn-outline" id="bliImportBtn" onclick="importBliFromExp()" disabled>📋 导入</button>
-    <span style="color:#888;font-size:13px;margin-left:8px">或搜索添加：</span>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#555;font-size:13px">浓度单位
+    <button class="btn btn-outline" id="bliImportBtn" onclick="importBliFromExp()" disabled data-i18n="workbench.import">Import</button>
+    <span style="color:var(--graphite);font-size:13px;margin-left:8px" data-i18n="workbench.or_search">or search to add:</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#555;font-size:13px"><span data-i18n="workbench.conc_unit">Concentration unit</span>
       <select id="dilUnitSel" onchange="changeDilUnit()" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
         <option value="M">M</option>
         <option value="uM" selected>uM</option>
@@ -103,7 +115,7 @@
   </div>
   <div class="protein-picker" style="margin-bottom:12px">
     <div class="picker-header">
-      <input type="text" id="bliProteinSearch" placeholder="搜索蛋白名称..." oninput="searchBliProteins()" autocomplete="off">
+      <input type="text" id="bliProteinSearch" data-i18n-placeholder="workbench.search_protein" placeholder="Search protein name…" oninput="searchBliProteins()" autocomplete="off">
       <div id="bliSearchResults" class="search-dropdown hidden"></div>
     </div>
   </div>
@@ -113,26 +125,26 @@
     <table id="bliTable" class="calc-table">
       <thead>
         <tr>
-          <th>蛋白</th>
-          <th>母液浓度 (μM)</th>
-          <th>起始浓度 (μM)</th>
-          <th>稀释倍数</th>
-          <th>步数</th>
-          <th>每孔 (μL)</th>
-          <th>死体积 (μL)</th>
+          <th data-i18n="workbench.col_protein">Protein</th>
+          <th data-i18n="workbench.stock_c">Stock concentration</th>
+          <th data-i18n="workbench.start_c">Start concentration</th>
+          <th data-i18n="workbench.dil_factor">Dilution factor</th>
+          <th data-i18n="workbench.steps">Steps</th>
+          <th data-i18n="workbench.per_well">Per well (μL)</th>
+          <th data-i18n="workbench.dead_vol">Dead volume (μL)</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        <tr class="empty-row"><td colspan="8">请从浓度表导入蛋白，或在上方搜索添加</td></tr>
+        <tr class="empty-row"><td colspan="8" data-i18n="workbench.empty_dil">Import from the concentration table, or search to add</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="tab-actions">
-    <input type="text" id="bliExpName" placeholder="实验名称（可选）" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
-    <button class="btn btn-primary" id="bliCalcAllBtn" onclick="calcAllBliRows()">全部计算</button>
-    <button class="btn btn-outline" onclick="saveBliTable()">💾 保存为实验</button>
+    <input type="text" id="bliExpName" data-i18n-placeholder="workbench.exp_name" placeholder="Experiment name (optional)" style="flex:1;max-width:300px;padding:8px 12px;border:1px dashed var(--rule);font-size:14px">
+    <button class="btn btn-primary" id="bliCalcAllBtn" onclick="calcAllBliRows()" data-i18n="workbench.calc_all">Calculate all</button>
+    <button class="btn btn-outline" onclick="saveBliTable()" data-i18n="workbench.save_exp">Save as experiment</button>
   </div>
 
   <div id="bliResults" style="margin-top:16px"></div>
@@ -144,99 +156,95 @@
 <div id="tab-bli" class="tab-panel hidden">
   <div class="toolbar" style="flex-wrap:wrap">
     <input type="file" id="bliFile" accept=".csv" onchange="uploadBliFile()" style="display:none">
-    <button class="btn btn-outline" onclick="document.getElementById('bliFile').click()">📁 上传 ForteBio CSV</button>
+    <button class="btn btn-outline" onclick="document.getElementById('bliFile').click()" data-i18n="workbench.upload_bli">Upload ForteBio CSV</button>
     <span id="bliMeta" style="font-size:13px;color:#888;margin-left:8px"></span>
   </div>
 
   <!-- 解析后：样本列表 + 参数面板 -->
   <div id="bliAnalyzed" class="hidden" style="margin-top:12px">
-    <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px">
-      <!-- 左侧：样本曲线摘要 + 曲线勾选（勾选决定哪些曲线进入数据/拟合/导出） -->
+    <div class="workbench-split">
       <div class="calc-card" style="padding:12px;min-width:0">
-        <h3 style="margin-bottom:8px">样本</h3>
+        <h3 style="margin-bottom:8px" data-i18n="workbench.samples">Samples</h3>
         <div class="table-scroll" style="max-height:150px;overflow-y:auto">
           <table class="calc-table">
-            <thead><tr><th>Sample</th><th>曲线数</th><th>浓度 (nM)</th><th></th></tr></thead>
+            <thead><tr><th>Sample</th><th data-i18n="workbench.curves_n">Curves</th><th data-i18n="workbench.conc_nm">Concentration (nM)</th><th></th></tr></thead>
             <tbody id="bliSampleList"></tbody>
           </table>
         </div>
         <h3 style="margin:10px 0 6px">
-          进入数据的曲线
-          <span id="bliCurveStats" style="font-weight:normal;font-size:12px;color:#888"></span>
+          <span data-i18n="workbench.curves_in">Curves in dataset</span>
+          <span id="bliCurveStats" style="font-weight:normal;font-size:12px;color:var(--graphite)"></span>
         </h3>
         <div style="margin-bottom:6px;font-size:13px">
-          <label style="display:inline-flex;align-items:center;gap:4px;margin:0">
-            <input type="checkbox" id="bliCurveSelectAll"> 全选 / 清空
+          <label style="display:inline-flex;align-items:center;gap:4px;margin:0;flex-direction:row">
+            <input type="checkbox" id="bliCurveSelectAll"> <span data-i18n="workbench.select_all_clear">Select all / none</span>
           </label>
         </div>
         <div class="table-scroll" style="max-height:200px;overflow-y:auto">
           <table class="calc-table">
-            <thead><tr><th style="width:28px"></th><th>曲线</th><th>样品</th><th>浓度 (nM)</th></tr></thead>
+            <thead><tr><th style="width:28px"></th><th data-i18n="workbench.curve">Curve</th><th data-i18n="workbench.sample">Sample</th><th data-i18n="workbench.conc_nm">Concentration (nM)</th></tr></thead>
             <tbody id="bliCurveList"></tbody>
           </table>
         </div>
       </div>
-      <!-- 右侧：分析参数 -->
-      <div class="calc-card" style="padding:12px;min-width:0">
-        <h3 style="margin-bottom:8px">分析参数</h3>
+      <details class="advanced">
+        <summary data-i18n="common.advanced">Advanced</summary>
+        <div class="calc-card" style="padding:12px;min-width:0;border:0">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <label style="font-size:13px;margin:0">SG 平滑窗 <span style="color:#888">(0 关闭)</span>
-            <input type="number" id="bliSmooth" value="31" min="0" step="2" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+          <label style="font-size:13px;margin:0"><span data-i18n="workbench.sg_window">SG smooth window</span> <span style="color:var(--graphite)" data-i18n="workbench.sg_off">(0 = off)</span>
+            <input type="number" id="bliSmooth" value="31" min="0" step="2" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
-          <label style="font-size:13px;margin:0">拟合浓度数
-            <input type="number" id="bliNConcs" value="8" min="2" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+          <label style="font-size:13px;margin:0"><span data-i18n="workbench.n_concs">Fit concentration count</span>
+            <input type="number" id="bliNConcs" value="8" min="2" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
-          <label style="font-size:13px;margin:0">结合起点 t_assoc (s)
-            <input type="number" id="bliTAssoc" step="any" placeholder="自动" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+          <label style="font-size:13px;margin:0"><span data-i18n="workbench.t_assoc">Association start t_assoc (s)</span>
+            <input type="number" id="bliTAssoc" step="any" data-i18n-placeholder="workbench.auto" placeholder="auto" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
-          <label style="font-size:13px;margin:0">解离起点 t_dissoc (s)
-            <input type="number" id="bliTDissoc" step="any" placeholder="自动" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+          <label style="font-size:13px;margin:0"><span data-i18n="workbench.t_dissoc">Dissociation start t_dissoc (s)</span>
+            <input type="number" id="bliTDissoc" step="any" data-i18n-placeholder="workbench.auto" placeholder="auto" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
-          <label style="font-size:13px;margin:0;grid-column:1/3">NS 传感器
-            <input type="text" id="bliNsSensor" placeholder="如 F8（非特异对照，留空不扣）" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
-          </label>
-        </div>
-        <div style="margin-top:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;white-space:nowrap">
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
-            <input type="checkbox" id="bliFit" checked> 叠加拟合虚线
-          </label>
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
-            <input type="checkbox" id="bliNoCutoff"> 不过滤死曲线
-          </label>
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0" title="上传后自动截去结合起点（t_assoc）之前的基线区，默认开启">
-            <input type="checkbox" id="bliTrimStart" checked> 截去结合起点前基线
+          <label style="font-size:13px;margin:0;grid-column:1/3"><span data-i18n="workbench.ns_sensor">NS sensor</span>
+            <input type="text" id="bliNsSensor" data-i18n-placeholder="workbench.ns_ph" placeholder="e.g. F8" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
         </div>
-      </div>
+        <div style="margin-top:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0;flex-direction:row">
+            <input type="checkbox" id="bliFit" checked> <span data-i18n="workbench.overlay_fit">Overlay fit dashed line</span>
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0;flex-direction:row">
+            <input type="checkbox" id="bliNoCutoff"> <span data-i18n="workbench.no_cutoff">Do not filter dead curves</span>
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0;flex-direction:row">
+            <input type="checkbox" id="bliTrimStart" checked> <span data-i18n="workbench.trim_start">Trim baseline before association start</span>
+          </label>
+        </div>
+        </div>
+      </details>
     </div>
 
-    <!-- 动作栏：出图模式 + 出图 / 拟合 / 导出（统一 tab-actions，对齐 AKTA 批量操作流） -->
-    <div class="tab-actions">
-      <select id="bliPlotMode" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
-        <option value="overlay">总图（所有曲线叠加）</option>
-        <option value="separate">分图（每样本一图）</option>
+    <div class="tab-actions sticky-actions">
+      <select id="bliPlotMode" style="padding:8px 12px;border:1px dashed var(--rule);font-size:14px;min-height:44px">
+        <option value="overlay" data-i18n-option="workbench.plot_overlay">Overlay (all curves)</option>
+        <option value="separate" data-i18n-option="workbench.plot_separate">Separate (one plot per sample)</option>
       </select>
-      <button class="btn btn-primary" onclick="bliPlot()">🖼 出图</button>
-      <button class="btn btn-outline" onclick="bliFitSelected()">🧪 拟合选中样本</button>
-      <button class="btn btn-outline" onclick="bliExport()">📊 导出 Excel</button>
-      <button class="btn btn-outline" onclick="downloadBliPlot()">📥 下载 PNG</button>
+      <button class="btn btn-primary" onclick="bliPlot()" data-i18n="workbench.plot">Plot</button>
+      <button class="btn btn-outline" onclick="bliFitSelected()" data-i18n="workbench.fit_selected">Fit selected samples</button>
+      <button class="btn btn-outline" onclick="bliExport()" data-i18n="workbench.export_xlsx">Export Excel</button>
+      <button class="btn btn-outline" onclick="downloadBliPlot()" data-i18n="workbench.download_png">Download PNG</button>
     </div>
 
-    <!-- KD 拟合结果表 -->
     <div style="margin-top:16px" class="hidden" id="bliKdWrap">
       <div class="calc-card" style="padding:12px">
-        <h3 style="margin:0 0 8px">KD 拟合结果（5 方法 · 点样本行可单独重拟合）</h3>
+        <h3 style="margin:0 0 8px" data-i18n="workbench.kd_results">KD fit results (5 methods · click a sample row to refit)</h3>
         <div id="bliKdTables"></div>
       </div>
     </div>
 
-    <!-- 传感器图 -->
     <div id="bliPlotArea" style="margin-top:16px"></div>
 
-    <!-- 保存 -->
-    <div class="tab-actions">
-      <input type="text" id="bliAnaExpName" placeholder="实验名称（可选）" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
-      <button class="btn btn-outline" onclick="bliSaveExp()">💾 保存为实验（含原始曲线）</button>
+    <div class="tab-actions sticky-actions">
+      <input type="text" id="bliAnaExpName" data-i18n-placeholder="workbench.exp_name" placeholder="Experiment name (optional)" style="flex:1;max-width:300px;padding:8px 12px;border:1px dashed var(--rule);font-size:14px">
+      <button class="btn btn-outline" onclick="bliSaveExp()" data-i18n="workbench.save_raw">Save as experiment (with raw curves)</button>
     </div>
   </div>
 </div>
@@ -247,78 +255,76 @@
 <div id="tab-akta" class="tab-panel hidden">
   <div class="toolbar" style="flex-wrap:wrap">
     <input type="file" id="aktaFile" accept=".zip" multiple onchange="uploadAktaFile()" style="display:none">
-    <button class="btn btn-outline" onclick="document.getElementById('aktaFile').click()">📁 上传 AKTA Unicorn zip（可多选）</button>
+    <button class="btn btn-outline" onclick="document.getElementById('aktaFile').click()" data-i18n="workbench.upload_akta">Upload AKTA Unicorn zip (multi-select)</button>
     <span id="aktaMeta" style="font-size:13px;color:#888;margin-left:8px"></span>
   </div>
 
   <div id="aktaAnalyzed" class="hidden" style="margin-top:12px">
-    <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px">
-      <!-- 左侧：文件 × 通道列表（批量） -->
+    <div class="workbench-split">
       <div class="calc-card" style="padding:12px;min-width:0">
-        <h3 style="margin:0 0 8px">文件 / 通道</h3>
+        <h3 style="margin:0 0 8px" data-i18n="workbench.files_ch">Files / channels</h3>
         <div id="aktaRunList"></div>
-        <div style="margin-top:8px;font-size:13px;color:#555">
+        <div style="margin-top:8px;font-size:13px;color:var(--graphite)">
           <span id="aktaEventsInfo"></span>
         </div>
       </div>
-      <!-- 右侧：峰检测参数 -->
-      <div class="calc-card" style="padding:12px;min-width:0">
-        <h3 style="margin-bottom:8px">峰检测参数</h3>
+      <details class="advanced">
+        <summary data-i18n="common.advanced">Advanced</summary>
+        <div class="calc-card" style="padding:12px;min-width:0;border:0">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <label style="font-size:13px;margin:0">xmin (mL)
-            <input type="number" id="aktaXmin" value="0" step="any" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+          <label style="font-size:13px;margin:0"><span data-i18n="workbench.xmin">xmin (mL)</span>
+            <input type="number" id="aktaXmin" value="0" step="any" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
-          <label style="font-size:13px;margin:0">xmax (mL)
-            <input type="number" id="aktaXmax" step="any" placeholder="自动" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+          <label style="font-size:13px;margin:0"><span data-i18n="workbench.xmax">xmax (mL)</span>
+            <input type="number" id="aktaXmax" step="any" data-i18n-placeholder="workbench.auto" placeholder="auto" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
-          <label style="font-size:13px;margin:0">最小峰高 (mAU)
-            <input type="number" id="aktaMinHeight" value="5" step="any" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+          <label style="font-size:13px;margin:0"><span data-i18n="workbench.min_height">Min peak height (mAU)</span>
+            <input type="number" id="aktaMinHeight" value="5" step="any" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
-          <label style="font-size:13px;margin:0">SG 平滑窗
-            <input type="number" id="aktaSmooth" value="11" min="3" step="2" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
-          </label>
-        </div>
-        <!-- frac 控件 + 归一化：一行，不换行 -->
-        <div style="margin-top:10px;display:flex;gap:12px;align-items:center;flex-wrap:nowrap;white-space:nowrap">
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
-            <input type="checkbox" id="aktaHighlightFrac" checked> frac 阴影
-          </label>
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
-            <input type="checkbox" id="aktaShowEvents"> frac 线条
-          </label>
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
-            <input type="checkbox" id="aktaNormalize"> 归一化
-          </label>
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
-            <input type="checkbox" id="aktaPeakFill" checked> 峰阴影
-          </label>
-          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0">
-            <input type="checkbox" id="aktaPeakLabels"> 标记峰位置
+          <label style="font-size:13px;margin:0"><span data-i18n="workbench.sg_window">SG smooth window</span>
+            <input type="number" id="aktaSmooth" value="11" min="3" step="2" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
         </div>
-      </div>
+        <div style="margin-top:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0;flex-direction:row">
+            <input type="checkbox" id="aktaHighlightFrac" checked> <span data-i18n="workbench.frac_shade">frac shading</span>
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0;flex-direction:row">
+            <input type="checkbox" id="aktaShowEvents"> <span data-i18n="workbench.frac_lines">frac lines</span>
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0;flex-direction:row">
+            <input type="checkbox" id="aktaNormalize"> <span data-i18n="workbench.normalize">Normalize</span>
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0;flex-direction:row">
+            <input type="checkbox" id="aktaPeakFill" checked> <span data-i18n="workbench.peak_fill">Peak fill</span>
+          </label>
+          <label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;margin:0;flex-direction:row">
+            <input type="checkbox" id="aktaPeakLabels"> <span data-i18n="workbench.peak_labels">Label peaks</span>
+          </label>
+        </div>
+        </div>
+      </details>
     </div>
 
-    <!-- 动作栏：出图模式 + 出图 / 导出（统一 tab-actions，对齐酶活 tab 主线操作流） -->
-    <div class="tab-actions">
-      <select id="aktaPlotMode" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
-        <option value="batch">分图（每文件一张）</option>
-        <option value="overlay">总图（所有曲线叠加）</option>
+    <div class="tab-actions sticky-actions">
+      <select id="aktaPlotMode" style="padding:8px 12px;border:1px dashed var(--rule);font-size:14px;min-height:44px">
+        <option value="batch" data-i18n-option="workbench.plot_batch">Separate (one plot per file)</option>
+        <option value="overlay" data-i18n-option="workbench.plot_overlay">Overlay (all curves)</option>
       </select>
-      <button class="btn btn-primary" onclick="aktaBatchPlot()">🖼 出图</button>
-      <button class="btn btn-outline" onclick="aktaExport()">📊 导出峰表</button>
-      <button class="btn btn-outline" onclick="downloadAktaPlot()">📥 下载 PNG</button>
+      <button class="btn btn-primary" onclick="aktaBatchPlot()" data-i18n="workbench.plot">Plot</button>
+      <button class="btn btn-outline" onclick="aktaExport()" data-i18n="workbench.export_peaks">Export peak table</button>
+      <button class="btn btn-outline" onclick="downloadAktaPlot()" data-i18n="workbench.download_png">Download PNG</button>
     </div>
 
     <!-- 峰表 -->
     <div id="aktaPeakTableWrap" class="hidden" style="margin-top:16px">
       <div class="calc-card" style="padding:12px">
-        <h3 style="margin-bottom:8px">检测到的峰（点「目标」切换阴影跟随的峰）</h3>
+        <h3 style="margin-bottom:8px" data-i18n="workbench.peaks_found">Detected peaks (click Target to follow shading)</h3>
         <div class="table-scroll">
           <table class="calc-table" id="aktaPeakTable">
             <thead><tr>
-              <th>#</th><th>峰位 (mL)</th><th>峰高 (mAU)</th><th>面积 (mAU·mL)</th>
-              <th>起 (mL)</th><th>止 (mL)</th><th>半高宽 (mL)</th><th>阴影</th>
+              <th>#</th><th data-i18n="workbench.apex">Apex (mL)</th><th data-i18n="workbench.height">Height (mAU)</th><th data-i18n="workbench.area">Area (mAU·mL)</th>
+              <th data-i18n="workbench.start">Start (mL)</th><th data-i18n="workbench.end">End (mL)</th><th data-i18n="workbench.half_w">Half-width (mL)</th><th data-i18n="workbench.shade">Shade</th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -331,8 +337,8 @@
 
     <!-- 保存 -->
     <div class="tab-actions">
-      <input type="text" id="aktaExpName" placeholder="实验名称（可选）" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
-      <button class="btn btn-outline" onclick="aktaSaveExp()">💾 保存为实验（含原始曲线）</button>
+      <input type="text" id="aktaExpName" data-i18n-placeholder="workbench.exp_name" placeholder="Experiment name (optional)" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+      <button class="btn btn-outline" onclick="aktaSaveExp()" data-i18n="workbench.save_raw">Save as experiment (with raw curves)</button>
     </div>
   </div>
 </div>
@@ -343,16 +349,16 @@
   <div style="display:grid;grid-template-columns:320px 1fr;gap:20px">
     <!-- 左侧：蛋白选择 -->
     <div style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-      <input type="text" id="weblogoSearch" placeholder="搜索蛋白..." oninput="filterWeblogoProteins()" style="width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-bottom:6px">
+      <input type="text" id="weblogoSearch" data-i18n-placeholder="workbench.search_proteins" placeholder="Search proteins…" oninput="filterWeblogoProteins()" style="width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-bottom:6px">
       <div id="weblogoTagFilter" class="tag-filter-bar" style="margin-bottom:6px"></div>
       <div style="margin-bottom:8px">
-        <label class="checkbox-label" style="display:inline-flex!important"><input type="checkbox" id="weblogoSelectAll" onchange="toggleAllWeblogoProteins(this)"> 全选</label>
+        <label class="checkbox-label" style="display:inline-flex!important"><input type="checkbox" id="weblogoSelectAll" onchange="toggleAllWeblogoProteins(this)"> <span data-i18n="workbench.select_all">Select all</span></label>
       </div>
       <div id="weblogoProteinList" style="max-height:350px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:6px;padding:8px;font-size:13px">
-        <span style="color:#888">加载中...</span>
+        <span style="color:#888" data-i18n="common.loading">Loading…</span>
       </div>
       <div style="margin-top:10px">
-        <label style="font-size:13px">颜色方案
+        <label style="font-size:13px"><span data-i18n="workbench.color_scheme">Color scheme</span>
           <select id="weblogoColor" style="width:100%;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-top:4px">
             <option value="chemistry">chemistry</option>
             <option value="hydrophobicity">hydrophobicity</option>
@@ -360,27 +366,27 @@
             <option value="classic">classic</option>
           </select>
         </label>
-        <label style="font-size:13px;margin-top:4px">位点区间（可选）
+        <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.pos_range">Position range (optional)</span>
           <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
-            <input type="number" id="weblogoStart" min="1" placeholder="起始" style="flex:1;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+            <input type="number" id="weblogoStart" min="1" data-i18n-placeholder="workbench.pos_start" placeholder="Start" style="flex:1;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
             <span style="color:#888">–</span>
-            <input type="number" id="weblogoEnd" min="1" placeholder="结束" style="flex:1;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+            <input type="number" id="weblogoEnd" min="1" data-i18n-placeholder="workbench.pos_end" placeholder="End" style="flex:1;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
           </div>
         </label>
-        <label style="font-size:13px;margin-top:4px">多聚体
-          <span style="font-weight:400;color:#888">（二聚体填 2，自动裁剪为单亚基）</span>
+        <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.multimer">Multimer</span>
+          <span style="font-weight:400;color:#888" data-i18n="workbench.multimer_hint">(dimer = 2, cropped to one subunit)</span>
           <input type="number" id="weblogoMultimer" min="1" value="1" style="width:70px;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-top:4px">
         </label>
       </div>
-      <button class="btn btn-primary" onclick="generateWeblogo()" id="weblogoGenBtn" style="width:100%;margin-top:10px">生成 Logo</button>
-      <input type="text" id="weblogoExpName" placeholder="实验名称（可选）" style="display:none;width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-top:6px">
-      <button class="btn btn-outline" onclick="saveWeblogoExp()" id="weblogoSaveBtn" style="width:100%;margin-top:6px;display:none">💾 保存为实验</button>
+      <button class="btn btn-primary" onclick="generateWeblogo()" id="weblogoGenBtn" style="width:100%;margin-top:10px" data-i18n="workbench.gen_logo">Generate logo</button>
+      <input type="text" id="weblogoExpName" data-i18n-placeholder="workbench.exp_name" placeholder="Experiment name (optional)" style="display:none;width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-top:6px">
+      <button class="btn btn-outline" onclick="saveWeblogoExp()" id="weblogoSaveBtn" style="width:100%;margin-top:6px;display:none" data-i18n="workbench.save_exp">Save as experiment</button>
     </div>
     <!-- 右侧：结果 -->
     <div id="weblogoResult" class="hidden" style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px">
       <div style="align-self:stretch;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <span id="weblogoInfo" style="font-size:13px;color:#888"></span>
-        <button class="btn btn-sm btn-outline" onclick="downloadWeblogo()">📥 下载 PNG</button>
+        <button class="btn btn-sm btn-outline" onclick="downloadWeblogo()" data-i18n="workbench.download_png">Download PNG</button>
       </div>
       <img id="weblogoImage" style="max-width:100%" alt="Weblogo">
     </div>
@@ -393,7 +399,7 @@
 <div id="tab-enzyme" class="tab-panel hidden">
   <div class="toolbar" style="flex-wrap:wrap">
     <input type="file" id="enzymeFile" accept=".xlsx" onchange="uploadEnzymeFile()" style="display:none">
-    <button class="btn btn-outline" onclick="document.getElementById('enzymeFile').click()">📁 上传 TECAN xlsx</button>
+    <button class="btn btn-outline" onclick="document.getElementById('enzymeFile').click()" data-i18n="workbench.upload_tecan">Upload TECAN xlsx</button>
     <span id="enzymeMeta" style="font-size:13px;color:#888;margin-left:8px"></span>
   </div>
 
@@ -401,10 +407,10 @@
     <!-- 左侧: 96 孔板 -->
     <div class="calc-card" style="padding:12px">
       <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn btn-sm btn-outline" onclick="enzymeSelectAll()">全选</button>
-        <button class="btn btn-sm btn-outline" onclick="enzymeClearAll()">清除</button>
-        <button class="btn btn-sm btn-outline" onclick="enzymeInvertSelect()">反选</button>
-        <span style="color:#888;font-size:12px;margin-left:4px">Ctrl+点击多选</span>
+        <button class="btn btn-sm btn-outline" onclick="enzymeSelectAll()" data-i18n="workbench.select_all_wells">Select all</button>
+        <button class="btn btn-sm btn-outline" onclick="enzymeClearAll()" data-i18n="workbench.clear">Clear</button>
+        <button class="btn btn-sm btn-outline" onclick="enzymeInvertSelect()" data-i18n="workbench.invert">Invert</button>
+        <span style="color:#888;font-size:12px;margin-left:4px" data-i18n="workbench.ctrl_multi">Ctrl+click for multi-select</span>
       </div>
       <div id="plateGrid" class="plate-grid">
         <div class="plate-corner"></div>
@@ -420,15 +426,15 @@
 
     <!-- 右侧: 孔详情 + 浓度设置 -->
     <div class="calc-card" style="padding:12px">
-      <h3 style="margin-bottom:8px">孔位详情</h3>
-      <div id="wellDetail" style="font-size:13px;color:#888">选择孔位查看详情</div>
+      <h3 style="margin-bottom:8px" data-i18n="workbench.well_detail">Well detail</h3>
+      <div id="wellDetail" style="font-size:13px;color:#888" data-i18n="workbench.pick_well">Select a well to inspect</div>
       <div id="wellForm" class="hidden" style="margin-top:8px">
-        <label style="font-size:13px">命名 <input type="text" id="wellName" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
-        <label style="font-size:13px;margin-top:4px">组 <input type="text" id="wellGroup" list="wellGroupOptions" onchange="enzymeUpdateWells()" placeholder="同组孔取平均作图" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+        <label style="font-size:13px"><span data-i18n="workbench.well_name">Name</span> <input type="text" id="wellName" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
+        <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.well_group">Group</span> <input type="text" id="wellGroup" list="wellGroupOptions" onchange="enzymeUpdateWells()" data-i18n-placeholder="workbench.well_group_ph" placeholder="Same-group wells are averaged for plots" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
           <datalist id="wellGroupOptions"></datalist>
         </label>
         <div style="display:flex;gap:8px;align-items:end">
-          <label style="font-size:13px;flex:1">浓度
+          <label style="font-size:13px;flex:1"><span data-i18n="workbench.concentration">Concentration</span>
             <input type="number" id="wellConc" step="any" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
           </label>
           <select id="wellConcUnit" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
@@ -436,34 +442,35 @@
             <option value="uM">μM</option>
           </select>
         </div>
-        <label style="font-size:13px;margin-top:4px">MW (Da) <input type="number" id="wellMW" step="any" onchange="enzymeUpdateWells()" placeholder="用于 ng/mL ↔ μM 换算" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
-        <label style="font-size:13px;margin-top:4px">关联蛋白
+        <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.mw_da">MW (Da)</span> <input type="number" id="wellMW" step="any" onchange="enzymeUpdateWells()" data-i18n-placeholder="workbench.mw_ph" placeholder="Used for ng/mL ↔ μM" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
+        <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.link_protein">Linked protein</span>
           <div style="position:relative">
-            <input type="text" id="enzymeProteinSearch" placeholder="搜索蛋白..." oninput="enzymeSearchProtein()" autocomplete="off"
+            <input type="text" id="enzymeProteinSearch" data-i18n-placeholder="workbench.search_proteins" placeholder="Search proteins…" oninput="enzymeSearchProtein()" autocomplete="off"
                    style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%;font-size:13px">
             <div id="enzymeProteinResults" class="search-dropdown hidden"></div>
           </div>
           <input type="hidden" id="wellProtein">
         </label>
         <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-sm enzyme-ref-btn" id="refNone" onclick="enzymeSetRef(null)">● 样品</button>
-          <button class="btn btn-sm enzyme-ref-btn" id="refBlank" onclick="enzymeSetRef('blank')">○ 空白</button>
-          <button class="btn btn-sm enzyme-ref-btn" id="refNeg" onclick="enzymeSetRef('neg')">⊖ 阴性</button>
-          <button class="btn btn-sm enzyme-ref-btn" id="refPos" onclick="enzymeSetRef('pos')">⊕ 阳性</button>
+          <button class="btn btn-sm enzyme-ref-btn" id="refNone" onclick="enzymeSetRef(null)" data-i18n="workbench.sample_well">Sample</button>
+          <button class="btn btn-sm enzyme-ref-btn" id="refBlank" onclick="enzymeSetRef('blank')" data-i18n="workbench.blank">Blank</button>
+          <button class="btn btn-sm enzyme-ref-btn" id="refNeg" onclick="enzymeSetRef('neg')" data-i18n="workbench.neg">Negative</button>
+          <button class="btn btn-sm enzyme-ref-btn" id="refPos" onclick="enzymeSetRef('pos')" data-i18n="workbench.pos">Positive</button>
         </div>
-        <button class="btn btn-sm btn-outline" onclick="enzymeBatchConc()" style="margin-top:6px">📐 选中孔等比设浓度</button>
+        <button class="btn btn-sm btn-outline" onclick="enzymeBatchConc()" style="margin-top:6px" data-i18n="workbench.batch_conc">Geometric series on selected wells</button>
       </div>
       <div id="wellFit" class="hidden" style="margin-top:8px;font-size:13px"></div>
     </div>
   </div>
 
-  <!-- 时间范围筛选：拖动长轴两端把手选定连续时间区间（对拟合/绘图/存档/导出统一生效） -->
-  <div id="enzymeTimePanel" class="hidden" style="margin-top:12px">
-    <div class="calc-card" style="padding:12px">
+  <details class="advanced" style="margin-top:12px">
+    <summary data-i18n="common.advanced">Advanced</summary>
+    <div class="hidden" id="enzymeTimePanel">
+    <div class="calc-card" style="padding:12px;border:0">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
-        <h3 style="margin:0;font-size:15px">时间范围筛选</h3>
-        <span id="enzymeTimeCount" style="font-size:12px;color:#888"></span>
-        <button class="btn btn-sm btn-outline" onclick="enzymeTimeAll()">全选</button>
+        <h3 style="margin:0;font-size:15px" data-i18n="workbench.time_filter">Time-range filter</h3>
+        <span id="enzymeTimeCount" style="font-size:12px;color:var(--graphite)"></span>
+        <button class="btn btn-sm btn-outline" onclick="enzymeTimeAll()" data-i18n="workbench.select_all_wells">Select all</button>
       </div>
       <div id="enzymeTimeAxis" class="enzyme-time-axis"
            onpointerdown="enzymeTimeAxisDown(event)" onpointermove="enzymeTimeAxisMove(event)"
@@ -473,48 +480,50 @@
         <div class="eta-handle eta-handle-lo"></div>
         <div class="eta-handle eta-handle-hi"></div>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:12px;color:#999;margin-top:4px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--graphite);margin-top:4px">
         <span id="enzymeTimeLoLabel"></span>
         <span id="enzymeTimeHiLabel"></span>
       </div>
     </div>
-  </div>
-
-  <!-- 工具栏 -->
-  <div class="tab-actions" style="margin-top:12px">
-    <button class="btn btn-primary" onclick="enzymeCalcSelected()">🧪 计算选中孔</button>
-    <button class="btn btn-outline" onclick="enzymeCalcAll()">计算全部</button>
-    <label style="font-size:12px;display:flex;align-items:center;gap:4px">
-      <input type="checkbox" id="enzymeShowBlank" onchange="enzymePlot('kinetics')"> 显示阴性
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0">
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px;flex-direction:row">
+      <input type="checkbox" id="enzymeShowBlank" onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.show_neg">Show negative</span>
     </label>
-    <label style="font-size:12px;display:flex;align-items:center;gap:4px">
-      <input type="checkbox" id="enzymeSubBlank" checked onchange="enzymePlot('kinetics')"> 扣除阴性
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px;flex-direction:row">
+      <input type="checkbox" id="enzymeSubBlank" checked onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.sub_neg">Subtract negative</span>
     </label>
-    <label style="font-size:12px;display:flex;align-items:center;gap:4px">
-      <input type="checkbox" id="enzymeAlignStart" onchange="enzymePlot('kinetics')"> 对齐起始
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px;flex-direction:row">
+      <input type="checkbox" id="enzymeAlignStart" onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.align_start">Align start</span>
     </label>
-    <label style="font-size:12px;display:flex;align-items:center;gap:4px">
-      <input type="checkbox" id="enzymeAlignEnd" onchange="enzymePlot('kinetics')"> 对齐终止
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px;flex-direction:row">
+      <input type="checkbox" id="enzymeAlignEnd" onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.align_end">Align end</span>
     </label>
-    <label style="font-size:12px;display:flex;align-items:center;gap:4px" title="同组孔逐时间点取平均成一条曲线 + 误差棒；关闭则逐孔绘制">
-      <input type="checkbox" id="enzymeGroup" checked onchange="enzymePlot('kinetics')"> 按组分平均
+    <label style="font-size:12px;display:flex;align-items:center;gap:4px;flex-direction:row">
+      <input type="checkbox" id="enzymeGroup" checked onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.group_avg">Average by group</span>
     </label>
-    <select id="enzymeErrorBar" onchange="enzymePlot('kinetics')" title="同组孔平均曲线的误差棒" style="font-size:13px;padding:4px 6px;border:1px solid #d0d0d0;border-radius:4px">
-      <option value="sd" selected>误差棒 SD</option>
-      <option value="sem">误差棒 SEM</option>
-      <option value="none">无误差棒</option>
+    <select id="enzymeErrorBar" onchange="enzymePlot('kinetics')" style="font-size:13px;padding:8px 6px;border:1px dashed var(--rule);min-height:44px">
+      <option value="sd" selected data-i18n-option="workbench.err_sd">Error bar SD</option>
+      <option value="sem" data-i18n-option="workbench.err_sem">Error bar SEM</option>
+      <option value="none" data-i18n-option="workbench.err_none">No error bars</option>
     </select>
-    <button class="btn btn-outline" onclick="enzymePlot('kinetics')">📈 动力学曲线</button>
-    <button class="btn btn-outline" onclick="enzymePlot('michaelis')">📊 MM 曲线</button>
-    <button class="btn btn-outline" onclick="enzymeExportExcel()">📊 导出作图 Excel</button>
-    <button class="btn btn-outline" onclick="enzymeSaveExp()">💾 保存为实验</button>
+    <button class="btn btn-outline" onclick="enzymePlot('kinetics')" data-i18n="workbench.kinetics">Kinetics plot</button>
+    <button class="btn btn-outline" onclick="enzymePlot('michaelis')" data-i18n="workbench.mm">MM plot</button>
+    <button class="btn btn-outline" onclick="enzymeExportExcel()" data-i18n="workbench.export_plot_xlsx">Export plot Excel</button>
+    </div>
+  </details>
+
+  <div class="tab-actions sticky-actions" style="margin-top:12px">
+    <button class="btn btn-primary" onclick="enzymeCalcSelected()" data-i18n="workbench.calc_selected">Calculate selected wells</button>
+    <button class="btn btn-outline" onclick="enzymeCalcAll()" data-i18n="workbench.calc_all_wells">Calculate all</button>
+    <button class="btn btn-outline" onclick="enzymeSaveExp()" data-i18n="workbench.save_exp">Save as experiment</button>
   </div>
 
   <!-- 结果表 -->
   <div class="table-scroll" style="margin-top:12px">
     <table id="enzymeTable" class="calc-table hidden">
       <thead><tr>
-        <th>井</th><th>命名</th><th>组</th><th>参考</th><th>ng/mL</th><th>μM</th>
+        <th data-i18n="workbench.well">Well</th><th data-i18n="workbench.well_name">Name</th><th data-i18n="workbench.col_group">Group</th><th data-i18n="workbench.ref">Reference</th><th>ng/mL</th><th>μM</th>
         <th>ΔOD/min</th><th>R²</th><th>U/mL</th>
       </tr></thead>
       <tbody></tbody>
@@ -533,12 +542,12 @@
     <!-- 左侧：实验列表 -->
     <div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <input type="text" id="copySearchInput" placeholder="搜索实验标题..." oninput="filterCopyExps()"
+        <input type="text" id="copySearchInput" data-i18n-placeholder="workbench.search_exp" placeholder="Search experiment titles..." oninput="filterCopyExps()"
                style="flex:1;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
       </div>
       <div id="copyTypeTags" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"></div>
       <div id="copyExpList" style="max-height:420px;overflow-y:auto">
-        <p style="color:#888;font-size:13px;text-align:center;padding:40px">加载中...</p>
+        <p style="color:#888;font-size:13px;text-align:center;padding:40px" data-i18n="common.loading">Loading…</p>
       </div>
     </div>
     <!-- 右侧：详情预览 -->
@@ -546,9 +555,7 @@
       <h3 id="copyPreviewTitle" style="margin-bottom:4px;font-size:16px"></h3>
       <div id="copyPreviewMeta" style="font-size:13px;color:#888;margin-bottom:10px"></div>
       <div id="copyPreviewDetail" style="font-size:13px;line-height:1.7"></div>
-      <button class="btn btn-primary" onclick="applyCopyAndSwitch()" style="margin-top:12px;width:100%">
-        📋 加载到对应工具
-      </button>
+      <button class="btn btn-primary" onclick="applyCopyAndSwitch()" style="margin-top:12px;width:100%" data-i18n="workbench.load_tool">Load into matching tool</button>
     </div>
   </div>
 </div>

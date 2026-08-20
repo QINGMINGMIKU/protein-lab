@@ -399,7 +399,7 @@ assert _pj.get("calc_type") == "concentration", "紧凑浓度存档应规范出 
 assert _pj.get("proteins") and _pj["proteins"][0]["name"] == models.protein_get(pid)["name"], "应规范出含绑定蛋白的 proteins 列表"
 assert _pj["proteins"][0]["a280"] == 1.94 and _pj["proteins"][0]["conc_uM"] == 38.13, "proteins 应含 a280/浓度"
 _html19a = client.get(f"/experiments/{_legacy['id']}").get_data(as_text=True)
-assert "浓度计算" in _html19a and "38.13" in _html19a, "MCP 紧凑浓度详情页应渲染浓度卡片"
+assert 'data-i18n="detail.conc_title"' in _html19a and "38.13" in _html19a, "MCP 紧凑浓度详情页应渲染浓度卡片"
 # 19b. 通用绑定快照：无 proteins 的存档（酶活等）也会附上库内蛋白数值快照
 _enzyme19 = services.create_experiment(
     title="", exp_type="酶活测定", protein_ids=[pid], date="2026-08-16",
@@ -552,7 +552,7 @@ _e22c = services.create_experiment(
     results={"结论": "wt 较高"},
 )
 _h22c = client.get(f"/experiments/{_e22c['id']}").get_data(as_text=True)
-assert "实验参数</h2>" in _h22c, "AKTA 汇总实验无 peaks 时应落入 kv 区（known 门修复），当前整页空白"
+assert 'data-i18n="detail.params"' in _h22c, "AKTA 汇总实验无 peaks 时应落入 kv 区（known 门修复），当前整页空白"
 assert "主峰 23 mL" in _h22c, "kv 区应展示参数值"
 # 22d. 嵌套 dict 渲染成子表格，不是一行巨型 JSON
 _e22d = services.create_experiment(

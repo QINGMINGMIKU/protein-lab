@@ -2,124 +2,130 @@
 {% block content %}
 
 <div class="page-header">
-  <h1>蛋白库</h1>
-  <div style="display:flex;gap:8px">
-    <button class="btn btn-outline" onclick="refreshAllProteins()">🔄 刷新全部</button>
-    <button class="btn btn-primary" onclick="showAddModal()">+ 添加蛋白</button>
+  <h1 data-i18n="proteins.title">Protein Library</h1>
+  <div class="page-actions">
+    <button class="btn btn-outline" onclick="refreshAllProteins()"><span data-i18n="proteins.refresh">Recalculate all</span></button>
+    <button class="btn btn-primary" onclick="showAddModal()"><span data-i18n="proteins.add">Add protein</span></button>
   </div>
 </div>
 
 <div class="toolbar">
-  <input type="text" id="searchBox" placeholder="搜索蛋白名称/标签..." oninput="loadProteins()">
-  <button class="btn btn-outline" onclick="showImportModal()">📥 FASTA 导入</button>
+  <input type="text" id="searchBox" data-i18n-placeholder="proteins.search" placeholder="Search name or tags…" oninput="loadProteins()">
+  <button class="btn btn-outline" onclick="showImportModal()"><span data-i18n="proteins.import">Import FASTA</span></button>
 </div>
 <div id="tagFilterBar" class="tag-filter-bar" style="margin-bottom:8px"></div>
 
-<!-- ── 批量操作栏 ── -->
 <div id="bulkBar" class="bulk-bar hidden">
-  <span class="bulk-count" id="bulkCount">已选 0 项</span>
-  <button class="btn btn-sm btn-danger" onclick="batchDeleteProteins()">🗑 删除选中</button>
-  <button class="btn btn-sm btn-outline" onclick="batchEditTags()">🏷 改标签</button>
-  <button class="btn btn-sm btn-outline" onclick="deleteAllProteins()">全部删除</button>
-  <button class="btn btn-sm" onclick="clearSelection()">取消选择</button>
+  <span class="bulk-count" id="bulkCount">Selected 0</span>
+  <button class="btn btn-sm btn-danger" onclick="batchDeleteProteins()"><span data-i18n="proteins.delete_selected">Delete selected</span></button>
+  <button class="btn btn-sm btn-outline" onclick="batchEditTags()"><span data-i18n="proteins.edit_tags">Edit tags</span></button>
+  <button class="btn btn-sm btn-outline" onclick="deleteAllProteins()"><span data-i18n="proteins.delete_all">Delete all</span></button>
+  <button class="btn btn-sm" onclick="clearSelection()"><span data-i18n="proteins.clear_sel">Clear selection</span></button>
 </div>
 
+<div class="table-scroll desktop-table">
 <table id="proteinTable" class="datatable">
   <thead>
     <tr>
-      <th style="width:36px"><input type="checkbox" id="selectAllProteins" onchange="toggleSelectAllProteins(this)" title="全选"></th>
-      <th>名称</th>
-      <th onclick="sortProteinTable('mw')" style="cursor:pointer" title="点击排序">MW (Da) <span id="sortMwInd" class="sort-ind"></span></th>
-      <th onclick="sortProteinTable('ext_ox')" style="cursor:pointer" title="点击排序">ε_ox <span id="sortExtInd" class="sort-ind"></span></th>
-      <th>Abs[0.1%]</th>
-      <th>标签</th>
-      <th>序列</th>
+      <th style="width:36px"><input type="checkbox" id="selectAllProteins" onchange="toggleSelectAllProteins(this)" data-i18n-title="proteins.select_all" title="Select all"></th>
+      <th data-i18n="proteins.col_name">Name</th>
+      <th onclick="sortProteinTable('mw')" style="cursor:pointer"><span data-i18n="proteins.col_mw">MW (Da)</span> <span id="sortMwInd" class="sort-ind"></span></th>
+      <th onclick="sortProteinTable('ext_ox')" style="cursor:pointer"><span data-i18n="proteins.col_ext">ε_ox</span> <span id="sortExtInd" class="sort-ind"></span></th>
+      <th data-i18n="proteins.col_abs">Abs[0.1%]</th>
+      <th data-i18n="proteins.col_tags">Tags</th>
+      <th data-i18n="proteins.col_seq">Sequence</th>
       <th></th>
     </tr>
   </thead>
   <tbody></tbody>
 </table>
+</div>
+<div id="proteinList" class="record-list"></div>
 
-<!-- ── 详情面板 ── -->
 <div id="detailPanel" class="panel hidden">
   <div class="panel-header">
     <h2 id="detailName"></h2>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-sm btn-primary" id="detailCreateExpBtn" onclick="createExpFromProtein()">📋 新建实验</button>
-      <button class="btn btn-sm" onclick="closeDetail()">✕</button>
+    <div class="page-actions">
+      <button class="btn btn-sm btn-primary" id="detailCreateExpBtn" onclick="createExpFromProtein()"><span data-i18n="proteins.create_exp">New experiment</span></button>
+      <button class="btn btn-sm btn-icon" data-drawer-close onclick="closeDetail()" data-i18n-aria="common.close">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
     </div>
   </div>
   <div id="detailContent"></div>
 </div>
 
-<!-- ── 添加蛋白弹窗 ── -->
 <div id="addModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>添加蛋白</h3>
-      <button class="btn btn-sm" onclick="closeAddModal()">✕</button>
+      <h3 data-i18n="proteins.add_title">Add protein</h3>
+      <button class="btn btn-sm btn-icon" onclick="closeAddModal()" data-i18n-aria="common.close">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
     </div>
     <form id="addForm" onsubmit="addProtein(event)">
-      <label>名称 <input type="text" name="name" required placeholder="如 TIM-WT"></label>
-      <label>序列 <textarea name="sequence" required rows="4" placeholder="单字母氨基酸序列"></textarea></label>
-      <label>标签 <span style="font-weight:400;color:#888">（回车添加）</span>
+      <label><span data-i18n="proteins.name">Name</span> <input type="text" name="name" required data-i18n-placeholder="proteins.name_ph" placeholder="e.g. TIM-WT"></label>
+      <label><span data-i18n="proteins.sequence">Sequence</span> <textarea name="sequence" required rows="4" data-i18n-placeholder="proteins.seq_ph" placeholder="Single-letter amino acid sequence"></textarea></label>
+      <label><span data-i18n="proteins.tags">Tags</span> <span style="font-weight:400;color:var(--graphite)" data-i18n="proteins.tags_hint">(Enter to add)</span>
         <div class="tag-input" id="addTagInput">
-          <input type="text" placeholder="输入后回车" onkeydown="handleTagKey(event, 'addTagInput')">
+          <input type="text" data-i18n-placeholder="proteins.tag_ph" placeholder="Type then Enter" onkeydown="handleTagKey(event, 'addTagInput')">
         </div>
         <input type="hidden" name="tag" id="addTagHidden">
       </label>
-      <label>备注 <input type="text" name="notes" placeholder=""></label>
+      <label><span data-i18n="proteins.notes">Notes</span> <input type="text" name="notes"></label>
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary">确定添加</button>
-        <button type="button" class="btn btn-outline" onclick="closeAddModal()">取消</button>
+        <button type="submit" class="btn btn-primary" data-i18n="proteins.submit_add">Add</button>
+        <button type="button" class="btn btn-outline" onclick="closeAddModal()" data-i18n="common.cancel">Cancel</button>
       </div>
     </form>
   </div>
 </div>
 
-<!-- ── FASTA 导入弹窗 ── -->
 <div id="importModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>FASTA 批量导入</h3>
-      <button class="btn btn-sm" onclick="closeImportModal()">✕</button>
+      <h3 data-i18n="proteins.import_title">Batch FASTA import</h3>
+      <button class="btn btn-sm btn-icon" onclick="closeImportModal()" data-i18n-aria="common.close">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
     </div>
     <form id="importForm" onsubmit="importFasta(event)">
-      <label>上传文件 <input type="file" id="fastaFile" accept=".fasta,.fa,.txt" onchange="loadFastaFile()"></label>
-      <label>或直接粘贴 FASTA 文本 <textarea name="fasta" required rows="10" placeholder=">蛋白名1&#10;MGHHHHHHSSG...&#10;>蛋白名2&#10;MARTFFVGG..."></textarea></label>
-      <label>统一标签 <input type="text" name="tag" placeholder="可选"></label>
-      <label>统一备注 <input type="text" name="notes" placeholder="可选"></label>
+      <label><span data-i18n="proteins.upload_file">Upload file</span> <input type="file" id="fastaFile" accept=".fasta,.fa,.txt" onchange="loadFastaFile()"></label>
+      <label><span data-i18n="proteins.or_paste">Or paste FASTA text</span> <textarea name="fasta" required rows="10" placeholder=">protein1&#10;MGHHHHHHSSG..."></textarea></label>
+      <label><span data-i18n="proteins.shared_tag">Shared tag</span> <input type="text" name="tag"></label>
+      <label><span data-i18n="proteins.shared_notes">Shared notes</span> <input type="text" name="notes"></label>
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary">导入</button>
-        <button type="button" class="btn btn-outline" onclick="closeImportModal()">取消</button>
+        <button type="submit" class="btn btn-primary" data-i18n="proteins.import_go">Import</button>
+        <button type="button" class="btn btn-outline" onclick="closeImportModal()" data-i18n="common.cancel">Cancel</button>
       </div>
     </form>
   </div>
 </div>
 
-<!-- ── 批量改标签弹窗 ── -->
 <div id="batchTagModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>批量修改标签</h3>
-      <button class="btn btn-sm" onclick="closeBatchTagModal()">✕</button>
+      <h3 data-i18n="proteins.batch_title">Batch edit tags</h3>
+      <button class="btn btn-sm btn-icon" onclick="closeBatchTagModal()" data-i18n-aria="common.close">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
     </div>
-    <p style="font-size:13px;color:#888;margin-bottom:12px">将应用到 <b id="batchTagCount">0</b> 个选中的蛋白</p>
-    <label>添加标签 <span style="font-weight:400;color:#888">（回车添加，不影响已有标签）</span>
+    <p style="font-size:13px;color:var(--graphite);margin-bottom:12px"><span data-i18n="proteins.batch_apply_n">Will apply to {n} selected proteins</span> <b id="batchTagCount">0</b></p>
+    <label><span data-i18n="proteins.add_tags">Add tags</span> <span data-i18n="proteins.add_tags_hint">(Enter to add; existing tags stay)</span>
       <div class="tag-input" id="batchTagAddInput">
-        <input type="text" placeholder="输入后回车" onkeydown="handleTagKey(event, 'batchTagAddInput')">
+        <input type="text" data-i18n-placeholder="proteins.tag_ph" placeholder="Type then Enter" onkeydown="handleTagKey(event, 'batchTagAddInput')">
       </div>
       <input type="hidden" id="batchTagAddHidden">
     </label>
-    <label>移除标签 <span style="font-weight:400;color:#888">（回车添加要移除的标签）</span>
+    <label><span data-i18n="proteins.remove_tags">Remove tags</span> <span data-i18n="proteins.remove_tags_hint">(Enter tags to remove)</span>
       <div class="tag-input" id="batchTagRemoveInput">
-        <input type="text" placeholder="输入后回车" onkeydown="handleTagKey(event, 'batchTagRemoveInput')">
+        <input type="text" data-i18n-placeholder="proteins.tag_ph" placeholder="Type then Enter" onkeydown="handleTagKey(event, 'batchTagRemoveInput')">
       </div>
       <input type="hidden" id="batchTagRemoveHidden">
     </label>
     <div class="form-actions">
-      <button class="btn btn-primary" onclick="applyBatchTags()">确定应用</button>
-      <button class="btn btn-outline" onclick="closeBatchTagModal()">取消</button>
+      <button class="btn btn-primary" onclick="applyBatchTags()" data-i18n="proteins.apply">Apply</button>
+      <button class="btn btn-outline" onclick="closeBatchTagModal()" data-i18n="common.cancel">Cancel</button>
     </div>
   </div>
 </div>
