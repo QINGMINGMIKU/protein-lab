@@ -10,7 +10,7 @@
 </div>
 
 <div class="toolbar">
-  <select id="expTypeFilter" onchange="loadExperiments()">
+  <select id="expTypeFilter" data-exp-types onchange="loadExperiments()">
     <option value="" data-i18n-option="archive.all_types">All types</option>
     {% for t in exp_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
   </select>
@@ -64,7 +64,7 @@
       <label><span data-i18n="archive.field_title">Title</span> <input type="text" name="title" id="expTitle" required></label>
       <div class="form-row">
         <label><span data-i18n="archive.field_type">Type</span>
-          <select name="exp_type" id="expType" required>
+          <select name="exp_type" id="expType" required data-exp-types>
             <option value="" data-i18n-option="archive.choose">-- choose --</option>
             {% for t in exp_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
           </select>

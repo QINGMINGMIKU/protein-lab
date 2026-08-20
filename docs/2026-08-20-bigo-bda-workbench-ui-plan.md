@@ -48,6 +48,7 @@ CI must run `test_research.py` and `test_ui.py` before the build.
 | Loop | Date | Tests | Notes |
 |------|------|-------|-------|
 | 2 | 2026-08-20 | all five scripts passed | English default copy, i18n wiring, enzyme Advanced time panel, CI includes research+ui tests. |
+| 3 | 2026-08-20 | all five scripts passed | Dialog overlay/Escape cancel as null; unique mobile+desktop bulk IDs; Weblogo search restored; leftover JS i18n; stack-on-narrow; exp-type option apply scoped. |
 
 ## Explicit exclusions
 

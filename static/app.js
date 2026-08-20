@@ -314,7 +314,7 @@ async function loadProteins() {
     }
     tbody.innerHTML = proteins.map(p => `
       <tr>
-        <td><input type="checkbox" class="protein-check" value="${p.id}" onchange="updateBulkBar()"></td>
+        <td><input type="checkbox" class="protein-check" value="${p.id}" onchange="syncRecordCheck(this, 'protein-check'); updateBulkBar()"></td>
         <td><span class="clickable" data-action="show-detail" data-id="${p.id}">${esc(p.name)}</span></td>
         <td>${p.mw ? p.mw.toLocaleString() : "-"}</td>
         <td>${p.ext_ox || "-"}</td>
@@ -327,8 +327,11 @@ async function loadProteins() {
     const list = document.getElementById("proteinList");
     if (list) {
       list.innerHTML = proteins.map(p => `
-        <article class="record-card" data-action="show-detail" data-id="${p.id}">
-          <h3>${esc(p.name)}</h3>
+        <article class="record-card">
+          <div class="record-card-head">
+            <label class="record-select"><input type="checkbox" class="protein-check" value="${p.id}" onchange="syncRecordCheck(this, 'protein-check'); updateBulkBar()"></label>
+            <h3 data-action="show-detail" data-id="${p.id}">${esc(p.name)}</h3>
+          </div>
           <dl>
             <dt>MW</dt><dd>${p.mw ? p.mw.toLocaleString() : "-"}</dd>
             <dt>ε_ox</dt><dd>${p.ext_ox || "-"}</dd>
@@ -436,6 +439,8 @@ async function showDetail(id) {
     currentDetailProtein = p;
     document.getElementById("detailName").textContent = p.name;
     document.getElementById("detailCreateExpBtn").onclick = () => createExpFromProtein();
+    const delBtn = document.getElementById("detailDeleteBtn");
+    if (delBtn) delBtn.onclick = () => deleteProtein(p.id, p.name);
     document.getElementById("detailContent").innerHTML = `
       <dl class="info-grid">
         <dt>${t("proteins.mw")}</dt><dd>${p.mw ? p.mw.toLocaleString() + " Da" : "-"}</dd>
@@ -681,7 +686,7 @@ async function searchProteins() {
       <div class="search-item" onclick="addProteinToTable(${p.id})">
         <strong>${esc(p.name)}</strong>
         <span style="color:#888;font-size:12px">${p.mw ? p.mw.toLocaleString() + ' Da' : ''} | ε=${p.ext_ox || 0}</span>
-        ${selectedProteins[p.id] ? '<span style="color:#27ae60">✓ 已选</span>' : ''}
+        ${selectedProteins[p.id] ? `<span style="color:var(--cyan-deep)">✓ ${t("ui.selected_chip")}</span>` : ''}
       </div>
     `).join("");
   }
@@ -1009,7 +1014,7 @@ async function searchBliProteins() {
     dropdown.innerHTML = matches.map(p => `
       <div class="search-item" onclick="addBliProtein(${p.id})">
         <strong>${esc(p.name)}</strong>
-        ${bliProteins[p.id] ? '<span style="color:#27ae60">✓ 已添加</span>' : ''}
+        ${bliProteins[p.id] ? `<span style="color:var(--cyan-deep)">✓ ${t("ui.added_chip")}</span>` : ''}
       </div>
     `).join("");
   }
@@ -1147,12 +1152,12 @@ function renderBliResults(results) {
     };
     html += `
       <div class="result-box" style="margin-bottom:14px">
-        <strong>${esc(p.name)}</strong> (母液 ${r.stock_conc_uM} μM, ${r.dilution_factor}× 稀释, ${r.n_steps} 步)
-        <table style="margin-top:6px"><thead><tr><th>#</th><th>浓度 (${dilUnit})</th><th>总体积 (μL)</th><th>取上步 (μL)</th><th>缓冲液 (μL)</th></tr></thead>
+        <strong>${esc(p.name)}</strong> (${t("workbench.stock_c")} ${r.stock_conc_uM} μM, ${r.dilution_factor}×, ${r.n_steps} ${t("workbench.steps")})
+        <table style="margin-top:6px"><thead><tr><th>#</th><th>${t("workbench.col_conc")} (${dilUnit})</th><th>${t("workbench.total_vol")}</th><th>${t("workbench.from_prev")}</th><th>${t("workbench.col_buffer")}</th></tr></thead>
         <tbody>${r.steps.map(s => `
           <tr><td>${s.step}</td><td>${fmtConc(s.conc_uM)}</td><td>${s.total_vol_uL}</td><td>${s.stock_vol_uL}</td><td>${s.buffer_vol_uL}</td></tr>
         `).join("")}</tbody></table>
-        <p style="margin-top:6px;font-size:13px;color:#666">第一步总需求 ≈ ${r.steps[0].total_vol_uL} μL（含递推稀释裕量）</p>
+        <p style="margin-top:6px;font-size:13px;color:var(--graphite)">${t("detail.first_demand", { v: r.steps[0].total_vol_uL })}</p>
       </div>`;
   }
   container.innerHTML = html;
@@ -1379,7 +1384,7 @@ async function selectCopyExp(eid) {
         proteins.map(p => `· ${esc(p.name)}: A₂₈₀=${p.a280 ?? "?"}, ${p.conc_uM ?? "?"} μM`).join("<br>");
     } else if (calcType === "dilution" && proteins.length) {
       detailHtml = `<b>${t("copy.proteins_n", { n: proteins.length })}</b><br>` +
-        proteins.map(p => `· ${esc(p.name)}: ${p.stock_uM}→${p.start_uM} μM, ${p.factor}×${p.steps}步`).join("<br>");
+        proteins.map(p => `· ${esc(p.name)}: ${t("workbench.dil_summary", { c: p.stock_uM, s: p.start_uM, f: p.factor, n: p.steps })}`).join("<br>");
     } else if (calcType === "enzyme") {
       const withData = Object.entries(wells).filter(([_, w]) => w.fit || w.times);
       detailHtml = `<b>${t("copy.wells_n", { n: Object.keys(wells).length })}</b> (${withData.length})<br>` +
@@ -1454,7 +1459,7 @@ async function applyCopyAndSwitch() {
     enzymeLastPlotType = null;
     renderEnzymeTimePanel();
     document.getElementById("enzymeMeta").textContent =
-      `${emeta.sample || ""} | ${emeta.wavelength || "?"} nm | ${Object.keys(wells).length} wells (复制)`;
+      `${emeta.sample || ""} | ${emeta.wavelength || "?"} nm | ${Object.keys(wells).length} wells (${t("copy.copied")})`;
     renderPlate();
     if (Object.values(enzymeWellInfo).some(i => i.fit)) {
       renderEnzymeTable(Object.keys(wells));
@@ -1509,7 +1514,7 @@ async function applyCopyAndSwitch() {
       renderBliCurves();
       // 揭示分析结果区（与上传路径一致：bliSampleList 在 #bliAnalyzed 内，默认 hidden）
       document.getElementById("bliMeta").textContent =
-        `${copyCache.title || "已存档"} | ${data.n_sensors} 传感器 | ${bliSamples.length} 样本（快照）`;
+        `${copyCache.title || t("toast.saved")} | ${t("workbench.sensors_n", { n: data.n_sensors })} | ${t("copy.samples_n", { n: bliSamples.length })}`;
       document.getElementById("bliAnalyzed").classList.remove("hidden");
       document.getElementById("bliKdWrap").classList.add("hidden");
       document.getElementById("bliPlotArea").innerHTML = "";
@@ -1543,7 +1548,7 @@ async function applyCopyAndSwitch() {
       renderAktaRuns();
       // 揭示分析结果区（与上传路径一致：aktaRunList 在 #aktaAnalyzed 内，默认 hidden）
       document.getElementById("aktaMeta").textContent =
-        `1 文件（快照） | 1 成功 | ${run.channels.length} 通道`;
+        `${t("workbench.files_ok", { n: 1, ok: 1 })} | ${t("workbench.channels_n", { n: run.channels.length })}`;
       document.getElementById("aktaEventsInfo").textContent = "";
       document.getElementById("aktaAnalyzed").classList.remove("hidden");
       document.getElementById("aktaPeakTableWrap").classList.add("hidden");
@@ -1612,7 +1617,7 @@ async function loadExperiments() {
       const typeLabel = (window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type;
       return `
       <tr>
-        <td><input type="checkbox" class="exp-check" value="${e.id}" onchange="updateExpBulkBar()"></td>
+        <td><input type="checkbox" class="exp-check" value="${e.id}" onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></td>
         <td class="exp-date">${e.date || "-"}</td>
         <td><a href="/experiments/${e.id}">${esc(e.title)}</a></td>
         <td class="exp-type"><span class="badge">${esc(typeLabel)}</span></td>
@@ -1628,14 +1633,17 @@ async function loadExperiments() {
       list.innerHTML = exps.map(e => {
         const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
         const typeLabel = (window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type;
-        return `<a class="record-card" href="/experiments/${e.id}">
-          <h3>${esc(e.title)}</h3>
+        return `<article class="record-card">
+          <div class="record-card-head">
+            <label class="record-select"><input type="checkbox" class="exp-check" value="${e.id}" onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></label>
+            <h3><a href="/experiments/${e.id}">${esc(e.title)}</a></h3>
+          </div>
           <dl>
             <dt>${t("archive.col_date")}</dt><dd>${esc(e.date || "-")}</dd>
             <dt>${t("archive.col_type")}</dt><dd>${esc(typeLabel)}</dd>
             <dt>${t("archive.col_protein")}</dt><dd>${esc(pnames[0] || "-")}${pnames.length > 1 ? t("archive.and_more", { n: pnames.length - 1 }) : ""}</dd>
           </dl>
-        </a>`;
+        </article>`;
       }).join("");
     }
   } catch (err) {
@@ -1644,7 +1652,7 @@ async function loadExperiments() {
 }
 
 function showExpAddModal(prefill = null) {
-  document.getElementById("expModalTitle").textContent = prefill?.title || "新建实验";
+  document.getElementById("expModalTitle").textContent = t("archive.new");
   document.getElementById("expModal").classList.remove("hidden");
   loadGoalOptions();  // v0.1.1：拉研究目标下拉
   if (prefill) {
@@ -1866,7 +1874,7 @@ async function editExpTitle(id) {
   const current = titleEl.textContent;
   const input = document.createElement("input");
   input.type = "text"; input.value = current;
-  input.style.cssText = "font-size:18px;font-weight:600;padding:4px 8px;border:1px solid #d0d0d0;border-radius:4px;width:300px";
+  input.style.cssText = "font-size:18px;font-weight:600;padding:4px 8px;border:1px dashed var(--rule);width:300px";
   titleEl.replaceWith(input);
   input.focus();
   input.onblur = input.onkeydown = async function (ev) {
@@ -2036,8 +2044,8 @@ function renderEnzymeTimeAxis() {
   // 端点读数
   const eLo = document.getElementById("enzymeTimeLoLabel");
   const eHi = document.getElementById("enzymeTimeHiLabel");
-  if (eLo) eLo.textContent = "起始 " + enzymeTimePoints[enzymeTimeLo] + " s";
-  if (eHi) eHi.textContent = "终止 " + enzymeTimePoints[enzymeTimeHi] + " s";
+  if (eLo) eLo.textContent = t("workbench.time_lo", { t: enzymeTimePoints[enzymeTimeLo] });
+  if (eHi) eHi.textContent = t("workbench.time_hi", { t: enzymeTimePoints[enzymeTimeHi] });
   updateEnzymeTimeBadge();
 }
 
@@ -2045,7 +2053,10 @@ function updateEnzymeTimeBadge() {
   const el = document.getElementById("enzymeTimeCount");
   if (!el || !enzymeTimePoints.length) return;
   const n = enzymeTimeHi - enzymeTimeLo + 1;
-  el.textContent = `已选 ${n}/${enzymeTimePoints.length} 个时间点（${enzymeTimePoints[enzymeTimeLo]}s — ${enzymeTimePoints[enzymeTimeHi]}s）`;
+  el.textContent = t("workbench.time_selected", {
+    n, total: enzymeTimePoints.length,
+    lo: enzymeTimePoints[enzymeTimeLo], hi: enzymeTimePoints[enzymeTimeHi],
+  });
   el.style.color = n < 2 ? "#e74c3c" : "#888";  // <2 点无法拟合斜率，标红提醒
 }
 
@@ -2149,7 +2160,7 @@ function updateWellForm() {
   const form = document.getElementById("wellForm");
   const fit = document.getElementById("wellFit");
   if (enzymeSelection.size === 0) {
-    detail.textContent = "选择孔位查看详情"; detail.classList.remove("hidden");
+    detail.textContent = t("workbench.pick_well"); detail.classList.remove("hidden");
     form.classList.add("hidden"); fit.classList.add("hidden");
     return;
   }
@@ -2172,9 +2183,9 @@ function updateWellForm() {
     document.getElementById("wellProtein").value = "";
     document.getElementById("enzymeProteinSearch").value = "";
   }
-  document.getElementById("wellName").placeholder = `${enzymeSelection.size} 个孔选中`;
+  document.getElementById("wellName").placeholder = t("toast.pick_wells_n", { n: enzymeSelection.size });
   document.getElementById("wellGroup").placeholder =
-    enzymeSelection.size > 1 ? `同时设置 ${enzymeSelection.size} 个孔的组` : "同组孔取平均作图";
+    enzymeSelection.size > 1 ? t("workbench.well_group_n", { n: enzymeSelection.size }) : t("workbench.well_group_ph");
 
   // 参考孔按钮状态
   const ref = info.ref;
@@ -2307,7 +2318,7 @@ async function enzymeCalc(wellIds, silent = false) {
     renderEnzymeTable(wellIds);
     updateWellForm();
     const bg = r.bg;
-    const msg = bg ? `计算完成 (已扣除背景 ${bg.count} 个孔, 均值 ΔOD/min=${bg.avg.toFixed(6)})` : "计算完成";
+    const msg = bg ? t("workbench.calc_bg", { n: bg.count, avg: bg.avg.toFixed(6) }) : t("toast.calc_done");
     if (!silent) toast(msg);
   } catch (err) { toast(err.message, true); }
 }
@@ -2319,13 +2330,13 @@ function renderEnzymeTable(wellIds) {
   tbody.innerHTML = wellIds.map(id => {
     const info = enzymeWellInfo[id] || {};
     const f = info.fit || {};
-    const refLabel = info.ref === "blank" ? "空白" : info.ref === "neg" ? "阴性" : info.ref === "pos" ? "阳性" : "样品";
+    const refLabel = info.ref === "blank" ? t("workbench.blank") : info.ref === "neg" ? t("workbench.neg") : info.ref === "pos" ? t("workbench.pos") : t("workbench.sample_well");
     return `<tr>
       <td>${id}</td><td>${esc(info.name || "")}</td>
       <td style="color:#888">${esc(info.group || "")}</td>
       <td>${refLabel}</td>
       <td>${info.conc_ng_ml ?? "-"}</td><td>${info.conc_uM ?? "-"}</td>
-      <td>${f.blank_corrected ? (f.slope_corrected?.toFixed(5) + ' <span style=color:#888;font-size:11px>(校正)</span>') : (f.slope?.toFixed(5) || "-")}</td>
+      <td>${f.blank_corrected ? (f.slope_corrected?.toFixed(5) + ' <span style=color:#888;font-size:11px>(' + t("workbench.corrected") + ')</span>') : (f.slope?.toFixed(5) || "-")}</td>
       <td style="color:${f.r2 != null && f.r2 < 0.95 ? '#e74c3c' : '#333'}">${f.r2 ?? "-"}</td>
       <td>${info.activity ?? "-"}</td>
     </tr>`;
@@ -2374,7 +2385,7 @@ async function enzymePlot(type) {
     enzymeLastImage = r.image;
     enzymeLastPlotType = type;
     document.getElementById("enzymePlotArea").innerHTML =
-      `<img src="${r.image}" style="max-width:100%;border-radius:8px" alt="plot">
+      `<img src="${r.image}" style="max-width:100%" alt="plot">
        <div style="margin-top:8px">
          <button class="btn btn-sm btn-outline" onclick="downloadEnzymePlot()">${t("workbench.download_png")}</button>
        </div>`;
@@ -2384,7 +2395,7 @@ async function enzymePlot(type) {
 async function downloadEnzymePlot() {
   if (!enzymeLastImage) { toast(t("toast.plot_curve_first"), true); return; }
   const auto = await getAutoName("酶活测定") || "酶活测定";
-  const name = enzymeLastPlotType === "michaelis" ? "MM曲线" : "动力学曲线";
+  const name = enzymeLastPlotType === "michaelis" ? t("workbench.mm") : t("workbench.kinetics");
   downloadDataUrl(enzymeLastImage, `${auto}_${name}.png`);
 }
 
@@ -2522,7 +2533,7 @@ async function enzymeSearchProtein() {
     ? matches.map(p => `<div class="search-item" onclick="enzymeSelectProtein(${p.id},'${esc(p.name)}')">
         <strong>${esc(p.name)}</strong><span style="color:#888;font-size:11px">${p.mw?.toLocaleString()} Da</span>
       </div>`).join("")
-    : '<div class="search-item" style="color:#888">无匹配</div>';
+    : `<div class="search-item" style="color:#888">${t("workbench.no_match")}</div>`;
   dropdown.classList.remove("hidden");
 }
 
@@ -2567,9 +2578,14 @@ document.addEventListener("click", function (e) {
 
 function enzymeSetRef(refType) {
   // 参考角色写进命名，不落空：●样品→"样品"、○空白→"空白"、⊖阴性→"阴性"、⊕阳性→"阳性"
-  const roleLabels = { "": "样品", blank: "空白", neg: "阴性", pos: "阳性" };
+  const roleLabels = {
+    "": t("workbench.sample_well"),
+    blank: t("workbench.blank"),
+    neg: t("workbench.neg"),
+    pos: t("workbench.pos"),
+  };
   const label = roleLabels[refType || ""];
-  const roleNames = Object.values(roleLabels);
+  const roleNames = Object.values(roleLabels).concat(["样品", "空白", "阴性", "阳性", "Sample", "Blank", "Negative", "Positive"]);
   for (const id of enzymeSelection) {
     if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
     enzymeWellInfo[id].ref = refType;
@@ -2629,7 +2645,7 @@ function renderWeblogoProteinList(filter) {
     `<label class="checkbox-label" style="display:flex!important;flex-direction:row!important;align-items:center!important;gap:4px!important;margin-bottom:2px!important;cursor:pointer;padding:2px 4px">
       <input type="checkbox" class="weblogo-protein-check" value="${p.id}"> ${esc(p.name)}
     </label>`
-  ).join("") || '<span style="color:#888">无匹配蛋白</span>';
+  ).join("") || `<span style="color:#888">${t("workbench.no_match_protein")}</span>`;
 }
 
 async function loadWeblogoTagFilter() {
@@ -2666,16 +2682,16 @@ function showWeblogoResult(r, count) {
   document.getElementById("weblogoImage").src = r.image;
   const notes = [];
   const p = weblogoLastParams || {};
-  if (p.multimer > 1) notes.push(`${p.multimer} 聚体裁剪`);
-  if (p.start || p.end) notes.push(`位点 ${r.range ? r.range[0] + "–" + r.range[1] : ""}`);
+  if (p.multimer > 1) notes.push(t("workbench.multimer_cropped", { n: p.multimer }));
+  if (p.start || p.end) notes.push(t("workbench.pos_span", { lo: r.range ? r.range[0] : "", hi: r.range ? r.range[1] : "" }));
   document.getElementById("weblogoInfo").textContent =
-    `${count} 条序列, ${r.positions} 个位置` + (notes.length ? " (" + notes.join(", ") + ")" : "");
+    t("workbench.seq_pos", { n: count, pos: r.positions }) + (notes.length ? " (" + notes.join(", ") + ")" : "");
   document.getElementById("weblogoResult").classList.remove("hidden");
   document.getElementById("weblogoSaveBtn").style.display = "";
   document.getElementById("weblogoExpName").style.display = "";
   getAutoName("Weblogo").then(auto => {
     document.getElementById("weblogoExpName").placeholder =
-      auto ? `实验名称（默认 ${auto}）` : "实验名称（可选）";
+      auto ? t("ui.exp_name_default", { name: auto }) : t("ui.exp_name_optional");
   });
 }
 
@@ -2708,7 +2724,7 @@ async function generateWeblogo() {
   const genBtn = document.getElementById("weblogoGenBtn");
   const origText = genBtn.textContent;
   genBtn.disabled = true;
-  genBtn.textContent = "⏳ 生成中…";
+  genBtn.textContent = t("workbench.generating");
   try {
     const r = await API.post("/api/weblogo", { sequences, color_scheme: color, start, end, multimer });
     weblogoLastImage = r.image;
@@ -2769,26 +2785,44 @@ async function saveWeblogoExp() {
 // ═════════════════════════════════════════════════════
 
 // ── Proteins bulk ─────────────────────────────────────
+function recordCheckedIds(cls) {
+  const ids = [];
+  const seen = new Set();
+  document.querySelectorAll("." + cls + ":checked").forEach(cb => {
+    if (seen.has(cb.value)) return;
+    seen.add(cb.value);
+    ids.push(parseInt(cb.value, 10));
+  });
+  return ids;
+}
+function recordAllCount(cls) {
+  return new Set([...document.querySelectorAll("." + cls)].map(cb => cb.value)).size;
+}
+function syncRecordCheck(el, cls) {
+  document.querySelectorAll("." + cls).forEach(cb => {
+    if (cb.value === el.value) cb.checked = el.checked;
+  });
+}
+
 function toggleSelectAllProteins(el) {
   document.querySelectorAll(".protein-check").forEach(cb => cb.checked = el.checked);
   updateBulkBar();
 }
 
 function updateBulkBar() {
-  const checked = document.querySelectorAll(".protein-check:checked");
+  const ids = recordCheckedIds("protein-check");
   const bar = document.getElementById("bulkBar");
   const count = document.getElementById("bulkCount");
   if (!bar || !count) return;
-  if (checked.length) {
+  if (ids.length) {
     bar.classList.remove("hidden");
-    count.textContent = t("workbench.selected_n", { n: checked.length });
+    count.textContent = t("workbench.selected_n", { n: ids.length });
   } else {
     bar.classList.add("hidden");
   }
-  // 同步全选框
-  const all = document.querySelectorAll(".protein-check");
   const selAll = document.getElementById("selectAllProteins");
-  if (selAll) selAll.checked = all.length > 0 && checked.length === all.length;
+  const allN = recordAllCount("protein-check");
+  if (selAll) selAll.checked = allN > 0 && ids.length === allN;
 }
 
 function clearSelection() {
@@ -2798,18 +2832,17 @@ function clearSelection() {
 }
 
 async function batchDeleteProteins() {
-  const checked = document.querySelectorAll(".protein-check:checked");
-  if (!checked.length) return;
+  const ids = recordCheckedIds("protein-check");
+  if (!ids.length) return;
   const ok = window.BigoUI
     ? await BigoUI.confirm({
         title: t("proteins.delete_selected"),
-        message: t("proteins.confirm_batch_delete", { n: checked.length }),
+        message: t("proteins.confirm_batch_delete", { n: ids.length }),
         impact: t("proteins.confirm_delete_impact"),
         danger: true,
       })
-    : confirm(t("proteins.confirm_batch_delete", { n: checked.length }));
+    : confirm(t("proteins.confirm_batch_delete", { n: ids.length }));
   if (!ok) return;
-  const ids = Array.from(checked).map(cb => parseInt(cb.value));
   try {
     const r = await API.post("/api/proteins/batch-delete", { ids });
     toast(t("toast.deleted_n_proteins", { n: r.deleted }), false, () => undoRestore());
@@ -2847,9 +2880,9 @@ async function deleteAllProteins() {
 
 // ── 批量改标签 ─────────────────────────────────────────
 function batchEditTags() {
-  const checked = document.querySelectorAll(".protein-check:checked");
-  if (!checked.length) { toast(t("toast.select_proteins"), true); return; }
-  document.getElementById("batchTagCount").textContent = checked.length;
+  const ids = recordCheckedIds("protein-check");
+  if (!ids.length) { toast(t("toast.select_proteins"), true); return; }
+  document.getElementById("batchTagCount").textContent = ids.length;
   document.getElementById("batchTagModal").classList.remove("hidden");
   document.getElementById("batchTagAddInput").querySelector("input").focus();
 }
@@ -2866,12 +2899,11 @@ function closeBatchTagModal() {
 }
 
 async function applyBatchTags() {
-  const checked = document.querySelectorAll(".protein-check:checked");
-  if (!checked.length) { closeBatchTagModal(); return; }
+  const ids = recordCheckedIds("protein-check");
+  if (!ids.length) { closeBatchTagModal(); return; }
   const add = document.getElementById("batchTagAddHidden").value;
   const remove = document.getElementById("batchTagRemoveHidden").value;
   if (!add && !remove) { toast(t("toast.need_tag_change"), true); return; }
-  const ids = Array.from(checked).map(cb => parseInt(cb.value));
   try {
     const r = await API.post("/api/proteins/batch-tags", { ids, add, remove });
     toast(t("toast.updated_n_tags", { n: r.updated }));
@@ -2889,19 +2921,19 @@ function toggleSelectAllExps(el) {
 }
 
 function updateExpBulkBar() {
-  const checked = document.querySelectorAll(".exp-check:checked");
+  const ids = recordCheckedIds("exp-check");
   const bar = document.getElementById("expBulkBar");
   const count = document.getElementById("expBulkCount");
   if (!bar || !count) return;
-  if (checked.length) {
+  if (ids.length) {
     bar.classList.remove("hidden");
-    count.textContent = t("workbench.selected_n", { n: checked.length });
+    count.textContent = t("workbench.selected_n", { n: ids.length });
   } else {
     bar.classList.add("hidden");
   }
-  const all = document.querySelectorAll(".exp-check");
   const selAll = document.getElementById("selectAllExps");
-  if (selAll) selAll.checked = all.length > 0 && checked.length === all.length;
+  const allN = recordAllCount("exp-check");
+  if (selAll) selAll.checked = allN > 0 && ids.length === allN;
 }
 
 function clearExpSelection() {
@@ -2911,18 +2943,17 @@ function clearExpSelection() {
 }
 
 async function batchDeleteExperiments() {
-  const checked = document.querySelectorAll(".exp-check:checked");
-  if (!checked.length) return;
+  const ids = recordCheckedIds("exp-check");
+  if (!ids.length) return;
   const ok = window.BigoUI
     ? await BigoUI.confirm({
         title: t("archive.delete_selected"),
-        message: t("archive.confirm_batch", { n: checked.length }),
+        message: t("archive.confirm_batch", { n: ids.length }),
         impact: t("archive.confirm_delete_impact"),
         danger: true,
       })
-    : confirm(t("archive.confirm_batch", { n: checked.length }));
+    : confirm(t("archive.confirm_batch", { n: ids.length }));
   if (!ok) return;
-  const ids = Array.from(checked).map(cb => parseInt(cb.value));
   try {
     const r = await API.post("/api/experiments/batch-delete", { ids });
     toast(t("toast.deleted_n_exps", { n: r.deleted }), false, () => undoRestore());
@@ -2964,7 +2995,7 @@ async function undoRestore() {
       loadExperiments().catch(() => {});
       loadProteinSelects();
     } else {
-      toast(r.error || "无法撤销", true);
+      toast(r.error || t("toast.cannot_undo"), true);
     }
   } catch (err) { toast(t("toast.undo_failed", { msg: err.message }), true); }
 }
@@ -2998,7 +3029,7 @@ async function uploadBliFile() {
     renderBliSamples();
     renderBliCurves();
     document.getElementById("bliMeta").textContent =
-      `${file.name} | ${data.n_sensors} 传感器 | ${bliSamples.length} 样本`;
+      `${file.name} | ${t("workbench.sensors_n", { n: data.n_sensors })} | ${t("copy.samples_n", { n: bliSamples.length })}`;
     document.getElementById("bliAnalyzed").classList.remove("hidden");
     document.getElementById("bliKdWrap").classList.add("hidden");
     document.getElementById("bliPlotArea").innerHTML = "";
@@ -3014,7 +3045,7 @@ function renderBliSamples() {
       <td><strong>${esc(s.sample)}</strong></td>
       <td>${s.n_curves}</td>
       <td style="font-size:12px;color:#666">${(s.concs || []).map(c => formatConc(c, "nM")).join(" / ")}</td>
-      <td><button class="btn btn-sm btn-outline bli-pick" data-sample="${escAttr(s.sample)}">${bliSelectedSample === s.sample ? "✓ 选中" : "拟合"}</button></td>
+      <td><button class="btn btn-sm btn-outline bli-pick" data-sample="${escAttr(s.sample)}">${bliSelectedSample === s.sample ? t("workbench.selected_mark") : t("workbench.fit")}</button></td>
     </tr>`).join("");
 }
 
@@ -3051,7 +3082,7 @@ function updateBliCurveMaster() {
   const nOn = all.filter(r => bliActiveCurves.has(r.label)).length;
   master.checked = nOn === all.length;
   master.indeterminate = nOn > 0 && nOn < all.length;
-  if (stats) stats.textContent = `已选 ${nOn}/${all.length}`;
+  if (stats) stats.textContent = nOn + "/" + all.length;
 }
 
 function bliToggleAllCurves() {
@@ -3136,15 +3167,15 @@ async function bliPlot() {
     const area = document.getElementById("bliPlotArea");
     if (mode === "separate" && r.images) {
       area.innerHTML = Object.entries(r.images).map(([sid, img]) =>
-        `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px">
+        `<div class="calc-card" style="padding:12px;margin-bottom:10px">
           <div style="font-weight:600;margin-bottom:6px">${esc(sid)}</div>
           <img src="${img}" style="max-width:100%" alt="${esc(sid)}">
         </div>`).join("");
       bliLastPlot = null;
     } else {
       area.innerHTML =
-        `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-          <img src="${r.image}" style="max-width:100%" alt="传感器图">
+        `<div class="calc-card" style="padding:12px">
+          <img src="${r.image}" style="max-width:100%" alt="${esc(t("workbench.sensorgram"))}">
         </div>`;
       bliLastPlot = r.image;
     }
@@ -3166,27 +3197,27 @@ function renderBliKd(sample, res) {
   if (!res || res.error) {
     return `<div class="calc-card" style="padding:12px;margin-bottom:10px">
       <div style="font-weight:600;margin-bottom:4px">${esc(sample)}</div>
-      <div style="color:#c00;font-size:13px">拟合失败：${esc(res.error || "未知错误")}</div>
+      <div style="color:#c00;font-size:13px">${t("toast.fit_failed")}: ${esc(res.error || t("error.generic"))}</div>
     </div>`;
   }
   const phase = res.phase || {};
   const methods = ["standard", "split", "joint", "steady", "mixed"];
   const rows = methods.map(m => {
     const v = res[m];
-    if (!v) return `<tr><td>${m}</td><td colspan="4" style="color:#888">拟合失败</td></tr>`;
+    if (!v) return `<tr><td>${m}</td><td colspan="4" style="color:#888">${t("workbench.fit_failed_row")}</td></tr>`;
     const kd = v.kd != null && isFinite(v.kd) ? `${formatConc(v.kd, "nM")} nM` : "—";
     const kon = v.kon != null && isFinite(v.kon) ? (+v.kon).toExponential(2) : "—";
     const koff = v.koff != null && isFinite(v.koff) ? (+v.koff).toExponential(2) : "—";
-    const extra = v.kd_steady_mixed != null ? `KD(稳态) ${formatConc(v.kd_steady_mixed, "nM")}` :
-                 (v.kd_kinetic_mixed != null ? `KD(动力学) ${formatConc(v.kd_kinetic_mixed, "nM")}` : "");
+    const extra = v.kd_steady_mixed != null ? t("workbench.kd_steady", { v: formatConc(v.kd_steady_mixed, "nM") }) :
+                 (v.kd_kinetic_mixed != null ? t("workbench.kd_kinetic", { v: formatConc(v.kd_kinetic_mixed, "nM") }) : "");
     return `<tr><td><strong>${m}</strong></td><td>${kd}</td><td>${kon}</td><td>${koff}</td><td>${extra}</td></tr>`;
   }).join("");
   return `<div class="calc-card" style="padding:12px;margin-bottom:10px">
-    <div style="font-size:13px;color:#555;margin-bottom:6px">
-      样本 <strong>${esc(sample)}</strong> · 相界 assoc ${phase.t_assoc?.toFixed(1)} s → dissoc ${phase.t_dissoc?.toFixed(1)} s
+    <div style="font-size:13px;color:var(--graphite);margin-bottom:6px">
+      ${t("workbench.sample_phase", { sample: esc(sample), ta: phase.t_assoc?.toFixed(1) ?? "—", td: phase.t_dissoc?.toFixed(1) ?? "—" })}
     </div>
     <table class="calc-table">
-      <thead><tr><th>方法</th><th>KD</th><th>kon (1/M·s)</th><th>koff (1/s)</th><th>备注</th></tr></thead>
+      <thead><tr><th>${t("workbench.method")}</th><th>KD</th><th>${t("workbench.kon")}</th><th>${t("workbench.koff")}</th><th>${t("workbench.notes_col")}</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
@@ -3278,7 +3309,7 @@ async function uploadAktaFile() {
     const errRuns = aktaRuns.filter(r => r.error);
     const totalCh = okRuns.reduce((n, r) => n + r.channels.length, 0);
     document.getElementById("aktaMeta").textContent =
-      `${files.length} 文件 | ${okRuns.length} 成功${errRuns.length ? ` / ${errRuns.length} 失败` : ""} | ${totalCh} 通道`;
+      `${t("workbench.files_ok", { n: files.length, ok: okRuns.length })}${errRuns.length ? t("workbench.files_fail", { n: errRuns.length }) : ""} | ${t("workbench.channels_n", { n: totalCh })}`;
     renderAktaRuns();
     document.getElementById("aktaEventsInfo").textContent =
       errRuns.map(r => `${r.name}: ${r.error}`).join("；");
@@ -3296,7 +3327,7 @@ function renderAktaRuns() {
   if (!box) return;
   box.innerHTML = aktaRuns.map((run, ri) => {
     if (run.error) {
-      return `<div style="border:1px solid #f0c0c0;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;background:#fff7f7">
+      return `<div class="calc-card" style="padding:8px 10px;margin-bottom:8px;font-size:13px;border-color:#f0c0c0;background:#fff7f7">
         <strong style="color:#c0392b">${esc(run.name)}</strong>
         <span style="color:#888;margin-left:8px">${esc(run.error)}</span>
       </div>`;
@@ -3305,16 +3336,16 @@ function renderAktaRuns() {
       `<option value="${escAttr(ch.name)}" ${ch.name === run.channel ? "selected" : ""}>${esc(ch.name)} (${esc(ch.data_type)}${ch.unit ? " " + esc(ch.unit) : ""}, ${ch.n_points}pts)</option>`).join("");
     const evInfo = Object.entries(run.events || {}).map(([k, v]) => `${k}:${v}`).join(" ");
     const checked = run.checked === false ? "" : "checked";
-    return `<div style="border:1px solid ${aktaCurrentRun === ri ? "#4361ee" : "#e0e0e0"};border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;background:${aktaCurrentRun === ri ? "#f0f5ff" : "#fff"}" data-run="${ri}">
+    return `<div class="calc-card" style="padding:8px 10px;margin-bottom:8px;font-size:13px;${aktaCurrentRun === ri ? "outline:2px solid var(--cyan);outline-offset:2px;" : ""}" data-run="${ri}">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <div style="display:inline-flex;align-items:center;gap:6px">
           <input type="checkbox" class="akta-run-check" data-run="${ri}" ${checked} onclick="event.stopPropagation()">
           <strong style="cursor:pointer" class="akta-run-select">${esc(run.name)}</strong>
         </div>
-        <span style="color:#888;font-size:12px">${evInfo || "无事件"}</span>
+        <span style="color:#888;font-size:12px">${evInfo || t("workbench.no_events")}</span>
       </div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center">
-        <select class="akta-run-channel" data-run="${ri}" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:12px">${chOpts}</select>
+        <select class="akta-run-channel" data-run="${ri}" style="flex:1;min-width:160px;padding:5px 8px;border:1px dashed var(--rule);font-size:12px">${chOpts}</select>
       </div>
     </div>`;
   }).join("");
@@ -3394,9 +3425,9 @@ async function aktaPlot() {
   try {
     const r = await API.post("/api/akta/plot", aktaParams(run));
     document.getElementById("aktaPlotArea").innerHTML =
-      `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+      `<div class="calc-card" style="padding:12px">
         <div style="font-weight:600;margin-bottom:6px;font-size:14px">${esc(run.name)} — ${esc(run.channel)}</div>
-        <img src="${r.image}" style="max-width:100%" alt="AKTA 峰图">
+        <img src="${r.image}" style="max-width:100%" alt="${esc(run.name)}">
       </div>`;
     renderAktaPeaks(r.peaks || [], run);
   } catch (err) { toast(err.message, true); }
@@ -3413,7 +3444,7 @@ async function aktaBatchPlot() {
 
   if (mode === "overlay") {
     if (okRuns.length < 2) { toast(t("toast.overlay_need_two"), true); return; }
-    area.innerHTML = `<p style="color:#888;font-size:13px">正在生成总图（${okRuns.length} 个文件）...</p>`;
+    area.innerHTML = `<p style="color:var(--graphite);font-size:13px">${t("workbench.plotting_overlay", { n: okRuns.length })}</p>`;
     try {
       const r = await API.post("/api/akta/overlay", {
         runs: okRuns.map(run => ({
@@ -3429,26 +3460,26 @@ async function aktaBatchPlot() {
         show_events: document.getElementById("aktaShowEvents").checked,
         highlight_frac: document.getElementById("aktaHighlightFrac").checked,
       });
-      area.innerHTML = `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-        <div style="font-weight:600;margin-bottom:6px;font-size:14px">总图（${okRuns.length} 个文件${normOn ? " · 归一化" : ""}）</div>
-        <img src="${r.image}" style="max-width:100%" alt="AKTA 总图">
+      area.innerHTML = `<div class="calc-card" style="padding:12px">
+        <div style="font-weight:600;margin-bottom:6px;font-size:14px">${normOn ? t("workbench.overlay_title_norm", { n: okRuns.length }) : t("workbench.overlay_title", { n: okRuns.length })}</div>
+        <img src="${r.image}" style="max-width:100%" alt="${esc(t("workbench.overlay_title", { n: okRuns.length }))}">
       </div>`;
     } catch (err) { toast(err.message, true); }
     return;
   }
 
   // 分图模式
-  area.innerHTML = `<p style="color:#888;font-size:13px">正在批量生成 ${okRuns.length} 张图...</p>`;
+  area.innerHTML = `<p style="color:var(--graphite);font-size:13px">${t("workbench.plotting_n", { n: okRuns.length })}</p>`;
   let html = "";
   for (const run of okRuns) {
     try {
       const r = await API.post("/api/akta/plot", aktaParams(run));
-      html += `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:12px">
+      html += `<div class="calc-card" style="padding:12px;margin-bottom:12px">
         <div style="font-weight:600;margin-bottom:6px;font-size:14px">${esc(run.name)} — ${esc(run.channel)}</div>
         <img src="${r.image}" style="max-width:100%" alt="${esc(run.name)}">
       </div>`;
     } catch (err) {
-      html += `<div style="border:1px solid #f0c0c0;border-radius:8px;padding:8px;margin-bottom:8px;color:#c0392b;font-size:13px">${esc(run.name)}: ${esc(err.message)}</div>`;
+      html += `<div class="calc-card" style="padding:8px;margin-bottom:8px;color:#c0392b;font-size:13px">${esc(run.name)}: ${esc(err.message)}</div>`;
     }
   }
   area.innerHTML = html;
@@ -3460,7 +3491,7 @@ function renderAktaPeaks(peaks, run) {
   if (!wrap || !tbody) return;
   if (!peaks.length) {
     wrap.classList.remove("hidden");
-    tbody.innerHTML = `<tr><td colspan="7" style="color:#888;text-align:center">未检测到峰（可调低最小峰高或缩小范围）</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="color:#888;text-align:center">${t("toast.no_peaks")}</td></tr>`;
     return;
   }
   wrap.classList.remove("hidden");
@@ -3474,7 +3505,7 @@ function renderAktaPeaks(peaks, run) {
       <td>${p.start_vol}</td>
       <td>${p.end_vol}</td>
       <td>${p.half_width}</td>
-      <td><button class="btn btn-sm btn-outline akta-peak-target" data-run-idx="${aktaCurrentRun}" data-peak="${i}">${i === cur ? "✓ 目标" : "目标"}</button></td>
+      <td><button class="btn btn-sm btn-outline akta-peak-target" data-run-idx="${aktaCurrentRun}" data-peak="${i}">${i === cur ? t("workbench.is_target") : t("workbench.target")}</button></td>
     </tr>`).join("");
 }
 
@@ -3645,7 +3676,7 @@ function researchRender(force) {
   const q = (document.getElementById("researchQuery").value || "").trim();
   const tag = document.getElementById("researchTagFilter").value || "";
   const prot = document.getElementById("researchProteinFilter").value || "";
-  if (!researchState.trees.length && force) { researchLoad().catch(() => {}); return; }
+  if (force) { researchLoad().catch(() => {}); return; }
   const flowEl = document.getElementById("researchFlow");
   const backEl = document.getElementById("researchFlowBack");
   const emptyEl = document.getElementById("researchEmpty");
@@ -3808,11 +3839,13 @@ const RES_STANCE_CHIP = {
   partial: { bg: "#fff3e0", fg: "#e65100" },
   uncertain: { bg: "#f5f5f5", fg: "#757575" },
 };
-function resTagChip(t) {
-  const c = RES_STANCE_CHIP[resStanceKey(t)];
+function resTagChip(tag) {
+  const key = resStanceKey(tag);
+  const label = key !== "other" ? t("stance." + tag) : tag;
+  const c = RES_STANCE_CHIP[key];
   return c
-    ? `<span class="res-tag-chip" style="background:${c.bg};color:${c.fg}">${esc(t)}</span>`
-    : `<span class="res-tag-chip">${esc(t)}</span>`;
+    ? `<span class="res-tag-chip" style="background:${c.bg};color:${c.fg}">${esc(label)}</span>`
+    : `<span class="res-tag-chip">${esc(label)}</span>`;
 }
 
 async function researchSelect(id) {
@@ -3961,7 +3994,7 @@ function researchOpenModal(mode, node, parent) {
   expSearch.value = "";
   researchExpFilter();
   if (mode === "edit" && node) {
-    document.getElementById("researchModalTitle").textContent = "编辑节点";
+    document.getElementById("researchModalTitle").textContent = t("common.edit");
     nid.value = node.id;
     pid.value = node.parent_id || "";
     typeSel.value = node.node_type;
@@ -3971,7 +4004,7 @@ function researchOpenModal(mode, node, parent) {
     expSel.value = node.exp_id || "";
     freeChk.checked = !!node.free_attach;
   } else {
-    document.getElementById("researchModalTitle").textContent = mode === "root" ? "新增根目标" : "新增子节点";
+    document.getElementById("researchModalTitle").textContent = mode === "root" ? t("research.add_root") : t("research.add_child");
     nid.value = "";
     pid.value = parent ? parent.id : "";
     typeSel.value = researchFirstAllowed(parent ? parent.node_type : null);
@@ -4020,7 +4053,7 @@ async function researchSave(e) {
     if (id) await API.put(`/api/research/nodes/${id}`, payload);
     else await API.post("/api/research/nodes", payload);
     researchCloseModal();
-    toast(id ? "已更新" : "已添加");
+    toast(id ? t("toast.updated") : t("toast.saved"));
     await researchLoad();
   } catch (err) { toast(err.message, true); }
 }
@@ -4047,9 +4080,11 @@ async function researchDelete(id) {
 
 function researchExpFill() {
   const sel = document.getElementById("researchExpSel");
-  sel.innerHTML = '<option value="">-- 计划占位（未归档）--</option>' +
-    researchState.experiments.map(e =>
-      `<option value="${e.id}">${esc(e.date || "")} ${esc(e.title)} — ${esc(e.exp_type)}</option>`).join("");
+  sel.innerHTML = '<option value="">' + t("research.exp_placeholder") + '</option>' +
+    researchState.experiments.map(e => {
+      const typeLabel = (window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type;
+      return `<option value="${e.id}">${esc(e.date || "")} ${esc(e.title)} — ${esc(typeLabel)}</option>`;
+    }).join("");
 }
 function researchExpFilter() {
   const q = (document.getElementById("researchExpSearch").value || "").toLowerCase();
@@ -4067,7 +4102,7 @@ function researchFillTagFilter() {
     if (n.children) stack.push(...n.children);
   }
   const cur = sel.value;
-  sel.innerHTML = '<option value="">全部标签</option>' +
+  sel.innerHTML = '<option value="">' + t("research.all_tags") + '</option>' +
     [...seen].sort().map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
   sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
 }
@@ -4077,7 +4112,7 @@ function researchFillProteinFilter() {
   researchState.experiments.forEach(e =>
     (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean).forEach(p => seen.add(p)));
   const cur = sel.value;
-  sel.innerHTML = '<option value="">全部蛋白</option>' +
+  sel.innerHTML = '<option value="">' + t("research.all_proteins") + '</option>' +
     [...seen].sort().map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
   sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
 }
@@ -4140,6 +4175,10 @@ function init() {
   } else if (document.querySelector(".tab-btn")) {
     const m = (location.hash || "").match(/tool=([a-z]+)/);
     if (m) activateTool(m[1], { hash: false });
+    else {
+      const active = document.querySelector(".tab-btn.active");
+      if (active) activateTool(active.dataset.tab);
+    }
   }
   window.addEventListener("hashchange", () => {
     if (document.querySelector(".tab-btn")) {
@@ -4150,9 +4189,18 @@ function init() {
   document.addEventListener("bigo:locale", () => {
     if (document.querySelector("#proteinTable")) loadProteins().catch(() => {});
     if (document.querySelector("#expTable")) loadExperiments().catch(() => {});
-    if (document.querySelector("#researchFlow")) researchRender();
-    const bulk = document.getElementById("bulkCount");
-    if (bulk && window.BigoI18n) { /* counts refreshed on next selection */ }
+    if (document.querySelector("#researchFlow")) {
+      researchFillTagFilter();
+      researchFillProteinFilter();
+      researchRender();
+    }
+    if (document.getElementById("copyTypeTags") && copyAllExps.length) {
+      renderCopyTypeTags();
+      renderCopyExpList();
+    }
+    if (document.querySelector("#concTable")) refreshAutoNamePlaceholders();
+    updateBulkBar();
+    updateExpBulkBar();
   });
   const rl = document.getElementById("detailResearchList");
   if (rl && rl.dataset.expId) {

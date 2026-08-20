@@ -560,7 +560,7 @@ _e22d = services.create_experiment(
     params={"蛋白": {"id": 1, "name": "1YPI_WT", "mw": 53309.8}}, results={},
 )
 _h22d = client.get(f"/experiments/{_e22d['id']}").get_data(as_text=True)
-assert "box-shadow:none" in _h22d, "嵌套 dict 应渲染子表格"
+assert "kv-nested" in _h22d, "嵌套 dict 应渲染子表格"
 assert "1YPI_WT" in _h22d, "嵌套子表应含值"
 print("22. 详情页兜底渲染（中文可读 / kv 表 / data-exp-id / HTML 安全 / AKTA 无峰表 / 嵌套子表）OK")
 

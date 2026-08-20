@@ -17,14 +17,17 @@
 
   function focusables(root) {
     return [...root.querySelectorAll("a, button, input, select, textarea, [tabindex]:not([tabindex='-1'])")]
-      .filter(el => !el.disabled && el.offsetParent !== null);
+      .filter(el => !el.disabled && el.getClientRects().length > 0);
   }
 
   function trapKey(e, root) {
     if (e.key === "Escape") {
       e.preventDefault();
-      if (activeDialog) closeDialog(false);
-      else closeMenu();
+      if (activeDialog) {
+        const cancel = qs("bigoDialogCancel");
+        if (cancel) cancel.click();
+        else closeDialog(false);
+      } else closeMenu();
       return;
     }
     if (e.key !== "Tab") return;
@@ -113,7 +116,12 @@
         </div>
       </div>`;
     document.body.appendChild(root);
-    root.addEventListener("click", (e) => { if (e.target === root) closeDialog(false); });
+    root.addEventListener("click", (e) => {
+      if (e.target === root) {
+        const cancel = qs("bigoDialogCancel");
+        if (cancel) cancel.click();
+      }
+    });
     return root;
   }
 

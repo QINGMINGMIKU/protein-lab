@@ -113,9 +113,20 @@ for t in models.EXP_TYPES:
 
 eid = services.create_experiment(title="UI detail", exp_type="其他", params={"k": "v"}, results={})["id"]
 detail = client.get(f"/experiments/{eid}").get_data(as_text=True)
-assert detail.find("Load into workbench") < 0 or True  # non-loadable: English CTA must not appear
+assert "Load into workbench" not in detail, "non-loadable experiment must not show workbench CTA"
 assert "载入计算工具" not in detail
 assert f'href="/calculator?load_exp={eid}"' not in detail
+assert 'data-exp-types' in exps and 'data-exp-types' in detail
+
+bli = services.create_experiment(
+    title="UI BLI loadable", exp_type="BLI",
+    params={"calc_type": "bli_fit"},
+    results={"samples": {}},
+    raw_snapshots=[("bli_curves", {"analysis_version": "0.0.8", "curves": []})],
+)
+bli_html = client.get(f"/experiments/{bli['id']}").get_data(as_text=True)
+assert "Load into workbench" in bli_html
+assert f'href="/calculator?load_exp={bli["id"]}"' in bli_html
 print("6. Critical DOM IDs OK")
 
 # ── 7. Fonts.py + PyInstaller paths ───────────────────
@@ -132,5 +143,24 @@ print("7. PyInstaller / fonts path OK")
 src = (ROOT / "app.py").read_text(encoding="utf-8")
 assert "i18n.js" in src, "inject_static_version should include i18n.js"
 print("8. static version includes i18n.js OK")
+
+# ── 9. Layout / i18n wiring / dialog cancel ───────────
+assert 'id="weblogoSearch"' in calc, "Weblogo search input missing"
+assert "stack-on-narrow" in calc
+assert 'id="copySearchInput"' in calc
+appjs = (STATIC / "app.js").read_text(encoding="utf-8")
+for banned in ("全部标签", "全部蛋白", "新建实验", "计划占位（未归档）"):
+    assert banned not in appjs, f"hardcoded UI string still in app.js: {banned}"
+assert "recordCheckedIds" in appjs
+assert "syncRecordCheck" in appjs
+ui = (STATIC / "ui-shell.js").read_text(encoding="utf-8")
+assert "getClientRects" in ui
+assert "bigoDialogCancel" in ui
+assert "cancel.click()" in ui
+assert 'select[data-exp-types]' in js
+# i18n.js embeds the same keys as i18n.json
+for key in EN:
+    assert f'"{key}"' in js, f"i18n.js missing key {key}"
+print("9. Layout / i18n / dialog wiring OK")
 
 print("\nAll UI tests passed.")

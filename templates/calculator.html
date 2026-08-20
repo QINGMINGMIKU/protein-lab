@@ -97,13 +97,13 @@
 <!-- ══════════════════════════════════════════════════ -->
 <div id="tab-dilution" class="tab-panel hidden">
   <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
-    <select id="bliImportExp" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;min-width:200px" onchange="onBliImportExpChange()">
+    <select id="bliImportExp" style="padding:8px 12px;border:1px dashed var(--rule);font-size:14px;min-width:200px" onchange="onBliImportExpChange()">
       <option value="" data-i18n-option="workbench.import_conc">-- Import from concentration experiment --</option>
     </select>
     <button class="btn btn-outline" id="bliImportBtn" onclick="importBliFromExp()" disabled data-i18n="workbench.import">Import</button>
     <span style="color:var(--graphite);font-size:13px;margin-left:8px" data-i18n="workbench.or_search">or search to add:</span>
     <span style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#555;font-size:13px"><span data-i18n="workbench.conc_unit">Concentration unit</span>
-      <select id="dilUnitSel" onchange="changeDilUnit()" style="padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+      <select id="dilUnitSel" onchange="changeDilUnit()" style="padding:8px 12px;border:1px dashed var(--rule);font-size:14px">
         <option value="M">M</option>
         <option value="uM" selected>uM</option>
         <option value="nM">nM</option>
@@ -337,7 +337,7 @@
 
     <!-- 保存 -->
     <div class="tab-actions">
-      <input type="text" id="aktaExpName" data-i18n-placeholder="workbench.exp_name" placeholder="Experiment name (optional)" style="flex:1;max-width:300px;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+      <input type="text" id="aktaExpName" data-i18n-placeholder="workbench.exp_name" placeholder="Experiment name (optional)" style="flex:1;max-width:300px;padding:8px 12px;border:1px dashed var(--rule);font-size:14px">
       <button class="btn btn-outline" onclick="aktaSaveExp()" data-i18n="workbench.save_raw">Save as experiment (with raw curves)</button>
     </div>
   </div>
@@ -346,20 +346,20 @@
 <!--  Tab 3: Weblogo                                     -->
 <!-- ══════════════════════════════════════════════════ -->
 <div id="tab-weblogo" class="tab-panel hidden">
-  <div style="display:grid;grid-template-columns:320px 1fr;gap:20px">
+  <div class="stack-on-narrow">
     <!-- 左侧：蛋白选择 -->
-    <div style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-      <input type="text" id="weblogoSearch" data-i18n-placeholder="workbench.search_proteins" placeholder="Search proteins…" oninput="filterWeblogoProteins()" style="width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-bottom:6px">
+    <div class="calc-card">
+      <input type="text" id="weblogoSearch" data-i18n-placeholder="workbench.search_proteins" placeholder="Search proteins…" oninput="filterWeblogoProteins()">
       <div id="weblogoTagFilter" class="tag-filter-bar" style="margin-bottom:6px"></div>
       <div style="margin-bottom:8px">
         <label class="checkbox-label" style="display:inline-flex!important"><input type="checkbox" id="weblogoSelectAll" onchange="toggleAllWeblogoProteins(this)"> <span data-i18n="workbench.select_all">Select all</span></label>
       </div>
-      <div id="weblogoProteinList" style="max-height:350px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:6px;padding:8px;font-size:13px">
+      <div id="weblogoProteinList" style="max-height:350px;overflow-y:auto;border:1px dashed var(--rule);padding:8px;font-size:13px">
         <span style="color:#888" data-i18n="common.loading">Loading…</span>
       </div>
       <div style="margin-top:10px">
         <label style="font-size:13px"><span data-i18n="workbench.color_scheme">Color scheme</span>
-          <select id="weblogoColor" style="width:100%;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-top:4px">
+          <select id="weblogoColor" style="width:100%;padding:6px;border:1px dashed var(--rule);font-size:13px;margin-top:4px">
             <option value="chemistry">chemistry</option>
             <option value="hydrophobicity">hydrophobicity</option>
             <option value="charge">charge</option>
@@ -368,22 +368,22 @@
         </label>
         <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.pos_range">Position range (optional)</span>
           <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
-            <input type="number" id="weblogoStart" min="1" data-i18n-placeholder="workbench.pos_start" placeholder="Start" style="flex:1;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+            <input type="number" id="weblogoStart" min="1" data-i18n-placeholder="workbench.pos_start" placeholder="Start" style="flex:1;padding:6px;border:1px dashed var(--rule);font-size:13px">
             <span style="color:#888">–</span>
-            <input type="number" id="weblogoEnd" min="1" data-i18n-placeholder="workbench.pos_end" placeholder="End" style="flex:1;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+            <input type="number" id="weblogoEnd" min="1" data-i18n-placeholder="workbench.pos_end" placeholder="End" style="flex:1;padding:6px;border:1px dashed var(--rule);font-size:13px">
           </div>
         </label>
         <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.multimer">Multimer</span>
           <span style="font-weight:400;color:#888" data-i18n="workbench.multimer_hint">(dimer = 2, cropped to one subunit)</span>
-          <input type="number" id="weblogoMultimer" min="1" value="1" style="width:70px;padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-top:4px">
+          <input type="number" id="weblogoMultimer" min="1" value="1" style="width:70px;padding:6px;border:1px dashed var(--rule);font-size:13px;margin-top:4px">
         </label>
       </div>
       <button class="btn btn-primary" onclick="generateWeblogo()" id="weblogoGenBtn" style="width:100%;margin-top:10px" data-i18n="workbench.gen_logo">Generate logo</button>
-      <input type="text" id="weblogoExpName" data-i18n-placeholder="workbench.exp_name" placeholder="Experiment name (optional)" style="display:none;width:100%;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px;margin-top:6px">
+      <input type="text" id="weblogoExpName" data-i18n-placeholder="workbench.exp_name" placeholder="Experiment name (optional)" style="display:none;width:100%;padding:8px 12px;border:1px dashed var(--rule);font-size:14px;margin-top:6px">
       <button class="btn btn-outline" onclick="saveWeblogoExp()" id="weblogoSaveBtn" style="width:100%;margin-top:6px;display:none" data-i18n="workbench.save_exp">Save as experiment</button>
     </div>
     <!-- 右侧：结果 -->
-    <div id="weblogoResult" class="hidden" style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px">
+    <div id="weblogoResult" class="calc-card hidden" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px">
       <div style="align-self:stretch;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <span id="weblogoInfo" style="font-size:13px;color:#888"></span>
         <button class="btn btn-sm btn-outline" onclick="downloadWeblogo()" data-i18n="workbench.download_png">Download PNG</button>
@@ -403,7 +403,7 @@
     <span id="enzymeMeta" style="font-size:13px;color:#888;margin-left:8px"></span>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;margin-top:12px">
+  <div class="stack-on-narrow" style="margin-top:12px">
     <!-- 左侧: 96 孔板 -->
     <div class="calc-card" style="padding:12px">
       <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
@@ -429,24 +429,24 @@
       <h3 style="margin-bottom:8px" data-i18n="workbench.well_detail">Well detail</h3>
       <div id="wellDetail" style="font-size:13px;color:#888" data-i18n="workbench.pick_well">Select a well to inspect</div>
       <div id="wellForm" class="hidden" style="margin-top:8px">
-        <label style="font-size:13px"><span data-i18n="workbench.well_name">Name</span> <input type="text" id="wellName" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
-        <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.well_group">Group</span> <input type="text" id="wellGroup" list="wellGroupOptions" onchange="enzymeUpdateWells()" data-i18n-placeholder="workbench.well_group_ph" placeholder="Same-group wells are averaged for plots" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+        <label style="font-size:13px"><span data-i18n="workbench.well_name">Name</span> <input type="text" id="wellName" onchange="enzymeUpdateWells()" style="padding:6px;border:1px dashed var(--rule);width:100%"></label>
+        <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.well_group">Group</span> <input type="text" id="wellGroup" list="wellGroupOptions" onchange="enzymeUpdateWells()" data-i18n-placeholder="workbench.well_group_ph" placeholder="Same-group wells are averaged for plots" style="padding:6px;border:1px dashed var(--rule);width:100%">
           <datalist id="wellGroupOptions"></datalist>
         </label>
         <div style="display:flex;gap:8px;align-items:end">
           <label style="font-size:13px;flex:1"><span data-i18n="workbench.concentration">Concentration</span>
-            <input type="number" id="wellConc" step="any" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%">
+            <input type="number" id="wellConc" step="any" onchange="enzymeUpdateWells()" style="padding:6px;border:1px dashed var(--rule);width:100%">
           </label>
-          <select id="wellConcUnit" onchange="enzymeUpdateWells()" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+          <select id="wellConcUnit" onchange="enzymeUpdateWells()" style="padding:6px;border:1px dashed var(--rule);font-size:13px">
             <option value="ng_ml">ng/mL</option>
             <option value="uM">μM</option>
           </select>
         </div>
-        <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.mw_da">MW (Da)</span> <input type="number" id="wellMW" step="any" onchange="enzymeUpdateWells()" data-i18n-placeholder="workbench.mw_ph" placeholder="Used for ng/mL ↔ μM" style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%"></label>
+        <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.mw_da">MW (Da)</span> <input type="number" id="wellMW" step="any" onchange="enzymeUpdateWells()" data-i18n-placeholder="workbench.mw_ph" placeholder="Used for ng/mL ↔ μM" style="padding:6px;border:1px dashed var(--rule);width:100%"></label>
         <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.link_protein">Linked protein</span>
           <div style="position:relative">
             <input type="text" id="enzymeProteinSearch" data-i18n-placeholder="workbench.search_proteins" placeholder="Search proteins…" oninput="enzymeSearchProtein()" autocomplete="off"
-                   style="padding:6px;border:1px solid #d0d0d0;border-radius:4px;width:100%;font-size:13px">
+                   style="padding:6px;border:1px dashed var(--rule);width:100%;font-size:13px">
             <div id="enzymeProteinResults" class="search-dropdown hidden"></div>
           </div>
           <input type="hidden" id="wellProtein">
@@ -538,12 +538,12 @@
 <!--  Tab 5: 从实验复制                                   -->
 <!-- ══════════════════════════════════════════════════ -->
 <div id="tab-copy" class="tab-panel hidden">
-  <div style="display:grid;grid-template-columns:1fr 360px;gap:20px">
+  <div class="stack-on-narrow">
     <!-- 左侧：实验列表 -->
     <div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <input type="text" id="copySearchInput" data-i18n-placeholder="workbench.search_exp" placeholder="Search experiment titles..." oninput="filterCopyExps()"
-               style="flex:1;padding:8px 12px;border:1px solid #d0d0d0;border-radius:6px;font-size:14px">
+               style="flex:1;padding:8px 12px;border:1px dashed var(--rule);font-size:14px">
       </div>
       <div id="copyTypeTags" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"></div>
       <div id="copyExpList" style="max-height:420px;overflow-y:auto">
@@ -551,7 +551,7 @@
       </div>
     </div>
     <!-- 右侧：详情预览 -->
-    <div id="copyPreview" class="hidden" style="background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);position:sticky;top:16px;align-self:start">
+    <div id="copyPreview" class="calc-card hidden" style="position:sticky;top:16px;align-self:start">
       <h3 id="copyPreviewTitle" style="margin-bottom:4px;font-size:16px"></h3>
       <div id="copyPreviewMeta" style="font-size:13px;color:#888;margin-bottom:10px"></div>
       <div id="copyPreviewDetail" style="font-size:13px;line-height:1.7"></div>

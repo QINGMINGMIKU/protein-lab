@@ -499,7 +499,31 @@
       "workbench.files_ok": "{n} files | {ok} succeeded",
       "workbench.files_fail": " / {n} failed",
       "workbench.channels_n": "{n} channels",
-      "workbench.seq_pos": "{n} sequences, {pos} positions"
+      "workbench.seq_pos": "{n} sequences, {pos} positions",
+      "workbench.time_lo": "Start {t} s",
+      "workbench.time_hi": "End {t} s",
+      "workbench.calc_bg": "Calculation complete (background subtracted from {n} wells, mean ΔOD/min={avg})",
+      "workbench.multimer_cropped": "{n}-mer cropped",
+      "workbench.pos_span": "positions {lo}–{hi}",
+      "workbench.generating": "Generating…",
+      "workbench.fit": "Fit",
+      "workbench.selected_mark": "✓ Selected",
+      "workbench.fit_failed_row": "Fit failed",
+      "workbench.kd_steady": "KD (steady) {v}",
+      "workbench.kd_kinetic": "KD (kinetic) {v}",
+      "workbench.sample_phase": "Sample {sample} · assoc {ta} s → dissoc {td} s",
+      "workbench.no_events": "No events",
+      "workbench.overlay_title": "Overlay ({n} files)",
+      "workbench.overlay_title_norm": "Overlay ({n} files · normalized)",
+      "workbench.no_match": "No matches",
+      "workbench.no_match_protein": "No matching proteins",
+      "workbench.well_group_n": "Set group for {n} wells",
+      "workbench.dil_summary": "{c}→{s} μM, {f}×{n} steps",
+      "workbench.sensorgram": "Sensorgram",
+      "workbench.kon": "kon (1/M·s)",
+      "workbench.koff": "koff (1/s)",
+      "copy.copied": "copy",
+      "toast.cannot_undo": "Cannot undo"
     },
     "zh-CN": {
       "nav.brand": "Bigo.bio",
@@ -999,7 +1023,31 @@
       "workbench.files_ok": "{n} 文件 | {ok} 成功",
       "workbench.files_fail": " / {n} 失败",
       "workbench.channels_n": "{n} 通道",
-      "workbench.seq_pos": "{n} 条序列, {pos} 个位置"
+      "workbench.seq_pos": "{n} 条序列, {pos} 个位置",
+      "workbench.time_lo": "起始 {t} s",
+      "workbench.time_hi": "终止 {t} s",
+      "workbench.calc_bg": "计算完成 (已扣除背景 {n} 个孔, 均值 ΔOD/min={avg})",
+      "workbench.multimer_cropped": "{n} 聚体裁剪",
+      "workbench.pos_span": "位点 {lo}–{hi}",
+      "workbench.generating": "生成中…",
+      "workbench.fit": "拟合",
+      "workbench.selected_mark": "✓ 选中",
+      "workbench.fit_failed_row": "拟合失败",
+      "workbench.kd_steady": "KD(稳态) {v}",
+      "workbench.kd_kinetic": "KD(动力学) {v}",
+      "workbench.sample_phase": "样本 {sample} · 相界 assoc {ta} s → dissoc {td} s",
+      "workbench.no_events": "无事件",
+      "workbench.overlay_title": "总图（{n} 个文件）",
+      "workbench.overlay_title_norm": "总图（{n} 个文件 · 归一化）",
+      "workbench.no_match": "无匹配",
+      "workbench.no_match_protein": "无匹配蛋白",
+      "workbench.well_group_n": "同时设置 {n} 个孔的组",
+      "workbench.dil_summary": "{c}→{s} μM, {f}×{n}步",
+      "workbench.sensorgram": "传感器图",
+      "workbench.kon": "kon (1/M·s)",
+      "workbench.koff": "koff (1/s)",
+      "copy.copied": "复制",
+      "toast.cannot_undo": "无法撤销"
     }
   };
   const STORAGE_KEY = "bigo.locale";
@@ -1037,7 +1085,7 @@
       scope.querySelectorAll("[data-i18n-option]").forEach((el) => {
         el.textContent = this.t(el.getAttribute("data-i18n-option"));
       });
-      scope.querySelectorAll("option[value]").forEach((el) => {
+      scope.querySelectorAll("select[data-exp-types] option[value]").forEach((el) => {
         const key = "exp_type." + el.value;
         if (DICTS.en[key]) el.textContent = this.t(key);
       });

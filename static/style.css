@@ -224,9 +224,15 @@ label input, label textarea, label select,
 .record-list { display: none; }
 .record-card {
   display: block; padding: 16px; border-bottom: 1px dashed var(--rule);
-  cursor: pointer; min-width: 0;
+  min-width: 0; text-decoration: none; color: inherit;
 }
-.record-card h3 { font-size: 16px; font-weight: 500; margin-bottom: 8px; overflow-wrap: anywhere; }
+.record-card-head { display: flex; align-items: flex-start; gap: 8px; }
+.record-card-head h3 { flex: 1; min-width: 0; cursor: pointer; font-size: 16px; font-weight: 500; margin-bottom: 8px; overflow-wrap: anywhere; }
+.record-select {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: var(--hit); min-height: var(--hit); flex-shrink: 0; margin: 0;
+}
+.record-select input { width: 18px; height: 18px; }
 .record-card dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 13px; color: var(--graphite); }
 @media (max-width: 767px) {
   .desktop-table { display: none; }
@@ -377,7 +383,10 @@ label textarea { resize: vertical; min-height: 80px; }
 .dialog-field { margin-top: 8px; }
 
 .workbench-split { display: grid; grid-template-columns: minmax(0,1fr) minmax(240px, 340px); gap: 16px; }
-@media (max-width: 1023px) { .workbench-split { grid-template-columns: 1fr; } }
+.stack-on-narrow { display: grid; grid-template-columns: minmax(0,1fr) minmax(240px, 360px); gap: 16px; min-width: 0; }
+@media (max-width: 1023px) {
+  .workbench-split, .stack-on-narrow { grid-template-columns: 1fr; }
+}
 
 details.advanced {
   margin: 16px 0; border: 1px dashed var(--rule); padding: 8px 12px; background: var(--instrument);

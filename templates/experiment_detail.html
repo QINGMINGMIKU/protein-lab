@@ -58,7 +58,7 @@
     <label><span data-i18n="archive.field_title">Title</span> <input type="text" id="editTitle" maxlength="200"></label>
     <div class="form-row">
       <label><span data-i18n="archive.field_type">Type</span>
-        <select id="editType">
+        <select id="editType" data-exp-types>
           {% for t in exp_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
         </select>
       </label>
@@ -208,8 +208,8 @@
   <h2>Weblogo</h2>
   {% set img = params.get("image", "") %}
   {% if img %}
-  <p style="color:#888;font-size:13px;margin-bottom:12px">{{ proteins|length }} 条序列</p>
-  <img src="{{ img }}" style="max-width:100%;border-radius:8px" alt="Weblogo">
+  <p style="color:#888;font-size:13px;margin-bottom:12px">{{ proteins|length }} sequences</p>
+  <img src="{{ img }}" style="max-width:100%" alt="Weblogo">
   <div style="margin-top:8px">
     <button class="btn btn-sm btn-outline" onclick="downloadDetailImage()" data-i18n="detail.download_png">Download PNG</button>
   </div>
@@ -319,7 +319,7 @@
     {%- if depth >= 2 %}
       <code style="font-size:12px">{{ (v | tojson) | truncate(200, true) }}</code>
     {%- else %}
-      <table class="calc-table" style="margin:2px 0;box-shadow:none;border:1px solid #eee">
+      <table class="calc-table kv-nested" style="margin:2px 0;border:1px dashed var(--rule)">
         {%- for kk, vv in v.items() %}
         <tr><th>{{ kk }}</th><td>{{ kv_sub(vv, depth+1) }}</td></tr>
         {%- endfor %}
@@ -331,7 +331,7 @@
     {%- set _keys = [] %}
     {%- for item in v %}{% for kk in item.keys() %}{% if kk not in _keys %}{% set _ = _keys.append(kk) %}{% endif %}{% endfor %}{% endfor %}
     {%- set cols = _keys[:8] %}
-    <table class="calc-table" style="margin:2px 0;box-shadow:none;border:1px solid #eee">
+    <table class="calc-table kv-nested" style="margin:2px 0;border:1px dashed var(--rule)">
       <thead><tr>{% for kk in cols %}<th>{{ kk }}</th>{% endfor %}</tr></thead>
       <tbody>
       {%- for item in v[:20] %}
@@ -367,7 +367,7 @@
     {% if params %}{{ kv_table(params) }}{% endif %}
     <details style="margin-top:8px">
       <summary style="font-size:12px;color:#888;cursor:pointer" data-i18n="detail.raw_json">Raw JSON</summary>
-      <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ params | tojson(indent=2) if params else "{}" }}</pre>
+      <pre style="background:#f8f9fb;padding:12px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ params | tojson(indent=2) if params else "{}" }}</pre>
     </details>
   </div>
   <div class="calc-card">
@@ -375,7 +375,7 @@
     {% if results %}{{ kv_table(results) }}{% endif %}
     <details style="margin-top:8px">
       <summary style="font-size:12px;color:#888;cursor:pointer" data-i18n="detail.raw_json">Raw JSON</summary>
-      <pre style="background:#f8f9fb;padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ results | tojson(indent=2) if results else "{}" }}</pre>
+      <pre style="background:#f8f9fb;padding:12px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ results | tojson(indent=2) if results else "{}" }}</pre>
     </details>
   </div>
 </div>
