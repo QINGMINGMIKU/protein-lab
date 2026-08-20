@@ -2211,6 +2211,17 @@ def backup_database():
     backup_dir = os.path.join(os.path.dirname(db_path), "backups")
     os.makedirs(backup_dir, exist_ok=True)
 
+    # WAL 模式下裸 copy 主文件会漏掉未 checkpoint 的 WAL 内容——先强制 checkpoint 再复制。
+    # 尽力而为：checkpoint 失败不阻断启动（备份失败也会继续启动）。
+    try:
+        conn = models.get_db()
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(backup_dir, f"protein_lab_{stamp}.db")
     import shutil
