@@ -142,6 +142,17 @@ function esc(s) {
 function escAttr(s) { return esc(s); }
 
 // ── Toast ────────────────────────────────────────────
+function iconClose() {
+  return `<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+}
+function setEvidence(id, phase, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.dataset.phase = phase || "";
+  el.classList.add("evidence-status");
+  el.textContent = text || "";
+}
+
 function toast(msg, error, undoAction) {
   const el = document.createElement("div");
   let text = msg;
@@ -176,7 +187,7 @@ function toast(msg, error, undoAction) {
     el.appendChild(link);
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), undoAction ? 8000 : 2500);
+  setTimeout(() => el.remove(), (undoAction || error) ? 8000 : 2500);
 }
 
 // ── Tag system ──────────────────────────────────────
@@ -220,7 +231,7 @@ function handleTagKey(event, containerId) {
   if (!val) return;
   const chip = document.createElement("span");
   chip.className = "tag-chip";
-  chip.innerHTML = `${esc(val)} <span class="chip-x" onclick="this.parentElement.remove()">✕</span>`;
+  chip.innerHTML = `${esc(val)} <button type="button" class="chip-x" onclick="this.parentElement.remove()" aria-label="${esc(t("common.close"))}">${iconClose()}</button>`;
   container.insertBefore(chip, input);
   input.value = "";
   syncTagHidden(containerId);
@@ -229,7 +240,11 @@ function handleTagKey(event, containerId) {
 function getTagChips(containerId) {
   const container = document.getElementById(containerId);
   const chips = container.querySelectorAll(".tag-chip");
-  return Array.from(chips).map(c => c.textContent.replace("✕", "").trim()).filter(Boolean).join(", ");
+  return Array.from(chips).map(c => {
+    const clone = c.cloneNode(true);
+    clone.querySelectorAll(".chip-x").forEach(x => x.remove());
+    return clone.textContent.trim();
+  }).filter(Boolean).join(", ");
 }
 
 function syncTagHidden(containerId) {
@@ -265,7 +280,7 @@ document.addEventListener("click", function (e) {
     case "show-detail":    showDetail(id); break;
     case "delete-protein": deleteProtein(id, name); break;
     case "show-exp":       showExpDetail(id); break;
-    case "delete-exp":     deleteExp(id); break;
+    case "delete-exp":     deleteExp(id, name); break;
   }
 });
 
@@ -360,7 +375,7 @@ async function refreshAllProteins() {
     toast(t("proteins.refreshed", { n: r.refreshed }));
     loadProteins();
     loadProteinSelects();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 function showAddModal() { document.getElementById("addModal").classList.remove("hidden"); }
@@ -395,7 +410,7 @@ async function addProtein(e) {
     closeAddModal();
     loadProteins();
     loadProteinSelects();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function deleteProtein(id, name) {
@@ -414,7 +429,7 @@ async function deleteProtein(id, name) {
     loadProteins();
     loadProteinSelects();
     closeDetail();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function importFasta(e) {
@@ -430,7 +445,7 @@ async function importFasta(e) {
     closeImportModal();
     loadProteins();
     loadProteinSelects();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function showDetail(id) {
@@ -500,7 +515,7 @@ async function saveProteinTags(pid) {
     showDetail(pid);
     loadProteins().catch(() => {});
     loadProteinSelects();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 function closeDetail() {
@@ -772,7 +787,7 @@ function renderChips() {
   }
   container.innerHTML = ids.map(id => {
     const p = selectedProteins[id];
-    return `<span class="chip">${esc(p.name)} <button class="chip-x" onclick="removeProteinFromTable(${id})">✕</button></span>`;
+    return `<span class="chip">${esc(p.name)} <button type="button" class="chip-x" onclick="removeProteinFromTable(${id})" aria-label="${esc(t("common.close"))}">${iconClose()}</button></span>`;
   }).join("");
 }
 
@@ -799,7 +814,7 @@ function renderTable() {
         <td><input type="number" class="cell-input target-vol" step="any" placeholder="200" value="${p._targetVol || ''}"></td>
         <td class="col-result vol-take">-</td>
         <td class="col-result vol-buffer">-</td>
-        <td><button class="btn btn-sm btn-danger" onclick="removeProteinFromTable(${id})">✕</button></td>
+        <td><button class="btn btn-sm btn-icon btn-danger" onclick="removeProteinFromTable(${id})" aria-label="${esc(t("common.delete"))}">${iconClose()}</button></td>
       </tr>
     `;
   }).join("");
@@ -936,7 +951,7 @@ async function saveConcTable() {
       ...goal,
     });
     toast(saved.goal_node_id ? t("toast.saved_linked") : t("toast.saved_record"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -996,7 +1011,7 @@ async function importBliFromExp() {
     if (!added) { toast(t("toast.proteins_exist_or_invalid"), true); return; }
     renderBliTable();
     toast(t("toast.imported_n", { n: added }));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ── Search proteins for BLI ─────────────────────────
@@ -1063,7 +1078,7 @@ function renderBliTable() {
         <td><input type="number" class="cell-input bli-nsteps" value="${b.steps}" min="2" max="24" style="width:55px"></td>
         <td><input type="number" class="cell-input bli-vol" step="any" value="${b.vol}" style="width:70px"></td>
         <td><input type="number" class="cell-input bli-dead" step="any" value="${b.dead}" style="width:65px"></td>
-        <td><button class="btn btn-sm btn-danger" onclick="removeBliProtein(${id})">✕</button></td>
+        <td><button class="btn btn-sm btn-icon btn-danger" onclick="removeBliProtein(${id})" aria-label="${esc(t("common.delete"))}">${iconClose()}</button></td>
       </tr>
     `;
   }).join("");
@@ -1153,10 +1168,10 @@ function renderBliResults(results) {
     html += `
       <div class="result-box" style="margin-bottom:14px">
         <strong>${esc(p.name)}</strong> (${t("workbench.stock_c")} ${r.stock_conc_uM} μM, ${r.dilution_factor}×, ${r.n_steps} ${t("workbench.steps")})
-        <table style="margin-top:6px"><thead><tr><th>#</th><th>${t("workbench.col_conc")} (${dilUnit})</th><th>${t("workbench.total_vol")}</th><th>${t("workbench.from_prev")}</th><th>${t("workbench.col_buffer")}</th></tr></thead>
+        <div class="table-scroll"><table class="calc-table" style="margin-top:6px"><thead><tr><th>#</th><th>${t("workbench.col_conc")} (${dilUnit})</th><th>${t("workbench.total_vol")}</th><th>${t("workbench.from_prev")}</th><th>${t("workbench.col_buffer")}</th></tr></thead>
         <tbody>${r.steps.map(s => `
           <tr><td>${s.step}</td><td>${fmtConc(s.conc_uM)}</td><td>${s.total_vol_uL}</td><td>${s.stock_vol_uL}</td><td>${s.buffer_vol_uL}</td></tr>
-        `).join("")}</tbody></table>
+        `).join("")}</tbody></table></div>
         <p style="margin-top:6px;font-size:13px;color:var(--graphite)">${t("detail.first_demand", { v: r.steps[0].total_vol_uL })}</p>
       </div>`;
   }
@@ -1226,7 +1241,7 @@ async function saveBliTable() {
     });
     renderBliResults(dilutionResults);
     toast(saved.goal_node_id ? t("toast.saved_linked") : t("toast.saved_record"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -1410,7 +1425,7 @@ async function selectCopyExp(eid) {
     document.getElementById("copyPreviewMeta").innerHTML = `<span class="copy-type-tag ${ti.css}">${esc(ti.label)}</span> ${e.date || ""} → <b>${targetLabel}</b>`;
     document.getElementById("copyPreviewDetail").innerHTML = detailHtml;
     document.getElementById("copyPreview").classList.remove("hidden");
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // helper: safe JSON parse
@@ -1522,7 +1537,7 @@ async function applyCopyAndSwitch() {
       document.querySelector(".tab-btn[data-tab='bli']").click();
       bliPlot();
       toast(t("toast.loaded_bli_samples", { n: bliSamples.length }));
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { toast(err, true); }
     return;
   }
 
@@ -1557,7 +1572,7 @@ async function applyCopyAndSwitch() {
       document.querySelector(".tab-btn[data-tab='akta']").click();
       aktaPlot();
       toast(t("toast.loaded_akta_channels", { n: run.channels.length }));
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { toast(err, true); }
     return;
   }
 
@@ -1594,7 +1609,7 @@ async function loadExpIntoCalc(expId) {
     if (!exp || exp.error) { toast(t("toast.load_exp_failed"), true); return; }
     copyCache = exp;
     await applyCopyAndSwitch();
-  } catch (err) { toast(err.message || t("toast.load_exp_failed"), true); }
+  } catch (err) { toast(err.backend ? err : backendError(null, 0, err.message || t("toast.load_exp_failed")), true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -1623,7 +1638,7 @@ async function loadExperiments() {
         <td class="exp-type"><span class="badge">${esc(typeLabel)}</span></td>
         <td>${pcell}</td>
         <td>${esc((e.notes || "").substring(0, 40))}</td>
-        <td><button class="btn btn-sm btn-danger" data-action="delete-exp" data-id="${e.id}">${t("common.delete")}</button></td>
+        <td><button class="btn btn-sm btn-danger" data-action="delete-exp" data-id="${e.id}" data-name="${escAttr(e.title)}">${t("common.delete")}</button></td>
         <td><a class="btn btn-sm btn-outline" href="/api/experiments/${e.id}/export" title="${esc(t("archive.export_one"))}">${t("common.export")}</a></td>
       </tr>
     `;
@@ -1778,7 +1793,7 @@ async function saveExperiment(e) {
     toast(saved.goal_node_id ? t("toast.saved_exp_linked") : t("toast.saved_exp"));
     closeExpModal();
     loadExperiments();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function showExpDetail(id) {
@@ -1808,7 +1823,7 @@ async function showExpDetail(id) {
     `;
     document.getElementById("expDetailPanel").classList.remove("hidden");
     loadResearchList(e.id);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function loadResearchList(expId) {
@@ -1846,7 +1861,7 @@ async function attachGoalPrompt(expId) {
       await API.post(`/api/experiments/${expId}/attach-goal`, { new_goal: { title: custom, tag: "" } });
       toast(t("toast.attached"));
       loadResearchList(expId);
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { toast(err, true); }
     return;
   }
   const picked = window.BigoUI && BigoUI.pick
@@ -1866,7 +1881,7 @@ async function attachGoalPrompt(expId) {
     await API.post(`/api/experiments/${expId}/attach-goal`, body);
     toast(t("toast.attached"));
     loadResearchList(expId);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function editExpTitle(id) {
@@ -1883,7 +1898,7 @@ async function editExpTitle(id) {
     try {
       await API.put(`/api/experiments/${id}`, { title: newTitle });
       toast(t("toast.updated"));
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { toast(err, true); }
     showExpDetail(id);
   };
 }
@@ -1899,21 +1914,22 @@ function closeExpDetail() {
   document.getElementById("expDetailPanel").classList.add("hidden");
 }
 
-async function deleteExp(id) {
+async function deleteExp(id, name) {
+  const label = name || ("#" + id);
   const ok = window.BigoUI
     ? await BigoUI.confirm({
         title: t("common.delete"),
-        message: t("archive.confirm_delete"),
+        message: t("archive.confirm_delete_named", { name: label }),
         impact: t("archive.confirm_delete_impact"),
         danger: true,
       })
-    : confirm(t("archive.confirm_delete"));
+    : confirm(t("archive.confirm_delete_named", { name: label }));
   if (!ok) return;
   try {
     await API.del(`/api/experiments/${id}`);
     toast(t("toast.deleted"));
     loadExperiments();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ── Pre-fill from protein page ──────────────────────
@@ -1955,10 +1971,14 @@ async function uploadEnzymeFile() {
   if (!file) return;
   const form = new FormData();
   form.append("file", file);
+  setEvidence("enzymeMeta", "processing", t("workbench.status_processing"));
   try {
     const r = await fetch("/api/enzyme/parse", { method: "POST", body: form });
     const data = await r.json();
-    if (!r.ok) { toast(data.error, true); return; }
+    if (!r.ok) {
+      setEvidence("enzymeMeta", "fail", t("workbench.status_fail"));
+      toast(backendError(data, r.status), true); return;
+    }
     enzymeData = data;
     enzymeSelection.clear();
     enzymeWellInfo = {};
@@ -1970,12 +1990,16 @@ async function uploadEnzymeFile() {
     enzymeLastPlotType = null;
     renderEnzymeTimePanel();
     renderPlate();
-    document.getElementById("enzymeMeta").textContent =
-      `${data.meta.sample || file.name} | ${data.meta.wavelength || "?"} nm | ${Object.keys(data.wells).length} wells`;
+    const nWells = Object.keys(data.wells).length;
+    setEvidence("enzymeMeta", nWells ? "done" : "empty",
+      `${data.meta.sample || file.name} | ${data.meta.wavelength || "?"} nm | ${t("detail.wells_n", { n: nWells })}`);
     document.getElementById("enzymeTable").classList.add("hidden");
     document.getElementById("enzymePlotArea").innerHTML = "";
     toast(t("toast.parsed"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) {
+    setEvidence("enzymeMeta", "fail", t("workbench.status_fail"));
+    toast(err, true);
+  }
 }
 
 function renderPlate() {
@@ -2320,7 +2344,7 @@ async function enzymeCalc(wellIds, silent = false) {
     const bg = r.bg;
     const msg = bg ? t("workbench.calc_bg", { n: bg.count, avg: bg.avg.toFixed(6) }) : t("toast.calc_done");
     if (!silent) toast(msg);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 function renderEnzymeTable(wellIds) {
@@ -2389,7 +2413,7 @@ async function enzymePlot(type) {
        <div style="margin-top:8px">
          <button class="btn btn-sm btn-outline" onclick="downloadEnzymePlot()">${t("workbench.download_png")}</button>
        </div>`;
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function downloadEnzymePlot() {
@@ -2472,7 +2496,7 @@ async function enzymeSaveExp() {
     });
     toast(mount.exp_id ? t("toast.remounted", { id: mount.exp_id })
       : (saved.goal_node_id ? t("toast.saved_linked") : t("toast.saved_record")));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // 导出作图友好 Excel（宽格式：每孔独立时间/OD 两列 + 动力学汇总），文件名用自动命名
@@ -2499,7 +2523,7 @@ async function enzymeExportExcel() {
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || t("toast.export_failed", { status: r.status }));
+      throw backendError(j, r.status, t("toast.export_failed", { status: r.status }));
     }
     const blob = await r.blob();
     const a = document.createElement("a");
@@ -2510,7 +2534,7 @@ async function enzymeExportExcel() {
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
     toast(t("toast.exported_plot"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 let enzymeProteinList = [];
@@ -2565,7 +2589,7 @@ async function enzymeLinkProtein(pid) {
     document.getElementById("wellMW").value = p.mw;
     renderPlate();
     toast(t("toast.linked_wells", { n: enzymeSelection.size, name: p.name }));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // 关闭搜索下拉
@@ -2730,7 +2754,7 @@ async function generateWeblogo() {
     weblogoLastImage = r.image;
     showWeblogoResult(r, selected.length);
     toast(t("toast.weblogo_done"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
   finally { genBtn.disabled = false; genBtn.textContent = origText; }
 }
 
@@ -2777,7 +2801,7 @@ async function saveWeblogoExp() {
       calc_result: {},
     });
     toast(t("toast.saved_record"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -2850,7 +2874,7 @@ async function batchDeleteProteins() {
     loadProteins().catch(() => {});
     loadProteinSelects();
     closeDetail();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function deleteAllProteins() {
@@ -2875,7 +2899,7 @@ async function deleteAllProteins() {
     loadProteins().catch(() => {});
     loadProteinSelects();
     closeDetail();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ── 批量改标签 ─────────────────────────────────────────
@@ -2911,7 +2935,7 @@ async function applyBatchTags() {
     loadProteins().catch(() => {});
     loadProteinSelects();
     loadTagFilter();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ── Experiments bulk ──────────────────────────────────
@@ -2959,7 +2983,7 @@ async function batchDeleteExperiments() {
     toast(t("toast.deleted_n_exps", { n: r.deleted }), false, () => undoRestore());
     clearExpSelection();
     loadExperiments().catch(() => {});
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function deleteAllExperiments() {
@@ -2982,7 +3006,7 @@ async function deleteAllExperiments() {
     toast(t("toast.deleted_all_exps", { n: r.deleted }), false, () => undoRestore());
     document.getElementById("selectAllExps").checked = false;
     loadExperiments().catch(() => {});
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ── Undo ──────────────────────────────────────────────
@@ -3016,10 +3040,14 @@ async function uploadBliFile() {
   if (!file) return;
   const form = new FormData();
   form.append("file", file);
+  setEvidence("bliMeta", "processing", t("workbench.status_processing"));
   try {
     const r = await fetch("/api/bli/analyze", { method: "POST", body: form });
     const data = await r.json();
-    if (!r.ok) { toast(data.error, true); return; }
+    if (!r.ok) {
+      setEvidence("bliMeta", "fail", t("workbench.status_fail"));
+      toast(backendError(data, r.status), true); return;
+    }
     bliSession = data.session_id;
     bliSamples = data.samples || [];
     bliSelectedSample = bliSamples[0]?.sample || "";
@@ -3028,14 +3056,18 @@ async function uploadBliFile() {
     bliActiveCurves = new Set(bliSamples.flatMap(s => s.labels || []));  // 默认全选进入数据
     renderBliSamples();
     renderBliCurves();
-    document.getElementById("bliMeta").textContent =
-      `${file.name} | ${t("workbench.sensors_n", { n: data.n_sensors })} | ${t("copy.samples_n", { n: bliSamples.length })}`;
+    const phase = bliSamples.length ? "done" : "empty";
+    setEvidence("bliMeta", phase,
+      `${file.name} | ${t("workbench.sensors_n", { n: data.n_sensors })} | ${t("copy.samples_n", { n: bliSamples.length })}`);
     document.getElementById("bliAnalyzed").classList.remove("hidden");
     document.getElementById("bliKdWrap").classList.add("hidden");
     document.getElementById("bliPlotArea").innerHTML = "";
     refreshBliPlaceholder();
     toast(t("toast.parsed"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) {
+    setEvidence("bliMeta", "fail", t("workbench.status_fail"));
+    toast(err, true);
+  }
 }
 
 function renderBliSamples() {
@@ -3179,7 +3211,7 @@ async function bliPlot() {
         </div>`;
       bliLastPlot = r.image;
     }
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function bliFitSelected() {
@@ -3189,7 +3221,7 @@ async function bliFitSelected() {
     bliKdResult = r;
     document.getElementById("bliKdWrap").classList.remove("hidden");
     document.getElementById("bliKdTables").innerHTML = renderBliKd(bliSelectedSample, r);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // 单样本 KD 结果渲染（点样本行重拟合 → 更新这张卡片；拟合失败显示错误卡）
@@ -3216,10 +3248,10 @@ function renderBliKd(sample, res) {
     <div style="font-size:13px;color:var(--graphite);margin-bottom:6px">
       ${t("workbench.sample_phase", { sample: esc(sample), ta: phase.t_assoc?.toFixed(1) ?? "—", td: phase.t_dissoc?.toFixed(1) ?? "—" })}
     </div>
-    <table class="calc-table">
+    <div class="table-scroll"><table class="calc-table">
       <thead><tr><th>${t("workbench.method")}</th><th>KD</th><th>${t("workbench.kon")}</th><th>${t("workbench.koff")}</th><th>${t("workbench.notes_col")}</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>
+    </table></div>
   </div>`;
 }
 
@@ -3243,7 +3275,7 @@ async function bliSaveExp() {
     });
     toast(mount.exp_id ? t("toast.remounted_curves", { id: mount.exp_id })
       : t("toast.saved_record"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function bliExport() {
@@ -3256,7 +3288,7 @@ async function bliExport() {
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || t("toast.export_failed", { status: r.status }));
+      throw backendError(j, r.status, t("toast.export_failed", { status: r.status }));
     }
     const blob = await r.blob();
     const fname = await askText(t("ui.export_name"), "BLI_KD.xlsx");
@@ -3270,7 +3302,7 @@ async function bliExport() {
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
     toast(t("toast.exported_bli"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // 兼容入口：BLI/AKTA 上传后刷新各自输入框占位（统一走 refreshAutoNamePlaceholders）
@@ -3290,10 +3322,14 @@ async function uploadAktaFile() {
   if (!files.length) return;
   const form = new FormData();
   files.forEach(f => form.append("file", f));
+  setEvidence("aktaMeta", "processing", t("workbench.status_processing"));
   try {
     const r = await fetch("/api/akta/analyze", { method: "POST", body: form });
     const data = await r.json();
-    if (!r.ok) { toast(data.error, true); return; }
+    if (!r.ok) {
+      setEvidence("aktaMeta", "fail", t("workbench.status_fail"));
+      toast(backendError(data, r.status), true); return;
+    }
     aktaRuns = (data.runs || []).map(run => {
       if (run.error) return { ...run, channels: [], uv_channels: [], events: {}, meta: {} };
       const uv = run.uv_channels && run.uv_channels[0];
@@ -3308,8 +3344,9 @@ async function uploadAktaFile() {
     const okRuns = aktaRuns.filter(r => !r.error);
     const errRuns = aktaRuns.filter(r => r.error);
     const totalCh = okRuns.reduce((n, r) => n + r.channels.length, 0);
-    document.getElementById("aktaMeta").textContent =
-      `${t("workbench.files_ok", { n: files.length, ok: okRuns.length })}${errRuns.length ? t("workbench.files_fail", { n: errRuns.length }) : ""} | ${t("workbench.channels_n", { n: totalCh })}`;
+    const phase = okRuns.length ? "done" : "fail";
+    setEvidence("aktaMeta", phase,
+      `${t("workbench.files_ok", { n: files.length, ok: okRuns.length })}${errRuns.length ? t("workbench.files_fail", { n: errRuns.length }) : ""} | ${t("workbench.channels_n", { n: totalCh })}`);
     renderAktaRuns();
     document.getElementById("aktaEventsInfo").textContent =
       errRuns.map(r => `${r.name}: ${r.error}`).join("；");
@@ -3319,7 +3356,10 @@ async function uploadAktaFile() {
     refreshAktaPlaceholder();
     if (okRuns.length) { toast(t("toast.parsed_n_files", { n: okRuns.length })); }
     else { toast(t("toast.parse_all_failed"), true); }
-  } catch (err) { toast(err.message, true); }
+  } catch (err) {
+    setEvidence("aktaMeta", "fail", t("workbench.status_fail"));
+    toast(err, true);
+  }
 }
 
 function renderAktaRuns() {
@@ -3430,7 +3470,7 @@ async function aktaPlot() {
         <img src="${r.image}" style="max-width:100%" alt="${esc(run.name)}">
       </div>`;
     renderAktaPeaks(r.peaks || [], run);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // 出图入口：分图模式 = 每文件一张；总图模式 = 所有曲线叠一张
@@ -3464,7 +3504,7 @@ async function aktaBatchPlot() {
         <div style="font-weight:600;margin-bottom:6px;font-size:14px">${normOn ? t("workbench.overlay_title_norm", { n: okRuns.length }) : t("workbench.overlay_title", { n: okRuns.length })}</div>
         <img src="${r.image}" style="max-width:100%" alt="${esc(t("workbench.overlay_title", { n: okRuns.length }))}">
       </div>`;
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { toast(err, true); }
     return;
   }
 
@@ -3540,7 +3580,7 @@ async function aktaExport() {
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || t("toast.export_failed", { status: r.status }));
+      throw backendError(j, r.status, t("toast.export_failed", { status: r.status }));
     }
     const blob = await r.blob();
     // 文件名默认用 zip 包名（去 .zip），允许用户自定义
@@ -3556,7 +3596,7 @@ async function aktaExport() {
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
     toast(t("toast.exported_peaks", { n: okRuns.length }));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 
@@ -3583,7 +3623,7 @@ async function aktaSaveExp() {
     });
     toast(mount.exp_id ? t("toast.remounted_curves", { id: mount.exp_id })
       : t("toast.saved_record"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
@@ -3659,7 +3699,7 @@ async function researchMove(id, dir) {
       if (n) renderResearchDetail(n);
     }
     toast(t("toast.moved"));
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // lineflow 卡片角标 ▾ 切换：折叠/展开子层
@@ -3851,7 +3891,7 @@ function resTagChip(tag) {
 async function researchSelect(id) {
   let node;
   try { node = await API.get(`/api/research/nodes/${id}`); }
-  catch (err) { toast(err.message, true); return; }
+  catch (err) { toast(err, true); return; }
   researchState.selectedId = id;
   researchRender();
   renderResearchChain(node.chain || []);
@@ -3943,7 +3983,7 @@ async function researchChangeStance(nodeId, stanceValue) {
   let curNode = researchFindNode(nodeId);
   if (!curNode) {
     try { curNode = await API.get(`/api/research/nodes/${nodeId}`); }
-    catch (err) { toast(err.message, true); if (sel) sel.value = prevValue; return; }
+    catch (err) { toast(err, true); if (sel) sel.value = prevValue; return; }
   }
   const STANCE_KEYWORDS = ["支持", "反驳", "部分", "不确定"];
   const parts = String(curNode.tag || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -3970,7 +4010,7 @@ async function researchChangeStance(nodeId, stanceValue) {
     if (refreshed) renderResearchDetail(refreshed);
     toast(t("toast.stance_updated"));
   } catch (err) {
-    toast(err.message, true);
+    toast(err, true);
     if (sel) sel.value = prevValue;  // 失败时回滚 UI
   }
 }
@@ -4055,7 +4095,7 @@ async function researchSave(e) {
     researchCloseModal();
     toast(id ? t("toast.updated") : t("toast.saved"));
     await researchLoad();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function researchDelete(id) {
@@ -4075,7 +4115,7 @@ async function researchDelete(id) {
     if (researchState.selectedId === id) researchCloseDetail();
     toast(t("toast.deleted"));
     await researchLoad();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 function researchExpFill() {

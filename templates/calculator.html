@@ -412,6 +412,7 @@
         <button class="btn btn-sm btn-outline" onclick="enzymeInvertSelect()" data-i18n="workbench.invert">Invert</button>
         <span style="color:#888;font-size:12px;margin-left:4px" data-i18n="workbench.ctrl_multi">Ctrl+click for multi-select</span>
       </div>
+      <div class="table-scroll">
       <div id="plateGrid" class="plate-grid">
         <div class="plate-corner"></div>
         <script>for(let c=1;c<=12;c++)document.write('<div class=plate-col-hdr>'+c+'</div>');</script>
@@ -421,6 +422,7 @@
             for(let c=1;c<=12;c++)document.write('<div class=plate-well id=well-'+"ABCDEFGH"[r]+c+' onclick=enzymeClickWell(event,"'+"ABCDEFGH"[r]+c+'")></div>');
           }
         </script>
+      </div>
       </div>
     </div>
 

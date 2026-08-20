@@ -7,8 +7,7 @@ onedir（非 onefile）：免启动解压、杀毒误报低、进程冷启动 <1
 """
 datas = [
     ("templates", "templates"),
-    ("static", "static"),
-    ("fonts", "fonts"),                      # 打包 Noto Sans SC（OFL）
+    ("static", "static"),                    # includes static/fonts (Inter, IBM Plex Mono, Noto Sans SC)
 ]
 # 惰性 import 的模块，PyInstaller 静态分析看不到，必须显式声明：
 #   mcp_server / fonts / waitress — app.py main 块或函数体内 import；pandas/logomaker/matplotlib — 路由内惰性 import

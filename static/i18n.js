@@ -475,6 +475,7 @@
       "detail.no_image": "No image data",
       "detail.seq_n": "{n} sequences",
       "detail.wells_n": "{n} wells",
+      "detail.wells_unit": "wells",
       "detail.peaks_n": "{n} peaks detected",
       "detail.phase": "Phase boundary",
       "detail.channel": "Channel",
@@ -523,7 +524,10 @@
       "workbench.kon": "kon (1/M·s)",
       "workbench.koff": "koff (1/s)",
       "copy.copied": "copy",
-      "toast.cannot_undo": "Cannot undo"
+      "toast.cannot_undo": "Cannot undo",
+      "workbench.status_processing": "Processing…",
+      "workbench.status_fail": "Processing failed",
+      "workbench.status_empty": "No results"
     },
     "zh-CN": {
       "nav.brand": "Bigo.bio",
@@ -999,6 +1003,7 @@
       "detail.no_image": "无图像数据",
       "detail.seq_n": "{n} 条序列",
       "detail.wells_n": "{n} 孔",
+      "detail.wells_unit": "孔",
       "detail.peaks_n": "检测到 {n} 个峰",
       "detail.phase": "相界",
       "detail.channel": "通道",
@@ -1047,7 +1052,10 @@
       "workbench.kon": "kon (1/M·s)",
       "workbench.koff": "koff (1/s)",
       "copy.copied": "复制",
-      "toast.cannot_undo": "无法撤销"
+      "toast.cannot_undo": "无法撤销",
+      "workbench.status_processing": "处理中…",
+      "workbench.status_fail": "处理失败",
+      "workbench.status_empty": "没有结果"
     }
   };
   const STORAGE_KEY = "bigo.locale";

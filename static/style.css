@@ -176,6 +176,7 @@ main {
 }
 @media (max-width: 767px) {
   .page-header h1 { font-size: 24px; }
+  .tab-panel { padding-bottom: 72px; }
   .tab-actions.sticky-actions {
     position: sticky; bottom: 0; z-index: 15;
     background: var(--lab-canvas); padding: 8px 0;
@@ -241,6 +242,7 @@ label input, label textarea, label select,
 
 .panel, .modal-box, .calc-card {
   background: var(--instrument); border: 1px dashed var(--rule); padding: 20px;
+  min-width: 0;
 }
 .modal {
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -279,7 +281,7 @@ label textarea { resize: vertical; min-height: 80px; }
 .checkbox-label {
   display: flex !important; flex-direction: row !important; align-items: center; gap: 4px !important;
   font-size: 13px; font-weight: 400 !important; padding: 6px 8px; background: var(--lab-canvas);
-  cursor: pointer; margin-bottom: 0 !important; min-height: 36px;
+  cursor: pointer; margin-bottom: 0 !important; min-height: var(--hit);
 }
 
 .info-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 14px; }
@@ -315,7 +317,7 @@ label textarea { resize: vertical; min-height: 80px; }
   font-size: 13px; font-weight: 500; color: var(--graphite); padding: 8px 12px;
   background: var(--instrument); border: 1px dashed var(--rule); min-height: var(--hit);
 }
-.cys-inline select { width: auto; min-height: 32px; }
+.cys-inline select { width: auto; min-height: var(--hit); }
 .cys-hint {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; border: 1px dashed var(--rule);
@@ -337,15 +339,15 @@ label textarea { resize: vertical; min-height: 80px; }
   padding: 4px 10px; background: var(--instrument); border: 1px dashed var(--rule);
   font-size: 12px; font-family: "IBM Plex Mono", monospace; color: var(--carbon);
 }
-.chip-x { background: none; border: none; color: var(--graphite); cursor: pointer; font-size: 14px; padding: 0 4px; min-width: 24px; min-height: 24px; }
+.chip-x { background: none; border: none; color: var(--graphite); cursor: pointer; font-size: 14px; padding: 0; min-width: var(--hit); min-height: var(--hit); display: inline-flex; align-items: center; justify-content: center; }
 .tag-chip.filter { cursor: pointer; }
-.tag-chip.filter.active { background: var(--cyan); border-color: var(--cyan); }
+.tag-chip.filter.active { background: var(--cyan); border-color: var(--cyan); color: var(--carbon); }
 .tag-input { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: var(--hit); }
 .tag-input input { border: none; outline: none; flex: 1; min-width: 80px; background: transparent; min-height: 28px; padding: 2px 4px; }
 
 .calc-table .empty-row td { text-align: center; color: var(--graphite); padding: 24px; }
 .calc-table .col-result { background: var(--instrument); font-weight: 500; font-variant-numeric: tabular-nums; font-family: "IBM Plex Mono", monospace; }
-.cell-input { width: 80px; text-align: center; min-height: 36px; }
+.cell-input { width: 80px; text-align: center; min-height: var(--hit); }
 .cell-input:focus { border-color: var(--cyan); outline: none; }
 
 .bulk-bar {
@@ -365,7 +367,11 @@ label textarea { resize: vertical; min-height: 80px; }
 .toast.error { background: var(--instrument); color: var(--carbon); border: 1px dashed var(--carbon); }
 .toast .undo-link { color: var(--cyan); cursor: pointer; font-weight: 600; margin-left: 8px; text-decoration: underline; }
 .toast details { margin-top: 8px; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
-.toast-title { font-weight: 500; }
+.evidence-status { font-size: 13px; color: var(--graphite); min-height: 1.4em; }
+.evidence-status[data-phase="processing"]::before { content: "… "; }
+.evidence-status[data-phase="fail"]::before { content: "! "; font-weight: 600; }
+.evidence-status[data-phase="done"]::before { content: "✓ "; }
+.evidence-status[data-phase="empty"]::before { content: "– "; }
 
 .badge {
   display: inline-flex; align-items: center; padding: 2px 8px;
@@ -377,7 +383,7 @@ label textarea { resize: vertical; min-height: 80px; }
   padding: 2px 8px; font-family: "IBM Plex Mono", monospace; font-size: 11px;
   border: 1px solid var(--carbon); background: var(--instrument);
 }
-.stance-chip.support { background: var(--cyan); border-color: var(--cyan); }
+.stance-chip.support { background: var(--cyan); border-color: var(--cyan); color: var(--carbon); }
 .dialog-body { margin-bottom: 8px; }
 .dialog-impact { color: var(--graphite); font-size: 13px; margin-bottom: 12px; }
 .dialog-field { margin-top: 8px; }
@@ -398,8 +404,9 @@ details.advanced > summary {
 .empty-hint { color: var(--graphite); text-align: center; padding: 40px 16px; }
 
 .plate-grid {
-  display: grid; grid-template-columns: 28px repeat(12, minmax(24px, 1fr));
-  gap: 2px; user-select: none; overflow-x: auto;
+  display: grid; grid-template-columns: 28px repeat(12, minmax(44px, 1fr));
+  gap: 2px; user-select: none;
+  width: max(100%, 578px);
 }
 .plate-corner { height: 22px; }
 .plate-col-hdr, .plate-row-hdr {
@@ -410,7 +417,7 @@ details.advanced > summary {
 .plate-well {
   aspect-ratio: 1; border: 1px dashed var(--rule); background: var(--instrument);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  font-size: 9px; color: var(--graphite); min-width: 24px; min-height: 24px;
+  font-size: 9px; color: var(--graphite); min-width: var(--hit); min-height: var(--hit);
 }
 .plate-well:hover { border-color: var(--cyan); }
 .plate-well.has-data { background: var(--lab-canvas); color: var(--carbon); font-weight: 600; }
@@ -418,9 +425,9 @@ details.advanced > summary {
 .plate-well.selected.has-data { background: var(--cyan-deep); }
 .plate-well.ref-blank { background: var(--instrument); }
 .plate-well.ref-neg { background: var(--lab-canvas); border-color: var(--carbon); }
-.plate-well.ref-pos { background: var(--cyan); }
+.plate-well.ref-pos { background: var(--cyan); color: var(--carbon); }
 .enzyme-ref-btn { padding: 8px 10px; min-height: var(--hit); font-size: 12px; border: 1px dashed var(--rule); background: var(--instrument); cursor: pointer; }
-.enzyme-ref-btn.active { border-color: var(--cyan); background: var(--cyan); }
+.enzyme-ref-btn.active { border-color: var(--cyan); background: var(--cyan); color: var(--carbon); }
 
 .enzyme-time-axis {
   position: relative; height: 36px; margin: 10px 6px 2px;
@@ -440,7 +447,7 @@ details.advanced > summary {
 }
 .enzyme-time-axis .eta-handle {
   position: absolute; top: 50%; transform: translate(-50%, -50%);
-  width: 12px; height: 20px; background: var(--cyan); border: 1.5px solid var(--instrument);
+  width: 24px; height: var(--hit); background: var(--cyan); border: 1.5px solid var(--instrument);
   cursor: ew-resize; z-index: 2;
 }
 
@@ -460,10 +467,10 @@ details.advanced > summary {
 .copy-card-sub { font-size: 12px; color: var(--graphite); margin-top: 2px; }
 .copy-type-tag {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 6px 8px; min-height: 32px; font-size: 11px; font-weight: 600;
+  padding: 6px 8px; min-height: var(--hit); font-size: 11px; font-weight: 600;
   cursor: pointer; border: 1px dashed var(--rule); font-family: "IBM Plex Mono", monospace;
 }
-.copy-type-tag.active { background: var(--cyan); border-color: var(--cyan); }
+.copy-type-tag.active { background: var(--cyan); border-color: var(--cyan); color: var(--carbon); }
 
 .res-layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; align-items: start; }
 @media (max-width: 1023px) { .res-layout { grid-template-columns: 1fr; } }

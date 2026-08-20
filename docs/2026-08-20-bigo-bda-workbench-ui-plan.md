@@ -49,6 +49,8 @@ CI must run `test_research.py` and `test_ui.py` before the build.
 |------|------|-------|-------|
 | 2 | 2026-08-20 | all five scripts passed | English default copy, i18n wiring, enzyme Advanced time panel, CI includes research+ui tests. |
 | 3 | 2026-08-20 | all five scripts passed | Dialog overlay/Escape cancel as null; unique mobile+desktop bulk IDs; Weblogo search restored; leftover JS i18n; stack-on-narrow; exp-type option apply scoped. |
+| 4 | 2026-08-20 | all five scripts passed | PLAN gap-fill: spec packs static/fonts only; backend errors expandable; named archive deletes; evidence-status on BLI/AKTA/enzyme; 44px hits; cyan/carbon; detail load/export after raw. |
+| 5 | 2026-08-20 | all five scripts passed | PyInstaller onedir smoke (`dist/protein_lab/_internal/static/fonts/NotoSansSC-Regular.otf`); Chrome matrix 390–2560 × 10 routes no page overflow; enzyme plate local `.table-scroll`; error toasts 8s; mobile sticky actions padded. |
 
 ## Explicit exclusions
 

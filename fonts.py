@@ -1,20 +1,19 @@
 """
 CJK 字体解析 + matplotlib 中文配置
 
-打包用 Noto Sans SC（OFL 开源，可随公开仓库再分发），dev 下回退到
-旧跨工作区 simhei.ttf 或系统字体（Windows SimHei / macOS PingFang）。
+打包用 Noto Sans SC（OFL 开源，可随公开仓库再分发），
+dev 与 onedir 优先 `static/fonts/`，再回退系统字体。
 """
 import os
 
-from paths import app_base_dir, resource_path
+from paths import resource_path
 
 
 def find_cjk_font() -> str | None:
     """返回第一个可用的 CJK 字体路径，找不到返回 None。"""
     candidates = [
-        resource_path("static/fonts/NotoSansSC-Regular.otf"),  # web + matplotlib
+        resource_path("static/fonts/NotoSansSC-Regular.otf"),  # web + matplotlib + onedir
         resource_path("fonts/NotoSansSC-Regular.otf"),          # legacy pack path
-        os.path.join(app_base_dir(), "..", "fonts", "simhei.ttf"),
         "C:/Windows/Fonts/simhei.ttf",                          # Windows 系统字体
         "C:/Windows/Fonts/msyh.ttc",
         "/System/Library/Fonts/PingFang.ttc",                   # macOS 系统字体

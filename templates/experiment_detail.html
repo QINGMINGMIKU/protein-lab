@@ -53,7 +53,9 @@
   <div class="modal-box">
     <div class="modal-header">
       <h3 data-i18n="detail.edit_title">Edit experiment</h3>
-      <button class="btn btn-sm btn-outline" onclick="closeEditModal()">✕</button>
+      <button type="button" class="btn btn-sm btn-icon" onclick="closeEditModal()" data-i18n-aria="common.close">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
     </div>
     <label><span data-i18n="archive.field_title">Title</span> <input type="text" id="editTitle" maxlength="200"></label>
     <div class="form-row">
@@ -172,7 +174,7 @@
 <div class="calc-card" style="margin-bottom:20px">
   <h2 data-i18n="detail.enzyme_title">Enzyme activity</h2>
   <p style="color:#888;font-size:13px;margin:4px 0 12px">
-    {{ emeta.sample or "" }} | {{ emeta.wavelength or "?" }} nm | {{ params.well_count or wells.keys()|length }} 孔
+    {{ emeta.sample or "" }} | {{ emeta.wavelength or "?" }} nm | {{ params.well_count or wells.keys()|length }} <span data-i18n="detail.wells_unit">wells</span>
   </p>
   <div class="table-scroll">
     <table class="calc-table">
@@ -403,6 +405,13 @@
 </section>
 {% endif %}
 
+<div class="page-actions" style="margin-top:20px">
+  {% if loadable %}
+  <a class="btn btn-primary" href="/calculator?load_exp={{ exp.id }}"><span data-i18n="detail.load_tool">Load into workbench</span></a>
+  {% endif %}
+  <a class="btn btn-outline" href="/api/experiments/{{ exp.id }}/export"><span data-i18n="detail.export_xlsx">Export Excel</span></a>
+</div>
+
 <a href="/experiments" style="display:inline-block;margin-top:8px;color:var(--graphite);font-size:14px" data-i18n="detail.back">Back to archive</a>
 
 <script>
@@ -456,18 +465,19 @@ async function saveEditModal() {
     document.getElementById("detailExpNotes").textContent = exp.notes || "-";
     closeEditModal();
     toast(typeof t === "function" ? t("detail.updated") : "Updated");
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function deleteExpDetail(id) {
+  const title = (document.querySelector("h1") || {}).textContent || ("#" + id);
   const ok = window.BigoUI
     ? await BigoUI.confirm({
         title: (window.BigoI18n && BigoI18n.t("detail.delete")) || "Delete",
-        message: (window.BigoI18n && BigoI18n.t("detail.confirm_delete")) || "Delete this experiment?",
+        message: (window.BigoI18n && BigoI18n.t("archive.confirm_delete_named", { name: title })) || ("Delete experiment \"" + title + "\"?"),
         impact: (window.BigoI18n && BigoI18n.t("archive.confirm_delete_impact")) || "",
         danger: true,
       })
-    : confirm("Delete this experiment?");
+    : confirm("Delete experiment \"" + title + "\"?");
   if (!ok) return;
   try {
     await API.del(`/api/experiments/${id}`);

@@ -153,14 +153,50 @@ for banned in ("全部标签", "全部蛋白", "新建实验", "计划占位（�
     assert banned not in appjs, f"hardcoded UI string still in app.js: {banned}"
 assert "recordCheckedIds" in appjs
 assert "syncRecordCheck" in appjs
+assert "archive.confirm_delete_named" in appjs
+assert "setEvidence" in appjs
+assert "iconClose" in appjs
+assert "backendError" in appjs
 ui = (STATIC / "ui-shell.js").read_text(encoding="utf-8")
 assert "getClientRects" in ui
 assert "bigoDialogCancel" in ui
 assert "cancel.click()" in ui
 assert 'select[data-exp-types]' in js
+spec = (ROOT / "protein_lab.spec").read_text(encoding="utf-8")
+assert '("static", "static")' in spec
+assert '("fonts", "fonts")' not in spec
+detail_src = (TEMPLATES / "experiment_detail.html").read_text(encoding="utf-8")
+assert "detail.wells_unit" in detail_src
+assert " 孔" not in detail_src
+assert "setEvidence" in appjs and "workbench.status_processing" in appjs
 # i18n.js embeds the same keys as i18n.json
 for key in EN:
     assert f'"{key}"' in js, f"i18n.js missing key {key}"
 print("9. Layout / i18n / dialog wiring OK")
+
+# ── 10. Design tokens / responsive invariants ─────────
+css = (STATIC / "style.css").read_text(encoding="utf-8")
+for token in (
+    "--lab-canvas: #E1E4E2",
+    "--instrument: #F8F9F8",
+    "--carbon: #141716",
+    "--graphite: #626966",
+    "--cyan: #00D8C5",
+    "--cyan-deep: #00AFA1",
+    "--hit: 44px",
+    "--max: 1920px",
+):
+    assert token in css, f"missing token {token}"
+assert "html, body { max-width: 100%; overflow-x: hidden; }" in css
+assert "@media (max-width: 1023px) { .grid-guides { display: none; } }" in css
+assert "@media (max-width: 767px)" in css
+assert ".record-list { display: block" in css
+assert "prefers-reduced-motion" in css
+assert "outline: 2px solid var(--cyan)" in css
+assert "border-radius" not in css and "box-shadow" not in css
+assert "id=\"bliMeta\"" in calc and "id=\"aktaMeta\"" in calc and "id=\"enzymeMeta\"" in calc
+assert 'id="plateGrid"' in calc
+assert re.search(r'class="table-scroll"\s*>\s*<div id="plateGrid"', calc), "enzyme plate must scroll locally"
+print("10. Design tokens / responsive CSS OK")
 
 print("\nAll UI tests passed.")
