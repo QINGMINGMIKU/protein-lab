@@ -77,9 +77,9 @@ protein_lab/
 ## 数据安全（最高优先级）
 
 - **严禁在生产数据库上测试**：任何涉及删改数据的测试必须用独立临时库或先备份。
-- `app.py` 启动时自动将 `protein_lab.db` 复制到 `backups/`，保留最近 10 份。
+- `app.py` 启动时自动将 `protein_lab.db` 复制到 `backups/`，保留最近 10 份。**库已切 WAL**（`models.init_db()` 设一次，持久化在库文件头）：备份前先 `wal_checkpoint(TRUNCATE)` 再 copy，保证不丢未落盘内容；并发安全由 `models.get_db(timeout=30)` 兜底（waitress 4 线程 + MCP 进程互等而非 5s 撞锁）。
 - **迁移前自动备份**：`_migrate()` 在首个未应用迁移前快照 `pre-migration_*.db`（保留 5 份）——app.py 启动备份晚于 import 时迁移，备份到手已是迁移后库，迁移前快照为破坏性迁移留回滚点。
-- 恢复方法：关闭服务 → 从 `backups/` 选一份复制回上级目录改名为 `protein_lab.db` → 重启。
+- 恢复方法：关闭服务 → 从 `backups/` 选一份复制回上级目录改名为 `protein_lab.db` → **删掉同目录残留的 `protein_lab.db-wal` / `protein_lab.db-shm`**（异常退出可能遗留，会让 SQLite 把旧 WAL 重放到刚恢复的库上）→ 重启。
 
 ## 测试规范
 

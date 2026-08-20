@@ -19,8 +19,10 @@ EXP_TYPES = ("BLI", "SDS-PAGE", "AKTA", "浓度测定", "酶活测定", "其他"
 
 def get_db(read_only: bool = False) -> sqlite3.Connection:
     """获取连接。read_only=True 时开 query_only——任何写操作被 SQLite 拒绝，
-    供 MCP 读工具等只读契约使用（见 mcp_server.py 读写契约）。"""
-    conn = sqlite3.connect(DB_PATH)
+    供 MCP 读工具等只读契约使用（见 mcp_server.py 读写契约）。
+    timeout=30：多写者（waitress 4 线程 + MCP 独立进程）共享同一库文件时互等，
+    而非默认 5s 内撞锁直接抛 `database is locked`。"""
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if read_only:
@@ -165,8 +167,16 @@ def _migrate():
 
 
 def init_db():
-    """迁移到最新 schema。保持历史语义：import models 即触发（models.py 末尾调用）。"""
+    """迁移到最新 schema。保持历史语义：import models 即触发（models.py 末尾调用）。
+    迁移后切 WAL（持久化在库文件头，设一次即可；:memory: 测试库是 no-op）——
+    WAL 下读者不阻塞写者，Web 4 线程 + MCP 进程并存更稳；但备份裸 copy 主文件会漏
+    未 checkpoint 的 WAL 内容，备份前必须 wal_checkpoint（见 app.py backup_database）。"""
     _migrate()
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    finally:
+        conn.close()
 
 
 # ── Proteins CRUD ──────────────────────────────────────────
