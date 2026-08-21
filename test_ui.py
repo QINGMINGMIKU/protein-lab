@@ -174,6 +174,9 @@ detail_src = (TEMPLATES / "experiment_detail.html").read_text(encoding="utf-8")
 assert "detail.wells_unit" in detail_src
 assert " 孔" not in detail_src
 assert "setEvidence" in appjs and "workbench.status_processing" in appjs
+# 自由格式 kv 渲染必须被 table-scroll 保护，嵌套表不能撑破「实验参数/结果」卡片
+kv_macro = detail_src.split("{% macro kv_table")[1].split("{% endmacro")[0]
+assert 'class="table-scroll"' in kv_macro, "kv_table must be wrapped in a scroll container"
 # i18n.js embeds the same keys as i18n.json
 for key in EN:
     assert f'"{key}"' in js, f"i18n.js missing key {key}"
@@ -215,6 +218,7 @@ assert "@keyframes toastIn" in css, "toast animation missing"
 assert "@media (prefers-reduced-motion: no-preference)" in css, "animations must be motion-safe gated"
 assert "::-webkit-scrollbar" in css, "custom scrollbar missing"
 assert "::selection" in css, "selection highlight missing"
+assert ".kv-nested th, .kv-nested td" in css and "word-break: break-all" in css, "kv-nested cells must wrap long content"
 assert "id=\"bliMeta\"" in calc and "id=\"aktaMeta\"" in calc and "id=\"enzymeMeta\"" in calc
 assert 'id="plateGrid"' in calc
 assert re.search(r'class="table-scroll"\s*>\s*<div id="plateGrid"', calc), "enzyme plate must scroll locally"

@@ -362,6 +362,11 @@ label textarea { resize: vertical; min-height: 80px; }
 
 .calc-table .empty-row td { text-align: center; color: var(--graphite); padding: 24px; }
 .calc-table .col-result { background: var(--instrument); font-weight: 500; font-variant-numeric: tabular-nums; font-family: "JetBrains Mono", monospace; }
+/* 自由格式 kv 渲染（实验详情「参数/结果」卡片）：嵌套表长内容强制换行，
+   外层 kv 表由 table-scroll 兜底，不再撑破卡片 */
+.kv-nested { min-width: 0; }
+.kv-nested th, .kv-nested td { overflow-wrap: anywhere; word-break: break-all; }
+.result-box { overflow-wrap: anywhere; }
 .cell-input { width: 80px; text-align: center; min-height: var(--hit); }
 .cell-input:focus { border-color: var(--cyan); outline: none; }
 

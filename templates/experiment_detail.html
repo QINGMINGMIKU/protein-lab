@@ -352,6 +352,7 @@
 {%- endmacro %}
 
 {% macro kv_table(data) %}
+<div class="table-scroll" style="margin-top:4px">
 <table class="calc-table">
   <tbody>
   {% for k, v in data.items() %}
@@ -362,6 +363,7 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% endmacro %}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
   <div class="calc-card">
