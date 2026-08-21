@@ -185,18 +185,21 @@ print("9. Layout / i18n / dialog wiring OK")
 # ── 10. Design tokens / responsive invariants ─────────
 css = (STATIC / "style.css").read_text(encoding="utf-8")
 for token in (
-    "--lab-canvas: #FAF8F3",
+    "--lab-canvas: #FFFFFF",
+    "--paper: #F3F0EA",
     "--instrument: #FFFFFF",
     "--carbon: #141414",
     "--graphite: #4E4A44",
     "--cyan: #C8791E",
     "--cyan-deep: #A96316",
+    "--on-accent: #FBF8F1",
     "--hit: 44px",
+    "--ctrl: 36px",
     "--max: 1920px",
 ):
     assert token in css, f"missing token {token}"
 assert "html, body { max-width: 100%; overflow-x: hidden; }" in css
-assert "@media (max-width: 1023px) { .grid-guides { display: none; } }" in css
+assert ".grid-guides { display: none; }" in css, "column guides must not paint over cards"
 assert "@media (max-width: 767px)" in css
 assert ".record-list { display: block" in css
 assert "prefers-reduced-motion" in css
@@ -204,8 +207,11 @@ assert "outline: 2px solid var(--cyan)" in css
 assert "border-radius" in css and "box-shadow" in css, "warm-paper cards need radius + shadow"
 assert "JetBrainsMonoVariable.woff2" in css, "JetBrains Mono should be registered"
 assert "IBM Plex" not in css, "IBM Plex Mono must be fully removed"
-assert '"JetBrains Mono"' in css, "JetBrains Mono should be the default UI font"
+assert '--font-sans: "Inter"' in css, "Inter should be the UI sans stack (BDA body)"
+assert "font-family: var(--font-sans)" in css, "body should use Inter, not mono"
+assert '"JetBrains Mono"' in css, "JetBrains Mono remains for data/labels"
 assert "font-variant-numeric: tabular-nums" in css, "tabular numbers for data columns"
+assert ".page-kicker" in css, "BDA-style orange uppercase page eyebrow"
 assert "a { color: var(--cyan)" in css, "links should use the amber accent, not browser blue"
 assert "a:visited { color: var(--cyan)" in css, "visited links must not revert to browser purple"
 for tok in ("--success", "--danger", "--warning", "--info", "--rule-soft", "--accent-bg"):

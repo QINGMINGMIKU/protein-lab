@@ -12,24 +12,26 @@
 </div>
 <a class="skip-link" href="#main" data-i18n="a11y.skip">Skip to content</a>
 <header class="topbar">
-  <a href="/research" class="brand">
-    <span class="brand-mark" data-i18n="nav.brand">Bigo.bio</span>
-    <span class="brand-product" data-i18n="nav.product">BDA Workbench</span>
-  </a>
-  <nav class="nav-links" aria-label="Primary">
-    <a href="/research" class="{% if request.path == '/research' or request.path == '/' %}active{% endif %}" data-i18n="nav.research">Research Trace</a>
-    <a href="/proteins" class="{% if request.path == '/proteins' %}active{% endif %}" data-i18n="nav.proteins">Protein Library</a>
-    <a href="/calculator" class="{% if request.path == '/calculator' %}active{% endif %}" data-i18n="nav.workbench">BDA Workbench</a>
-    <a href="/compare" class="{% if request.path == '/compare' %}active{% endif %}" data-i18n="nav.compare">Compare</a>
-    <a href="/experiments" class="{% if request.path.startswith('/experiments') %}active{% endif %}" data-i18n="nav.archive">Evidence Archive</a>
-    <div class="lang-switch" id="langSwitch" role="group" data-i18n-aria="nav.lang">
-      <button type="button" data-locale-btn="en" aria-pressed="true" data-i18n="nav.lang.en">EN</button>
-      <button type="button" data-locale-btn="zh-CN" aria-pressed="false" data-i18n="nav.lang.zh">中文</button>
-    </div>
-  </nav>
-  <button type="button" class="btn-icon menu-toggle" id="menuToggle" aria-controls="siteMenu" aria-expanded="false" data-i18n-aria="nav.menu">
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 4h14M2 9h14M2 14h14" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-  </button>
+  <div class="topbar-inner">
+    <a href="/research" class="brand">
+      <span class="brand-mark" data-i18n="nav.brand">Bigo.bio</span>
+      <span class="brand-product" data-i18n="nav.product">BDA Workbench</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/research" class="{% if request.path == '/research' or request.path == '/' %}active{% endif %}" data-i18n="nav.research">Research Trace</a>
+      <a href="/proteins" class="{% if request.path == '/proteins' %}active{% endif %}" data-i18n="nav.proteins">Protein Library</a>
+      <a href="/calculator" class="{% if request.path == '/calculator' %}active{% endif %}" data-i18n="nav.workbench">BDA Workbench</a>
+      <a href="/compare" class="{% if request.path == '/compare' %}active{% endif %}" data-i18n="nav.compare">Compare</a>
+      <a href="/experiments" class="{% if request.path.startswith('/experiments') %}active{% endif %}" data-i18n="nav.archive">Evidence Archive</a>
+      <div class="lang-switch" id="langSwitch" role="group" data-i18n-aria="nav.lang">
+        <button type="button" data-locale-btn="en" aria-pressed="true" data-i18n="nav.lang.en">EN</button>
+        <button type="button" data-locale-btn="zh-CN" aria-pressed="false" data-i18n="nav.lang.zh">中文</button>
+      </div>
+    </nav>
+    <button type="button" class="btn-icon menu-toggle" id="menuToggle" aria-controls="siteMenu" aria-expanded="false" data-i18n-aria="nav.menu">
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 4h14M2 9h14M2 14h14" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+  </div>
 </header>
 <div id="siteMenu" aria-hidden="true">
   <div class="menu-head">

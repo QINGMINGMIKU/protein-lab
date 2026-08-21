@@ -2,7 +2,10 @@
 {% block content %}
 
 <div class="page-header">
-  <h1 data-i18n="proteins.title">Protein Library</h1>
+  <div>
+    <p class="page-kicker" data-i18n="nav.product">BDA Workbench</p>
+    <h1 data-i18n="proteins.title">Protein Library</h1>
+  </div>
   <div class="page-actions">
     <button class="btn btn-outline" onclick="refreshAllProteins()"><span data-i18n="proteins.refresh">Recalculate all</span></button>
     <button class="btn btn-primary" onclick="showAddModal()"><span data-i18n="proteins.add">Add protein</span></button>
