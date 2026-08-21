@@ -559,8 +559,55 @@ details.advanced > summary {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
-@keyframes toastIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes modalIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes dropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: no-preference) {
   .toast { animation: toastIn var(--dur) var(--ease); }
   #siteMenu.is-open { animation: toastIn var(--dur) var(--ease); }
+  .modal-box { animation: modalIn 200ms var(--ease); }
+  .search-dropdown { animation: dropIn 160ms var(--ease); }
+  .record-list, .res-root-list { animation: fadeIn var(--dur) var(--ease); }
 }
+
+/* ── Motion & polish (ui-design2) ── */
+/* 交互元素统一过渡：hover 变化不再瞬跳，280ms calm easing */
+a, .nav-links a, .lang-switch button, .btn-icon, .btn, .tab-btn,
+.datatable tr, .calc-table tr, .search-item, .plate-well, .lf-collapse,
+.chip, .tag-chip, .res-tag-chip, .badge, .stance-chip,
+.copy-card, .res-root-card, .record-card, .evidence-node,
+.enzyme-ref-btn, .cell-input, .checkbox-label,
+label input, label select, label textarea,
+.toolbar input, .toolbar select, .tag-input,
+details.advanced > summary {
+  transition: background-color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease),
+              color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease),
+              transform var(--dur) var(--ease);
+}
+
+/* 按下反馈 + primary 悬停微光 */
+.btn:active { transform: translateY(1px); }
+.btn-primary:hover { box-shadow: var(--shadow-soft); }
+
+/* 卡片悬停：边框加深一档 + 阴影抬升，维持层次不糊 */
+.panel:hover, .calc-card:hover {
+  border-color: color-mix(in srgb, var(--carbon) 14%, var(--rule));
+  box-shadow: var(--shadow-medium);
+}
+.record-card:hover { background: var(--instrument); }
+.search-item:hover { background: var(--accent-bg); }
+
+/* 细滚动条：同色系，不抢版面 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--rule); border-radius: 5px; border: 2px solid var(--lab-canvas);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--graphite); }
+
+/* 选区高亮：暖纸琥珀浅底，反选不突兀 */
+::selection { background: var(--accent-bg); color: var(--carbon); }
+

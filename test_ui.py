@@ -209,6 +209,12 @@ for tok in ("--success", "--danger", "--warning", "--info", "--rule-soft", "--ac
     assert tok in css, f"missing semantic token {tok}"
 assert ".res-tag-chip.support" in css, "stance semantic classes missing"
 assert "border-radius: 0" in css, "buttons must stay square (BDA decision)"
+assert "@keyframes modalIn" in css, "modal entrance animation missing"
+assert "@keyframes dropIn" in css, "dropdown entrance animation missing"
+assert "@keyframes toastIn" in css, "toast animation missing"
+assert "@media (prefers-reduced-motion: no-preference)" in css, "animations must be motion-safe gated"
+assert "::-webkit-scrollbar" in css, "custom scrollbar missing"
+assert "::selection" in css, "selection highlight missing"
 assert "id=\"bliMeta\"" in calc and "id=\"aktaMeta\"" in calc and "id=\"enzymeMeta\"" in calc
 assert 'id="plateGrid"' in calc
 assert re.search(r'class="table-scroll"\s*>\s*<div id="plateGrid"', calc), "enzyme plate must scroll locally"
