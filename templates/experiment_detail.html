@@ -111,7 +111,7 @@
 <!-- 旧格式（v0.0.x）单蛋白 A280 浓度：无 calc_type/proteins，results 为 measurements/mean -->
 {% set abs01 = (10 * (params.get("epsilon_red") or 0) / params.get("mw_da")) if params.get("mw_da") else 0 %}
 <div class="calc-card" style="margin-bottom:20px">
-  <h2><span data-i18n="detail.conc_title">Concentration</span> <span style="font-size:12px;color:#888;font-weight:400" data-i18n="detail.legacy">(legacy format)</span></h2>
+  <h2><span data-i18n="detail.conc_title">Concentration</span> <span style="font-size:12px;color:var(--graphite);font-weight:400" data-i18n="detail.legacy">(legacy format)</span></h2>
   <div class="table-scroll" style="margin-top:12px">
     <table class="calc-table">
       <thead><tr>
@@ -155,7 +155,7 @@
         {% endfor %}
         </tbody>
       </table>
-      <p style="margin-top:4px;font-size:12px;color:#888">≈ {{ pr.steps[0].total_vol_uL }} μL</p>
+      <p style="margin-top:4px;font-size:12px;color:var(--graphite)">≈ {{ pr.steps[0].total_vol_uL }} μL</p>
       {% endif %}
     </div>
   {% endfor %}
@@ -173,7 +173,7 @@
 {% set emeta = params.get("meta", {}) %}
 <div class="calc-card" style="margin-bottom:20px">
   <h2 data-i18n="detail.enzyme_title">Enzyme activity</h2>
-  <p style="color:#888;font-size:13px;margin:4px 0 12px">
+  <p style="color:var(--graphite);font-size:13px;margin:4px 0 12px">
     {{ emeta.sample or "" }} | {{ emeta.wavelength or "?" }} nm | {{ params.well_count or wells.keys()|length }} <span data-i18n="detail.wells_unit">wells</span>
   </p>
   <div class="table-scroll">
@@ -194,7 +194,7 @@
           <td>{{ w.conc_uM if w.conc_uM != None else "-" }}</td>
           <td>{{ w.od_range[0] ~ " → " ~ w.od_range[1] if w.od_range else "-" }}</td>
           <td>{{ "%.5f"|format(w.fit.slope) if w.fit and w.fit.slope != None else "-" }}</td>
-          <td style="color:{{ '#e74c3c' if w.fit and w.fit.r2 != None and w.fit.r2 < 0.95 else '#333' }}">
+          <td style="color:{{ 'var(--danger)' if w.fit and w.fit.r2 != None and w.fit.r2 < 0.95 else 'var(--carbon)' }}">
             {{ "%.4f"|format(w.fit.r2) if w.fit and w.fit.r2 != None else "-" }}
           </td>
         </tr>
@@ -210,13 +210,13 @@
   <h2>Weblogo</h2>
   {% set img = params.get("image", "") %}
   {% if img %}
-  <p style="color:#888;font-size:13px;margin-bottom:12px">{{ proteins|length }} sequences</p>
+  <p style="color:var(--graphite);font-size:13px;margin-bottom:12px">{{ proteins|length }} sequences</p>
   <img src="{{ img }}" style="max-width:100%" alt="Weblogo">
   <div style="margin-top:8px">
     <button class="btn btn-sm btn-outline" onclick="downloadDetailImage()" data-i18n="detail.download_png">Download PNG</button>
   </div>
   {% else %}
-  <p style="color:#888" data-i18n="detail.no_image">No image data</p>
+  <p style="color:var(--graphite)" data-i18n="detail.no_image">No image data</p>
   {% endif %}
 </div>
 {% endif %}
@@ -227,10 +227,10 @@
 {% if exp.exp_type == "BLI" and results.get("samples") %}
 <div class="calc-card" style="margin-bottom:20px">
   <h2><span data-i18n="detail.bli_kd_title">BLI KD fit</span>
-    <span style="font-size:12px;color:#888;font-weight:400">v{{ results.get("BLI_ANALYSIS_VERSION", "?") }}</span>
+    <span style="font-size:12px;color:var(--graphite);font-weight:400">v{{ results.get("BLI_ANALYSIS_VERSION", "?") }}</span>
   </h2>
   {% set params_bli = params %}
-  <p style="font-size:13px;color:#555;margin-bottom:8px">
+  <p style="font-size:13px;color:var(--graphite);margin-bottom:8px">
     <span data-i18n="detail.phase">Phase boundary</span>: assoc {{ "%g"|format(params_bli.get("t_assoc")) if params_bli.get("t_assoc") else "auto" }} s →
     dissoc {{ "%g"|format(params_bli.get("t_dissoc")) if params_bli.get("t_dissoc") else "auto" }} s
     {% if params_bli.get("ns_sensor") %} · NS {{ params_bli.get("ns_sensor") }}{% endif %}
@@ -239,7 +239,7 @@
     {% if sres is mapping and sres.get("phase") %}
     <div style="margin-bottom:14px">
       <div style="font-weight:600;margin-bottom:4px">{{ sid }}
-        <span style="font-weight:400;color:#888;font-size:12px">
+        <span style="font-weight:400;color:var(--graphite);font-size:12px">
           {% if sres.get("error") %}（{{ sres.error }}）{% endif %}
         </span>
       </div>
@@ -256,7 +256,7 @@
               <td>{{ "%.3g"|format(mv.get("kon")) if mv.get("kon") != None else "—" }}</td>
               <td>{{ "%.3g"|format(mv.get("koff")) if mv.get("koff") != None else "—" }}</td>
             {% else %}
-              <td colspan="3" style="color:#888" data-i18n="detail.fit_failed">Fit failed</td>
+              <td colspan="3" style="color:var(--graphite)" data-i18n="detail.fit_failed">Fit failed</td>
             {% endif %}
           </tr>
         {% endfor %}
@@ -275,9 +275,9 @@
 {% if exp.exp_type == "AKTA" and results.get("peaks") %}
 <div class="calc-card" style="margin-bottom:20px">
   <h2><span data-i18n="detail.akta_title">AKTA peak detection</span>
-    <span style="font-size:12px;color:#888;font-weight:400">v{{ results.get("AKTA_ANALYSIS_VERSION", "?") }}</span>
+    <span style="font-size:12px;color:var(--graphite);font-weight:400">v{{ results.get("AKTA_ANALYSIS_VERSION", "?") }}</span>
   </h2>
-  <p style="font-size:13px;color:#555;margin-bottom:8px">
+  <p style="font-size:13px;color:var(--graphite);margin-bottom:8px">
     <span data-i18n="detail.channel">Channel</span> {{ params.get("channel", "?") }}
     {% if params.get("xmin") or params.get("xmax") %} ({{ params.get("xmin", 0) }}–{{ params.get("xmax") or "∞" }} mL){% endif %}
   </p>
@@ -316,7 +316,7 @@
   {%- elif v is number or v is boolean %}
     {{ v }}
   {%- elif v is none %}
-    <span style="color:#999">-</span>
+    <span style="color:var(--graphite)">-</span>
   {%- elif v is mapping %}
     {%- if depth >= 2 %}
       <code style="font-size:12px">{{ (v | tojson) | truncate(200, true) }}</code>
@@ -328,7 +328,7 @@
       </table>
     {%- endif %}
   {%- elif v | length == 0 %}
-    <span style="color:#999">[]</span>
+    <span style="color:var(--graphite)">[]</span>
   {%- elif v[0] is mapping %}
     {%- set _keys = [] %}
     {%- for item in v %}{% for kk in item.keys() %}{% if kk not in _keys %}{% set _ = _keys.append(kk) %}{% endif %}{% endfor %}{% endfor %}
@@ -340,7 +340,7 @@
         <tr>{% for kk in cols %}<td>{{ kv_sub(item.get(kk), depth+1) }}</td>{% endfor %}</tr>
       {%- endfor %}
       {%- if v | length > 20 %}
-        <tr><td colspan="{{ cols | length }}" style="color:#888">… {{ v | length - 20 }}</td></tr>
+        <tr><td colspan="{{ cols | length }}" style="color:var(--graphite)">… {{ v | length - 20 }}</td></tr>
       {%- endif %}
       </tbody>
     </table>
@@ -368,16 +368,16 @@
     <h2 data-i18n="detail.params">Parameters</h2>
     {% if params %}{{ kv_table(params) }}{% endif %}
     <details style="margin-top:8px">
-      <summary style="font-size:12px;color:#888;cursor:pointer" data-i18n="detail.raw_json">Raw JSON</summary>
-      <pre style="background:#f8f9fb;padding:12px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ params | tojson(indent=2) if params else "{}" }}</pre>
+      <summary style="font-size:12px;color:var(--graphite);cursor:pointer" data-i18n="detail.raw_json">Raw JSON</summary>
+      <pre style="background:var(--instrument);padding:12px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ params | tojson(indent=2) if params else "{}" }}</pre>
     </details>
   </div>
   <div class="calc-card">
     <h2 data-i18n="detail.results">Results</h2>
     {% if results %}{{ kv_table(results) }}{% endif %}
     <details style="margin-top:8px">
-      <summary style="font-size:12px;color:#888;cursor:pointer" data-i18n="detail.raw_json">Raw JSON</summary>
-      <pre style="background:#f8f9fb;padding:12px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ results | tojson(indent=2) if results else "{}" }}</pre>
+      <summary style="font-size:12px;color:var(--graphite);cursor:pointer" data-i18n="detail.raw_json">Raw JSON</summary>
+      <pre style="background:var(--instrument);padding:12px;font-size:13px;max-height:300px;overflow:auto;margin-top:8px">{{ results | tojson(indent=2) if results else "{}" }}</pre>
     </details>
   </div>
 </div>

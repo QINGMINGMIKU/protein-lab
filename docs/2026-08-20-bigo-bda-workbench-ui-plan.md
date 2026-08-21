@@ -13,11 +13,11 @@
 
 ## Global Constraints
 
-- Lab canvas `#E1E4E2`, instrument white `#F8F9F8`, carbon `#141716`, graphite `#626966`, assay cyan `#00D8C5`, deep cyan `#00AFA1`, structural rule `rgba(20, 23, 22, 0.15)`.
+- Warm Paper palette (ui-design2, source: BDA-demo): canvas `#F3F0EA`, surface `#FBF8F1`, carbon `#141414`, graphite `#4E4A44`, amber accent `#C8791E` (hover `#A96316`), structural rule `#D8D1C5`. Semantic status: success `#3F7A57`, warning `#B97922`, danger `#B4483F`, info `#4A6478`.
 - Desktop max frame 1920px with five-column fixed dashed guides; hide guides below 1024px. Workbench spacing 32–64px, not marketing 192px pauses.
-- Zero radius, no shadows, 1px dashed borders. Minimum hit target 44px. Focus: 2px cyan outline with 2px offset.
-- Cyan-filled controls use carbon text. Status never relies on color alone.
-- Local fonts only: Inter Variable, IBM Plex Mono, Noto Sans SC. No CDN.
+- Cards 6–14px radius with soft shadow; buttons stay square (`rounded-none`). 1px solid borders (dashed only for grid guides and free-attach chains). Minimum hit target 44px. Focus: 2px amber outline with 2px offset.
+- Amber-filled controls use carbon text. Status never relies on color alone; stance chips use semantic success green.
+- Local fonts only: Inter Variable, JetBrains Mono (default UI mono), Noto Sans SC. No CDN.
 - `window.BigoI18n` in `static/i18n.js`: `t`, `apply`, `setLocale("en"|"zh-CN")`, `locale`. Persist `localStorage["bigo.locale"]`. Default `en`.
 - User-entered titles, tags, sequences, and experiment names are not translated. Stored exp types, node types, and stance keywords stay as stored values; labels map at display time.
 - Preserve all `/api/*` contracts, tool IDs (`conc|dilution|bli|akta|weblogo|enzyme|copy`), and research DOM ids (`researchFlow`, `researchFlowBack`, `res-layout`, `res-detail-side`).
@@ -51,6 +51,15 @@ CI must run `test_research.py` and `test_ui.py` before the build.
 | 3 | 2026-08-20 | all five scripts passed | Dialog overlay/Escape cancel as null; unique mobile+desktop bulk IDs; Weblogo search restored; leftover JS i18n; stack-on-narrow; exp-type option apply scoped. |
 | 4 | 2026-08-20 | all five scripts passed | PLAN gap-fill: spec packs static/fonts only; backend errors expandable; named archive deletes; evidence-status on BLI/AKTA/enzyme; 44px hits; cyan/carbon; detail load/export after raw. |
 | 5 | 2026-08-20 | all five scripts passed | PyInstaller onedir smoke (`dist/protein_lab/_internal/static/fonts/NotoSansSC-Regular.otf`); Chrome matrix 390–2560 × 10 routes no page overflow; enzyme plate local `.table-scroll`; error toasts 8s; mobile sticky actions padded. |
+| 6 | 2026-08-21 | all five scripts passed | **ui-design2 分支 — Warm Paper 迁移**（源：BDA-demo `frontend/src/index.css`）：token 换纸面琥珀（`#F3F0EA`/`#FBF8F1`/`#C8791E`）、JetBrains Mono 换 IBM Plex Mono（打包进 static/fonts）、dashed→solid 边框、卡片圆角+soft shadow、按钮保持方角、语义状态色（success/danger/info）、stance support 改语义绿、app.js/模板内联色收敛到 CSS 变量。布局结构（1920 五列引导线/44px 命中区/类名/DOM id）全部保留。 |
+
+## ui-design2 — Warm Paper 迁移决策
+
+- 仅换视觉语言，不动布局结构、DOM id、API 契约、i18n。
+- 跟随 BDA-demo：默认字体栈 JetBrains Mono → Noto Sans SC（中文 fallback），`tabular-nums` 对齐数据列。
+- `grid-guides` 与 `free-attach` 虚线保留（布局引导 / 自由挂载语义），其余全部 solid。
+- `.btn` 保持 `border-radius: 0`（BDA 按钮方角）；卡片/面板/下拉 6–14px 圆角 + shadow。
+- 立场 chip 支持态从 cyan 改为语义绿 `--success`（支持=绿 / 反驳=红 / 部分=橙 / 不确定=灰蓝，与 BDA statusTone 语义一致）。
 
 ## Explicit exclusions
 

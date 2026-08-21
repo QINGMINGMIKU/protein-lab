@@ -697,12 +697,12 @@ async function searchProteins() {
   });
 
   if (!matches.length) {
-    dropdown.innerHTML = '<div class="search-item" style="color:#888">' + t("ui.no_match") + '</div>';
+    dropdown.innerHTML = '<div class="search-item" style="color:var(--graphite)">' + t("ui.no_match") + '</div>';
   } else {
     dropdown.innerHTML = matches.map(p => `
       <div class="search-item" onclick="addProteinToTable(${p.id})">
         <strong>${esc(p.name)}</strong>
-        <span style="color:#888;font-size:12px">${p.mw ? p.mw.toLocaleString() + ' Da' : ''} | ε=${p.ext_ox || 0}</span>
+        <span style="color:var(--graphite);font-size:12px">${p.mw ? p.mw.toLocaleString() + ' Da' : ''} | ε=${p.ext_ox || 0}</span>
         ${selectedProteins[p.id] ? `<span style="color:var(--cyan-deep)">✓ ${t("ui.selected_chip")}</span>` : ''}
       </div>
     `).join("");
@@ -784,7 +784,7 @@ function renderChips() {
   const container = document.getElementById("selectedChips");
   const ids = Object.keys(selectedProteins);
   if (!ids.length) {
-    container.innerHTML = '<span style="color:#888;font-size:13px">' + t("ui.search_add_protein") + '</span>';
+    container.innerHTML = '<span style="color:var(--graphite);font-size:13px">' + t("ui.search_add_protein") + '</span>';
     return;
   }
   container.innerHTML = ids.map(id => {
@@ -886,7 +886,7 @@ function calcOneRow(row) {
   if (!isNaN(targetConc) && !isNaN(targetVol) && targetConc > 0 && targetVol > 0) {
     p._targetConc = targetConc; p._targetVol = targetVol;
     if (targetConc > conc_uM) {
-      row.querySelector(".vol-take").innerHTML = '<span style="color:#e74c3c">' + t("toast.target_gt_current") + '</span>';
+      row.querySelector(".vol-take").innerHTML = '<span style="color:var(--danger)">' + t("toast.target_gt_current") + '</span>';
       row.querySelector(".vol-buffer").textContent = "-";
       p._takeVol = null; p._bufferVol = null;
     } else {
@@ -1026,7 +1026,7 @@ async function searchBliProteins() {
     p.name.toLowerCase().includes(q.toLowerCase())
   );
   if (!matches.length) {
-    dropdown.innerHTML = '<div class="search-item" style="color:#888">' + t("ui.no_match") + '</div>';
+    dropdown.innerHTML = '<div class="search-item" style="color:var(--graphite)">' + t("ui.no_match") + '</div>';
   } else {
     dropdown.innerHTML = matches.map(p => `
       <div class="search-item" onclick="addBliProtein(${p.id})">
@@ -1311,7 +1311,7 @@ async function loadCopyExpList() {
     copyAllExps = await API.get("/api/experiments?limit=100");
     renderCopyExpList();
     renderCopyTypeTags();
-  } catch (err) { document.getElementById("copyExpList").innerHTML = '<p style="color:#888;text-align:center;padding:40px">' + t("copy.load_failed") + '</p>'; }
+  } catch (err) { document.getElementById("copyExpList").innerHTML = '<p style="color:var(--graphite);text-align:center;padding:40px">' + t("copy.load_failed") + '</p>'; }
 }
 
 function renderCopyTypeTags() {
@@ -1351,7 +1351,7 @@ function renderCopyExpList() {
     exps = exps.filter(e => (e.title || "").toLowerCase().includes(q) || (e.protein_names || "").toLowerCase().includes(q));
   }
   if (!exps.length) {
-    container.innerHTML = '<p style="color:#888;font-size:13px;text-align:center;padding:40px">' + t("ui.no_matching_exp") + '</p>';
+    container.innerHTML = '<p style="color:var(--graphite);font-size:13px;text-align:center;padding:40px">' + t("ui.no_matching_exp") + '</p>';
     return;
   }
   container.innerHTML = exps.map(e => {
@@ -1824,9 +1824,9 @@ async function showExpDetail(id) {
         </dd>
       </dl>
       <div style="margin-top:12px"><strong>${t("detail.params")}</strong></div>
-      <pre style="background:#f8f9fb;padding:10px;border:1px dashed var(--rule);font-size:12px;max-height:150px;overflow:auto">${esc(paramsStr)}</pre>
+      <pre style="background:var(--instrument);padding:10px;border:1px solid var(--rule);font-size:12px;max-height:150px;overflow:auto">${esc(paramsStr)}</pre>
       <div style="margin-top:8px"><strong>${t("detail.results")}</strong></div>
-      <pre style="background:#f8f9fb;padding:10px;border:1px dashed var(--rule);font-size:12px;max-height:200px;overflow:auto">${esc(resultsStr)}</pre>
+      <pre style="background:var(--instrument);padding:10px;border:1px solid var(--rule);font-size:12px;max-height:200px;overflow:auto">${esc(resultsStr)}</pre>
     `;
     document.getElementById("expDetailPanel").classList.remove("hidden");
     loadResearchList(e.id);
@@ -1896,7 +1896,7 @@ async function editExpTitle(id) {
   const current = titleEl.textContent;
   const input = document.createElement("input");
   input.type = "text"; input.value = current;
-  input.style.cssText = "font-size:18px;font-weight:600;padding:4px 8px;border:1px dashed var(--rule);width:300px";
+  input.style.cssText = "font-size:18px;font-weight:600;padding:4px 8px;border:1px solid var(--rule);width:300px";
   titleEl.replaceWith(input);
   input.focus();
   input.onblur = input.onkeydown = async function (ev) {
@@ -2088,7 +2088,7 @@ function updateEnzymeTimeBadge() {
     n, total: enzymeTimePoints.length,
     lo: enzymeTimePoints[enzymeTimeLo], hi: enzymeTimePoints[enzymeTimeHi],
   });
-  el.style.color = n < 2 ? "#e74c3c" : "#888";  // <2 点无法拟合斜率，标红提醒
+  el.style.color = n < 2 ? "var(--danger)" : "var(--graphite)";  // <2 点无法拟合斜率，标红提醒
 }
 
 function enzymeTimeIndexFromEvent(e) {
@@ -2364,11 +2364,11 @@ function renderEnzymeTable(wellIds) {
     const refLabel = info.ref === "blank" ? t("workbench.blank") : info.ref === "neg" ? t("workbench.neg") : info.ref === "pos" ? t("workbench.pos") : t("workbench.sample_well");
     return `<tr>
       <td>${id}</td><td>${esc(info.name || "")}</td>
-      <td style="color:#888">${esc(info.group || "")}</td>
+      <td style="color:var(--graphite)">${esc(info.group || "")}</td>
       <td>${refLabel}</td>
       <td>${info.conc_ng_ml ?? "-"}</td><td>${info.conc_uM ?? "-"}</td>
-      <td>${f.blank_corrected ? (f.slope_corrected?.toFixed(5) + ' <span style=color:#888;font-size:11px>(' + t("workbench.corrected") + ')</span>') : (f.slope?.toFixed(5) || "-")}</td>
-      <td style="color:${f.r2 != null && f.r2 < 0.95 ? '#e74c3c' : '#333'}">${f.r2 ?? "-"}</td>
+      <td>${f.blank_corrected ? (f.slope_corrected?.toFixed(5) + ' <span style=color:var(--graphite);font-size:11px>(' + t("workbench.corrected") + ')</span>') : (f.slope?.toFixed(5) || "-")}</td>
+      <td style="color:${f.r2 != null && f.r2 < 0.95 ? 'var(--danger)' : 'var(--carbon)'}">${f.r2 ?? "-"}</td>
       <td>${info.activity ?? "-"}</td>
     </tr>`;
   }).join("");
@@ -2562,9 +2562,9 @@ async function enzymeSearchProtein() {
   );
   dropdown.innerHTML = matches.length
     ? matches.map(p => `<div class="search-item" onclick="enzymeSelectProtein(${p.id},'${esc(p.name)}')">
-        <strong>${esc(p.name)}</strong><span style="color:#888;font-size:11px">${p.mw?.toLocaleString()} Da</span>
+        <strong>${esc(p.name)}</strong><span style="color:var(--graphite);font-size:11px">${p.mw?.toLocaleString()} Da</span>
       </div>`).join("")
-    : `<div class="search-item" style="color:#888">${t("workbench.no_match")}</div>`;
+    : `<div class="search-item" style="color:var(--graphite)">${t("workbench.no_match")}</div>`;
   dropdown.classList.remove("hidden");
 }
 
@@ -2676,7 +2676,7 @@ function renderWeblogoProteinList(filter) {
     `<label class="checkbox-label" style="display:flex!important;flex-direction:row!important;align-items:center!important;gap:4px!important;margin-bottom:2px!important;cursor:pointer;padding:2px 4px">
       <input type="checkbox" class="weblogo-protein-check" value="${p.id}"> ${esc(p.name)}
     </label>`
-  ).join("") || `<span style="color:#888">${t("workbench.no_match_protein")}</span>`;
+  ).join("") || `<span style="color:var(--graphite)">${t("workbench.no_match_protein")}</span>`;
 }
 
 async function loadWeblogoTagFilter() {
@@ -3083,7 +3083,7 @@ function renderBliSamples() {
     <tr>
       <td><strong>${esc(s.sample)}</strong></td>
       <td>${s.n_curves}</td>
-      <td style="font-size:12px;color:#666">${(s.concs || []).map(c => formatConc(c, "nM")).join(" / ")}</td>
+      <td style="font-size:12px;color:var(--graphite)">${(s.concs || []).map(c => formatConc(c, "nM")).join(" / ")}</td>
       <td><button class="btn btn-sm btn-outline bli-pick" data-sample="${escAttr(s.sample)}">${bliSelectedSample === s.sample ? t("workbench.selected_mark") : t("workbench.fit")}</button></td>
     </tr>`).join("");
 }
@@ -3106,8 +3106,8 @@ function renderBliCurves() {
     <tr>
       <td><input type="checkbox" class="bli-curve-cb" data-label="${escAttr(r.label)}" ${bliActiveCurves.has(r.label) ? "checked" : ""}></td>
       <td style="font-size:12px">${esc(r.label)}</td>
-      <td style="font-size:12px;color:#666">${esc(r.sample)}</td>
-      <td style="font-size:12px;color:#666">${formatConc(r.conc, "nM")} nM</td>
+      <td style="font-size:12px;color:var(--graphite)">${esc(r.sample)}</td>
+      <td style="font-size:12px;color:var(--graphite)">${formatConc(r.conc, "nM")} nM</td>
     </tr>`).join("");
   updateBliCurveMaster();
 }
@@ -3236,14 +3236,14 @@ function renderBliKd(sample, res) {
   if (!res || res.error) {
     return `<div class="calc-card" style="padding:12px;margin-bottom:10px">
       <div style="font-weight:600;margin-bottom:4px">${esc(sample)}</div>
-      <div style="color:#c00;font-size:13px">${t("toast.fit_failed")}: ${esc(res.error || t("error.generic"))}</div>
+      <div style="color:var(--danger);font-size:13px">${t("toast.fit_failed")}: ${esc(res.error || t("error.generic"))}</div>
     </div>`;
   }
   const phase = res.phase || {};
   const methods = ["standard", "split", "joint", "steady", "mixed"];
   const rows = methods.map(m => {
     const v = res[m];
-    if (!v) return `<tr><td>${m}</td><td colspan="4" style="color:#888">${t("workbench.fit_failed_row")}</td></tr>`;
+    if (!v) return `<tr><td>${m}</td><td colspan="4" style="color:var(--graphite)">${t("workbench.fit_failed_row")}</td></tr>`;
     const kd = v.kd != null && isFinite(v.kd) ? `${formatConc(v.kd, "nM")} nM` : "—";
     const kon = v.kon != null && isFinite(v.kon) ? (+v.kon).toExponential(2) : "—";
     const koff = v.koff != null && isFinite(v.koff) ? (+v.koff).toExponential(2) : "—";
@@ -3374,9 +3374,9 @@ function renderAktaRuns() {
   if (!box) return;
   box.innerHTML = aktaRuns.map((run, ri) => {
     if (run.error) {
-      return `<div class="calc-card" style="padding:8px 10px;margin-bottom:8px;font-size:13px;border-color:#f0c0c0;background:#fff7f7">
-        <strong style="color:#c0392b">${esc(run.name)}</strong>
-        <span style="color:#888;margin-left:8px">${esc(run.error)}</span>
+      return `<div class="calc-card" style="padding:8px 10px;margin-bottom:8px;font-size:13px;border-color:var(--danger);background:var(--danger-bg)">
+        <strong style="color:var(--danger)">${esc(run.name)}</strong>
+        <span style="color:var(--graphite);margin-left:8px">${esc(run.error)}</span>
       </div>`;
     }
     const chOpts = run.channels.map(ch =>
@@ -3389,10 +3389,10 @@ function renderAktaRuns() {
           <input type="checkbox" class="akta-run-check" data-run="${ri}" ${checked} onclick="event.stopPropagation()">
           <strong style="cursor:pointer" class="akta-run-select">${esc(run.name)}</strong>
         </div>
-        <span style="color:#888;font-size:12px">${evInfo || t("workbench.no_events")}</span>
+        <span style="color:var(--graphite);font-size:12px">${evInfo || t("workbench.no_events")}</span>
       </div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center">
-        <select class="akta-run-channel" data-run="${ri}" style="flex:1;min-width:160px;padding:5px 8px;border:1px dashed var(--rule);font-size:12px">${chOpts}</select>
+        <select class="akta-run-channel" data-run="${ri}" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid var(--rule);font-size:12px">${chOpts}</select>
       </div>
     </div>`;
   }).join("");
@@ -3526,7 +3526,7 @@ async function aktaBatchPlot() {
         <img src="${r.image}" style="max-width:100%" alt="${esc(run.name)}">
       </div>`;
     } catch (err) {
-      html += `<div class="calc-card" style="padding:8px;margin-bottom:8px;color:#c0392b;font-size:13px">${esc(run.name)}: ${esc(err.message)}</div>`;
+      html += `<div class="calc-card" style="padding:8px;margin-bottom:8px;color:var(--danger);font-size:13px">${esc(run.name)}: ${esc(err.message)}</div>`;
     }
   }
   area.innerHTML = html;
@@ -3538,13 +3538,13 @@ function renderAktaPeaks(peaks, run) {
   if (!wrap || !tbody) return;
   if (!peaks.length) {
     wrap.classList.remove("hidden");
-    tbody.innerHTML = `<tr><td colspan="7" style="color:#888;text-align:center">${t("toast.no_peaks")}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="color:var(--graphite);text-align:center">${t("toast.no_peaks")}</td></tr>`;
     return;
   }
   wrap.classList.remove("hidden");
   const cur = run.target_peak || 0;
   tbody.innerHTML = peaks.map((p, i) => `
-    <tr style="${i === cur ? "background:#f0f5ff" : ""}">
+    <tr style="${i === cur ? "background:var(--accent-bg)" : ""}">
       <td>${i + 1}</td>
       <td>${p.apex_vol}</td>
       <td>${p.height}</td>
@@ -3870,9 +3870,7 @@ function researchBackToList() {
   researchRender();
 }
 
-// lineflow 重设计后，旧的横向流程图布局 researchFlowLayout + researchFlowCard 已删。
-// 旧 .res-flow-card / .res-flow-svg 等死样式已从 style.css 移除（v0.1.2 UI 优化轮）。
-// 结论 stance 配色由 CSS .lf-stance--* 接管，lineflowCard 直接调 resStanceKey 取 key。
+// 结论 stance 配色由 CSS .res-tag-chip.support/rebut/partial/uncertain 接管（语义 token）。
 function resStanceKey(tag) {
   const m = { 支持: "support", 反驳: "rebut", 部分: "partial", 不确定: "uncertain" };
   for (const t of String(tag || "").split(",").map(s => s.trim())) {
@@ -3880,19 +3878,10 @@ function resStanceKey(tag) {
   }
   return "other";
 }
-const RES_STANCE_CHIP = {
-  support: { bg: "#e8f5e9", fg: "#2e7d32" },
-  rebut:   { bg: "#ffebee", fg: "#c62828" },
-  partial: { bg: "#fff3e0", fg: "#e65100" },
-  uncertain: { bg: "#f5f5f5", fg: "#757575" },
-};
 function resTagChip(tag) {
   const key = resStanceKey(tag);
   const label = key !== "other" ? t("stance." + tag) : tag;
-  const c = RES_STANCE_CHIP[key];
-  return c
-    ? `<span class="res-tag-chip" style="background:${c.bg};color:${c.fg}">${esc(label)}</span>`
-    : `<span class="res-tag-chip">${esc(label)}</span>`;
+  return `<span class="res-tag-chip ${key}">${esc(label)}</span>`;
 }
 
 async function researchSelect(id) {

@@ -102,7 +102,7 @@
     </select>
     <button class="btn btn-outline" id="bliImportBtn" onclick="importBliFromExp()" disabled data-i18n="workbench.import">Import</button>
     <span style="color:var(--graphite);font-size:13px;margin-left:8px" data-i18n="workbench.or_search">or search to add:</span>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#555;font-size:13px"><span data-i18n="workbench.conc_unit">Concentration unit</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--graphite);font-size:13px"><span data-i18n="workbench.conc_unit">Concentration unit</span>
       <select id="dilUnitSel" onchange="changeDilUnit()" style="padding:8px 12px;border:1px dashed var(--rule);font-size:14px">
         <option value="M">M</option>
         <option value="uM" selected>uM</option>
@@ -157,7 +157,7 @@
   <div class="toolbar" style="flex-wrap:wrap">
     <input type="file" id="bliFile" accept=".csv" onchange="uploadBliFile()" style="display:none">
     <button class="btn btn-outline" onclick="document.getElementById('bliFile').click()" data-i18n="workbench.upload_bli">Upload ForteBio CSV</button>
-    <span id="bliMeta" style="font-size:13px;color:#888;margin-left:8px"></span>
+    <span id="bliMeta" style="font-size:13px;color:var(--graphite);margin-left:8px"></span>
   </div>
 
   <!-- 解析后：样本列表 + 参数面板 -->
@@ -256,7 +256,7 @@
   <div class="toolbar" style="flex-wrap:wrap">
     <input type="file" id="aktaFile" accept=".zip" multiple onchange="uploadAktaFile()" style="display:none">
     <button class="btn btn-outline" onclick="document.getElementById('aktaFile').click()" data-i18n="workbench.upload_akta">Upload AKTA Unicorn zip (multi-select)</button>
-    <span id="aktaMeta" style="font-size:13px;color:#888;margin-left:8px"></span>
+    <span id="aktaMeta" style="font-size:13px;color:var(--graphite);margin-left:8px"></span>
   </div>
 
   <div id="aktaAnalyzed" class="hidden" style="margin-top:12px">
@@ -355,7 +355,7 @@
         <label class="checkbox-label" style="display:inline-flex!important"><input type="checkbox" id="weblogoSelectAll" onchange="toggleAllWeblogoProteins(this)"> <span data-i18n="workbench.select_all">Select all</span></label>
       </div>
       <div id="weblogoProteinList" style="max-height:350px;overflow-y:auto;border:1px dashed var(--rule);padding:8px;font-size:13px">
-        <span style="color:#888" data-i18n="common.loading">Loading…</span>
+        <span style="color:var(--graphite)" data-i18n="common.loading">Loading…</span>
       </div>
       <div style="margin-top:10px">
         <label style="font-size:13px"><span data-i18n="workbench.color_scheme">Color scheme</span>
@@ -369,12 +369,12 @@
         <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.pos_range">Position range (optional)</span>
           <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
             <input type="number" id="weblogoStart" min="1" data-i18n-placeholder="workbench.pos_start" placeholder="Start" style="flex:1;padding:6px;border:1px dashed var(--rule);font-size:13px">
-            <span style="color:#888">–</span>
+            <span style="color:var(--graphite)">–</span>
             <input type="number" id="weblogoEnd" min="1" data-i18n-placeholder="workbench.pos_end" placeholder="End" style="flex:1;padding:6px;border:1px dashed var(--rule);font-size:13px">
           </div>
         </label>
         <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.multimer">Multimer</span>
-          <span style="font-weight:400;color:#888" data-i18n="workbench.multimer_hint">(dimer = 2, cropped to one subunit)</span>
+          <span style="font-weight:400;color:var(--graphite)" data-i18n="workbench.multimer_hint">(dimer = 2, cropped to one subunit)</span>
           <input type="number" id="weblogoMultimer" min="1" value="1" style="width:70px;padding:6px;border:1px dashed var(--rule);font-size:13px;margin-top:4px">
         </label>
       </div>
@@ -385,7 +385,7 @@
     <!-- 右侧：结果 -->
     <div id="weblogoResult" class="calc-card hidden" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px">
       <div style="align-self:stretch;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span id="weblogoInfo" style="font-size:13px;color:#888"></span>
+        <span id="weblogoInfo" style="font-size:13px;color:var(--graphite)"></span>
         <button class="btn btn-sm btn-outline" onclick="downloadWeblogo()" data-i18n="workbench.download_png">Download PNG</button>
       </div>
       <img id="weblogoImage" style="max-width:100%" alt="Weblogo">
@@ -400,7 +400,7 @@
   <div class="toolbar" style="flex-wrap:wrap">
     <input type="file" id="enzymeFile" accept=".xlsx" onchange="uploadEnzymeFile()" style="display:none">
     <button class="btn btn-outline" onclick="document.getElementById('enzymeFile').click()" data-i18n="workbench.upload_tecan">Upload TECAN xlsx</button>
-    <span id="enzymeMeta" style="font-size:13px;color:#888;margin-left:8px"></span>
+    <span id="enzymeMeta" style="font-size:13px;color:var(--graphite);margin-left:8px"></span>
   </div>
 
   <div class="stack-on-narrow" style="margin-top:12px">
@@ -410,7 +410,7 @@
         <button class="btn btn-sm btn-outline" onclick="enzymeSelectAll()" data-i18n="workbench.select_all_wells">Select all</button>
         <button class="btn btn-sm btn-outline" onclick="enzymeClearAll()" data-i18n="workbench.clear">Clear</button>
         <button class="btn btn-sm btn-outline" onclick="enzymeInvertSelect()" data-i18n="workbench.invert">Invert</button>
-        <span style="color:#888;font-size:12px;margin-left:4px" data-i18n="workbench.ctrl_multi">Ctrl+click for multi-select</span>
+        <span style="color:var(--graphite);font-size:12px;margin-left:4px" data-i18n="workbench.ctrl_multi">Ctrl+click for multi-select</span>
       </div>
       <div class="table-scroll">
       <div id="plateGrid" class="plate-grid">
@@ -429,7 +429,7 @@
     <!-- 右侧: 孔详情 + 浓度设置 -->
     <div class="calc-card" style="padding:12px">
       <h3 style="margin-bottom:8px" data-i18n="workbench.well_detail">Well detail</h3>
-      <div id="wellDetail" style="font-size:13px;color:#888" data-i18n="workbench.pick_well">Select a well to inspect</div>
+      <div id="wellDetail" style="font-size:13px;color:var(--graphite)" data-i18n="workbench.pick_well">Select a well to inspect</div>
       <div id="wellForm" class="hidden" style="margin-top:8px">
         <label style="font-size:13px"><span data-i18n="workbench.well_name">Name</span> <input type="text" id="wellName" onchange="enzymeUpdateWells()" style="padding:6px;border:1px dashed var(--rule);width:100%"></label>
         <label style="font-size:13px;margin-top:4px"><span data-i18n="workbench.well_group">Group</span> <input type="text" id="wellGroup" list="wellGroupOptions" onchange="enzymeUpdateWells()" data-i18n-placeholder="workbench.well_group_ph" placeholder="Same-group wells are averaged for plots" style="padding:6px;border:1px dashed var(--rule);width:100%">
@@ -549,13 +549,13 @@
       </div>
       <div id="copyTypeTags" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"></div>
       <div id="copyExpList" style="max-height:420px;overflow-y:auto">
-        <p style="color:#888;font-size:13px;text-align:center;padding:40px" data-i18n="common.loading">Loading…</p>
+        <p style="color:var(--graphite);font-size:13px;text-align:center;padding:40px" data-i18n="common.loading">Loading…</p>
       </div>
     </div>
     <!-- 右侧：详情预览 -->
     <div id="copyPreview" class="calc-card hidden" style="position:sticky;top:16px;align-self:start">
       <h3 id="copyPreviewTitle" style="margin-bottom:4px;font-size:16px"></h3>
-      <div id="copyPreviewMeta" style="font-size:13px;color:#888;margin-bottom:10px"></div>
+      <div id="copyPreviewMeta" style="font-size:13px;color:var(--graphite);margin-bottom:10px"></div>
       <div id="copyPreviewDetail" style="font-size:13px;line-height:1.7"></div>
       <button class="btn btn-primary" onclick="applyCopyAndSwitch()" style="margin-top:12px;width:100%" data-i18n="workbench.load_tool">Load into matching tool</button>
     </div>

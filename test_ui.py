@@ -74,11 +74,10 @@ print("4. Experiment type label mapping OK")
 for rel in (
     "i18n.js", "i18n.json", "ui-shell.js", "app.js", "style.css",
     "fonts/InterVariable.woff2",
-    "fonts/IBMPlexMono-Regular.woff2",
-    "fonts/IBMPlexMono-Medium.woff2",
+    "fonts/JetBrainsMonoVariable.woff2",
     "fonts/NotoSansSC-Regular.otf",
     "fonts/LICENSE-Inter.txt",
-    "fonts/LICENSE-IBMPlexMono.txt",
+    "fonts/LICENSE-JetBrainsMono.txt",
     "fonts/LICENSE-NotoSansSC.txt",
 ):
     p = STATIC / rel
@@ -183,12 +182,12 @@ print("9. Layout / i18n / dialog wiring OK")
 # ── 10. Design tokens / responsive invariants ─────────
 css = (STATIC / "style.css").read_text(encoding="utf-8")
 for token in (
-    "--lab-canvas: #E1E4E2",
-    "--instrument: #F8F9F8",
-    "--carbon: #141716",
-    "--graphite: #626966",
-    "--cyan: #00D8C5",
-    "--cyan-deep: #00AFA1",
+    "--lab-canvas: #F3F0EA",
+    "--instrument: #FBF8F1",
+    "--carbon: #141414",
+    "--graphite: #4E4A44",
+    "--cyan: #C8791E",
+    "--cyan-deep: #A96316",
     "--hit: 44px",
     "--max: 1920px",
 ):
@@ -199,10 +198,33 @@ assert "@media (max-width: 767px)" in css
 assert ".record-list { display: block" in css
 assert "prefers-reduced-motion" in css
 assert "outline: 2px solid var(--cyan)" in css
-assert "border-radius" not in css and "box-shadow" not in css
+assert "border-radius" in css and "box-shadow" in css, "warm-paper cards need radius + shadow"
+assert "JetBrainsMonoVariable.woff2" in css, "JetBrains Mono should be registered"
+assert "IBM Plex" not in css, "IBM Plex Mono must be fully removed"
+assert '"JetBrains Mono"' in css, "JetBrains Mono should be the default UI font"
+assert "font-variant-numeric: tabular-nums" in css, "tabular numbers for data columns"
+for tok in ("--success", "--danger", "--warning", "--info", "--rule-soft", "--accent-bg"):
+    assert tok in css, f"missing semantic token {tok}"
+assert ".res-tag-chip.support" in css, "stance semantic classes missing"
+assert "border-radius: 0" in css, "buttons must stay square (BDA decision)"
 assert "id=\"bliMeta\"" in calc and "id=\"aktaMeta\"" in calc and "id=\"enzymeMeta\"" in calc
 assert 'id="plateGrid"' in calc
 assert re.search(r'class="table-scroll"\s*>\s*<div id="plateGrid"', calc), "enzyme plate must scroll locally"
 print("10. Design tokens / responsive CSS OK")
+
+# ── 11. Hardcoded colors fully removed (Warm Paper tokenization) ──
+banned = ("#888", "#666", "#555", "#999", "#333", "#e74c3c", "#c0392b", "#c00",
+          "#f0f5ff", "#f8f9fb", "#f0c0c0", "#fff7f7", "#e8f5e9", "#ffebee",
+          "#fff3e0", "#f5f5f5", "#2e7d32", "#c62828", "#e65100", "#757575")
+for label, text in (("app.js", appjs), ("style.css", css)):
+    for c in banned:
+        assert c not in text, f"{label} still contains hardcoded {c}"
+for path in TEMPLATES.glob("*.html"):
+    text = path.read_text(encoding="utf-8")
+    for c in banned:
+        assert c not in text, f"{path.name} still contains hardcoded {c}"
+assert "RES_STANCE_CHIP" not in appjs, "JS stance inline colors must be removed"
+assert "IBM Plex" not in appjs and "IBMPlexMono" not in appjs
+print("11. No hardcoded colors / IBM Plex leftovers OK")
 
 print("\nAll UI tests passed.")
