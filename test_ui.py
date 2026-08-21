@@ -182,8 +182,8 @@ print("9. Layout / i18n / dialog wiring OK")
 # ── 10. Design tokens / responsive invariants ─────────
 css = (STATIC / "style.css").read_text(encoding="utf-8")
 for token in (
-    "--lab-canvas: #F3F0EA",
-    "--instrument: #FBF8F1",
+    "--lab-canvas: #FAF8F3",
+    "--instrument: #FFFFFF",
     "--carbon: #141414",
     "--graphite: #4E4A44",
     "--cyan: #C8791E",
