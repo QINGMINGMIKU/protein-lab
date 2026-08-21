@@ -122,6 +122,7 @@ def api_research_node_create():
         exp_id=data.get("exp_id"),
         tag=data.get("tag") or "",
         free_attach=data.get("free_attach", False),
+        supporting_exp_ids=data.get("supporting_exp_ids"),
     )
     if err:
         return jsonify({"error": err}), 400
@@ -149,6 +150,7 @@ def api_research_node_update(nid):
         exp_id=data.get("exp_id"),
         tag=data.get("tag") or "",
         free_attach=data.get("free_attach", False),
+        supporting_exp_ids=data.get("supporting_exp_ids"),
     )
     if not ok:
         return jsonify({"error": err}), 400

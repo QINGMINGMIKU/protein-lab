@@ -2,10 +2,14 @@
 研究脉络 service 层（v0.1.0）— 证据链：目标→(拆解)子目标/实验→(得出)结论→(引出)新目标。
 
 业务规则集中在这（Workbench 定位：AI 可读的证据链，不做项目管理）：
-  - 三节点类型 goal/experiment/conclusion；单亲树、可自由重挂；多根目标
-  - 白名单边：goal→{goal,experiment}、experiment→conclusion、conclusion→goal
+  - 节点类型 goal/experiment/conclusion/observation（v0.1.3 加 observation 观察·关键细节）；
+    单亲树、可自由重挂；多根目标
+  - 白名单边：goal→{goal,experiment,observation}、experiment→{conclusion,observation}、
+    conclusion→{goal,observation}、observation→{}（叶子）
     ——跨边不合法，除非勾「自由挂载」(free_attach) 逃生舱打破（不做跨分支共享，
       真 DAG 留后续）
+  - 结论旁路引用 supporting_exp_ids（v0.1.3）：多实验→一结论——树父实验仍是主证据，
+    其余支持实验走一等旁路引用（方向恒定实验→结论，结构上不可能成环）
   - 根必须是目标（goal）；experiment 块 = 实验引用（exp_id）或计划占位（exp_id 空）
   - 删节点级联删整棵子树（前端需确认）；删实验断链保留节点（FK SET NULL）
 
@@ -14,13 +18,16 @@ SQL 全在 models.py；这里只做校验 / 建树 / 序列化（纯逻辑，可
 import models
 
 RESEARCH_NODE_TYPES = models.RESEARCH_NODE_TYPES
-NODE_TYPE_LABELS = {"goal": "目标", "experiment": "实验", "conclusion": "结论"}
+NODE_TYPE_LABELS = {"goal": "目标", "experiment": "实验", "conclusion": "结论",
+                    "observation": "观察"}
 
 # 白名单边：父类型 → 允许的子类型集合。加子块勾「自由挂载」可打破任一边。
+# observation 是叶子旁注（不进必选链），任何节点下都能挂观察/关键细节。
 WHITELIST = {
-    "goal": {"goal", "experiment"},
-    "experiment": {"conclusion"},
-    "conclusion": {"goal"},
+    "goal": {"goal", "experiment", "observation"},
+    "experiment": {"conclusion", "observation"},
+    "conclusion": {"goal", "observation"},
+    "observation": set(),  # 叶子：观察下不再挂子节点
 }
 
 
@@ -56,6 +63,35 @@ def _normalize_tag(tag) -> str:
     return ",".join(t.strip() for t in str(tag).split(",") if t.strip())
 
 
+def _coerce_supporting_exp_ids(v, node_type: str) -> list[int]:
+    """supporting_exp_ids（v0.1.3）：结论引用支持它的实验（多实验→一结论旁路）。
+
+    None/[] → []；非空时逐项校验：(a) 整数（0/负拒绝）(b) 去重 (c) 实验存在。
+    仅 conclusion 节点可用——观察/实验/目标上写它会歧义（结论才是证据汇合点），
+    非空即拒绝。返回按传入序的 int 列表。
+    """
+    if not v:
+        return []
+    if node_type != "conclusion":
+        raise ValueError("supporting_exp_ids 仅结论（conclusion）节点支持")
+    if not isinstance(v, (list, tuple)):
+        raise ValueError(f"supporting_exp_ids 应为实验 id 列表，收到 {v!r}")
+    out = []
+    for x in v:
+        try:
+            x = int(x)
+        except (TypeError, ValueError):
+            raise ValueError(f"supporting_exp_ids 应为实验 id 列表，收到 {v!r}")
+        if x <= 0:
+            raise ValueError(f"supporting_exp_ids 实验 id 必须为正整数，收到 {x}")
+        if x in out:
+            continue
+        if not models.exp_get(x):
+            raise ValueError(f"supporting_exp_ids 引用的实验 {x} 不存在")
+        out.append(x)
+    return out
+
+
 def _parent_label(t: str | None) -> str:
     return NODE_TYPE_LABELS.get(t or "", t or "根")
 
@@ -87,11 +123,13 @@ def _sort_tail(sibs: list[dict], exclude_id: int = None) -> int:
 
 def create_node(node_type: str, title: str, detail: str = "",
                 parent_id: int = None, exp_id: int = None, tag: str = "",
-                free_attach: bool = False) -> tuple[int | None, str]:
+                free_attach: bool = False,
+                supporting_exp_ids: list = None) -> tuple[int | None, str]:
     """新建研究节点。返回 (node_id, "") 或 (None, error)。"""
     try:
         parent_id = _coerce_id(parent_id, "parent_id")
         exp_id = _coerce_id(exp_id, "exp_id")
+        supporting_exp_ids = _coerce_supporting_exp_ids(supporting_exp_ids, node_type)
     except ValueError as e:
         return None, str(e)
     if node_type not in RESEARCH_NODE_TYPES:
@@ -112,17 +150,20 @@ def create_node(node_type: str, title: str, detail: str = "",
     nid = models.research_node_create(
         node_type=node_type, title=title.strip(), detail=detail,
         parent_id=parent_id, exp_id=exp_id, tag=_normalize_tag(tag),
-        free_attach=_as_bool(free_attach), sort_order=_sort_tail(sibs))
+        free_attach=_as_bool(free_attach), sort_order=_sort_tail(sibs),
+        supporting_exp_ids=supporting_exp_ids)
     return nid, ""
 
 
 def update_node(node_id: int, node_type: str, title: str, detail: str = "",
                 parent_id: int = None, exp_id: int = None, tag: str = "",
-                free_attach: bool = False) -> tuple[bool, str]:
+                free_attach: bool = False,
+                supporting_exp_ids: list = None) -> tuple[bool, str]:
     """全量更新研究节点（前端提交完整对象）。重挂（父变化）时重校验白名单并重排。"""
     try:
         parent_id = _coerce_id(parent_id, "parent_id")
         exp_id = _coerce_id(exp_id, "exp_id")
+        supporting_exp_ids = _coerce_supporting_exp_ids(supporting_exp_ids, node_type)
     except ValueError as e:
         return False, str(e)
     node = models.research_node_get(node_id)
@@ -162,7 +203,8 @@ def update_node(node_id: int, node_type: str, title: str, detail: str = "",
     models.research_node_update(
         node_id, node_type=node_type, title=title.strip(), detail=detail,
         parent_id=parent_id, exp_id=exp_id, tag=_normalize_tag(tag),
-        free_attach=_as_bool(free_attach), sort_order=sort_order)
+        free_attach=_as_bool(free_attach), sort_order=sort_order,
+        supporting_exp_ids=supporting_exp_ids)
     return True, ""
 
 
@@ -330,6 +372,21 @@ def _depth_in_subtree(root_id: int, target_id: int) -> int:
     return depth
 
 
+def _exp_block(e: dict) -> dict:
+    """实验记录 → 完整 exp 块（params/results + raw 快照元数据，供上下文/AI 消费）。
+
+    子树实验与结论的支持实验共用（v0.1.3）——保证同一实验在两种位置给出的块一致。
+    """
+    raw = models.exp_raw_list(e["id"], with_version=True)
+    return {
+        "id": e["id"], "title": e["title"], "exp_type": e["exp_type"],
+        "date": e.get("date", ""), "protein_names": e.get("protein_names", ""),
+        "params": e.get("params"), "results": e.get("results"),
+        "notes": e.get("notes", ""),
+        "_raw": raw, "_raw_count": len(raw),
+    }
+
+
 def get_research_context(goal_id: int) -> dict | None:
     """研究目标上下文聚合（v0.1.2，MCP get_research_context）。
 
@@ -362,17 +419,12 @@ def get_research_context(goal_id: int) -> dict | None:
         if n["exp_id"]:
             e = models.exp_get(n["exp_id"])
             if e:
-                entry["exp"] = {
-                    "id": e["id"], "title": e["title"], "exp_type": e["exp_type"],
-                    "date": e.get("date", ""), "protein_names": e.get("protein_names", ""),
-                    "params": e.get("params"), "results": e.get("results"),
-                    "notes": e.get("notes", ""),
-                    "_raw": models.exp_raw_list(e["id"], with_version=True),
-                }
-                entry["exp"]["_raw_count"] = len(entry["exp"]["_raw"])
+                entry["exp"] = _exp_block(e)
         experiments.append(entry)
 
-    # ── 结论 epistemic status：立场（tag 首个命中词）+ 来源实验（父节点）──
+    # ── 结论 epistemic status：立场（tag 首个命中词）+ 来源实验（父节点）+ 旁路支持实验 ──
+    # source_exp_* = 树父实验（主证据，向后兼容）；supporting_*（v0.1.3）=
+    # 其余支持实验（多实验→一结论旁路引用），同一实验块 _exp_block 保证一致。
     conclusions = []
     for n in nodes:
         if n["node_type"] != "conclusion":
@@ -381,6 +433,13 @@ def get_research_context(goal_id: int) -> dict | None:
         parent = by_id.get(n["parent_id"]) if n["parent_id"] is not None else None
         source_exp_id = (parent["exp_id"] if parent and parent["node_type"] == "experiment"
                          else None)
+        supporting_ids = [sid for sid in (n.get("supporting_exp_ids") or [])
+                          if sid != source_exp_id]  # 父实验已是主证据，剔除防重复
+        supporting_experiments = []
+        for sid in supporting_ids:
+            e = models.exp_get(sid)
+            if e:
+                supporting_experiments.append(_exp_block(e))
         source_exp = models.exp_get(source_exp_id) if source_exp_id else None
         conclusions.append({
             "node_id": n["id"], "title": n["title"], "detail": n["detail"], "tag": n["tag"],
@@ -389,6 +448,23 @@ def get_research_context(goal_id: int) -> dict | None:
             "source_archived": source_exp_id is not None,
             "source_exp_title": source_exp["title"] if source_exp else "",
             "parent_title": parent["title"] if parent else "",
+            "supporting_exp_ids": supporting_ids,
+            "supporting_experiments": supporting_experiments,
+        })
+
+    # ── observation（v0.1.3）：观察/关键细节——挂任何节点下的研究过程事实/参数，
+    # 叶子旁注不进必选链。给 AI 看「为什么这个参数/方向」的上下文。──
+    observations = []
+    for n in nodes:
+        if n["node_type"] != "observation":
+            continue
+        parent = by_id.get(n["parent_id"]) if n["parent_id"] is not None else None
+        observations.append({
+            "node_id": n["id"], "title": n["title"], "detail": n["detail"],
+            "tag": n["tag"],
+            "parent_title": parent["title"] if parent else "",
+            "parent_node_type": parent["node_type"] if parent else "",
+            "parent_exp_id": parent["exp_id"] if parent else None,
         })
 
     # ── goal 节点：有无结论 / 归档·计划实验计数（开放目标 = 子树内无结论）──
@@ -436,6 +512,7 @@ def get_research_context(goal_id: int) -> dict | None:
             "goal_nodes": goal_nodes,
             "experiments": experiments,
             "conclusions": conclusions,
+            "observations": observations,
         },
         "open_goals": open_goals,
         "stats": {
@@ -444,6 +521,7 @@ def get_research_context(goal_id: int) -> dict | None:
             "planned": len(experiments) - archived,
             "archived": archived,
             "conclusions": len(conclusions),
+            "observations": len(observations),
             "open_goals": len(open_goals),
         },
     }

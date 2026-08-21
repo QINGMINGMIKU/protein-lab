@@ -35,7 +35,7 @@ def get_db(read_only: bool = False) -> sqlite3.Connection:
 # user_version=N→COMMIT 原子。老库（user_version=0）从 v1 起跑：v1 全是 CREATE IF NOT
 # EXISTS + 旧列清理，对已有表是 no-op——这是"非破坏性升级"的保证（数据原样不动）。
 
-SCHEMA_VERSION = 3  # 当前 schema 版本（与 MIGRATIONS 末项一致）
+SCHEMA_VERSION = 4  # 当前 schema 版本（与 MIGRATIONS 末项一致）
 
 
 def _migrate_v1_post(conn):
@@ -130,6 +130,16 @@ MIGRATIONS = [
                 created_at  TEXT DEFAULT (datetime('now','localtime'))
             )""",
             "CREATE INDEX IF NOT EXISTS idx_research_parent ON research_nodes(parent_id)",
+        ],
+    },
+    {
+        "version": 4,
+        # v0.1.3 证据结构升级：research_nodes 加 supporting_exp_ids（JSON 文本，
+        # 仅 conclusion 节点有意义——「多实验 → 一结论」旁路引用；observation 节点
+        # 类型不需要迁移，node_type 本就是文本列，白名单在 service 层 research.py）。
+        # ADD COLUMN 非破坏：老行取 DEFAULT '[]'。
+        "sql": [
+            "ALTER TABLE research_nodes ADD COLUMN supporting_exp_ids TEXT DEFAULT '[]'",
         ],
     },
 ]
@@ -607,27 +617,44 @@ def exp_raw_relink(raw_ids: list[int], new_exp_id: int) -> None:
 
 
 # ── research_nodes：研究脉络树（v0.1.0）───────────────────
-# 三节点类型 goal(目标)/experiment(实验引用或计划占位)/conclusion(结论)。
+# 节点类型 goal(目标)/experiment(实验引用或计划占位)/conclusion(结论)/observation(观察·关键细节)。
 # 白名单边校验在 research.py service 层（留 free_attach 逃生舱），这里只管存取——
 # SQL 全在 models.py，业务规则不进表（不建 CHECK，逃生舱可打破任意边）。
+# supporting_exp_ids（v0.1.3）：JSON 文本，仅 conclusion 节点有意义——多实验→一结论
+# 的旁路引用（树父实验仍是主证据）。读端 _node_row 统一反序列化为 int 列表。
 
-RESEARCH_NODE_TYPES = ("goal", "experiment", "conclusion")
+RESEARCH_NODE_TYPES = ("goal", "experiment", "conclusion", "observation")
 RESEARCH_SAFE_COLUMNS = frozenset({"node_type", "title", "detail", "parent_id",
-                                   "exp_id", "tag", "free_attach", "sort_order"})
+                                   "exp_id", "tag", "free_attach", "sort_order",
+                                   "supporting_exp_ids"})
+
+
+def _node_row(row: sqlite3.Row) -> dict:
+    """research_nodes 行 → dict：supporting_exp_ids JSON 文本反序列化为 int 列表（兜底 []）。"""
+    d = dict(row)
+    try:
+        v = _json_unwrap(d.get("supporting_exp_ids"))
+    except Exception:
+        v = None
+    d["supporting_exp_ids"] = [int(x) for x in v if str(x).isdigit()] if isinstance(v, list) else []
+    return d
 
 
 def research_node_create(node_type: str, title: str, detail: str = "",
                          parent_id: int = None, exp_id: int = None,
                          tag: str = "", free_attach: bool = False,
-                         sort_order: int = 0) -> int:
+                         sort_order: int = 0,
+                         supporting_exp_ids: list = None) -> int:
     """新建研究节点，返回 id。结构校验（白名单/根须目标）由 service 层负责。"""
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO research_nodes
-            (node_type, title, detail, parent_id, exp_id, tag, free_attach, sort_order)
-        VALUES (?,?,?,?,?,?,?,?)
+            (node_type, title, detail, parent_id, exp_id, tag, free_attach,
+             sort_order, supporting_exp_ids)
+        VALUES (?,?,?,?,?,?,?,?,?)
     """, (node_type, title, detail, parent_id, exp_id, tag,
-          1 if free_attach else 0, sort_order))
+          1 if free_attach else 0, sort_order,
+          json.dumps(supporting_exp_ids or [], ensure_ascii=False)))
     conn.commit()
     nid = cur.lastrowid
     conn.close()
@@ -639,7 +666,7 @@ def research_node_get(node_id: int) -> dict | None:
     row = conn.execute("SELECT * FROM research_nodes WHERE id = ?",
                        (node_id,)).fetchone()
     conn.close()
-    return dict(row) if row else None
+    return _node_row(row) if row else None
 
 
 def research_node_update(node_id: int, **kwargs) -> bool:
@@ -649,6 +676,9 @@ def research_node_update(node_id: int, **kwargs) -> bool:
         if k in RESEARCH_SAFE_COLUMNS:
             # 三元右结合陷阱：必须显式括号，否则非 free_attach 列真值也会被存成 1
             val = (1 if v else 0) if k == "free_attach" else v
+            # supporting_exp_ids 是 JSON 文本列：service 层给 list，这里序列化
+            if k == "supporting_exp_ids":
+                val = json.dumps(v or [], ensure_ascii=False)
             updates[k] = val
     if not updates:
         return False
@@ -697,7 +727,7 @@ def research_nodes_all() -> list[dict]:
     rows = conn.execute(
         "SELECT * FROM research_nodes ORDER BY sort_order, id").fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [_node_row(r) for r in rows]
 
 
 def research_node_children(parent_id: int) -> list[dict]:
@@ -707,7 +737,7 @@ def research_node_children(parent_id: int) -> list[dict]:
         "SELECT * FROM research_nodes WHERE parent_id=? ORDER BY sort_order, id",
         (parent_id,)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [_node_row(r) for r in rows]
 
 
 def research_nodes_root() -> list[dict]:
@@ -717,7 +747,7 @@ def research_nodes_root() -> list[dict]:
         "SELECT * FROM research_nodes WHERE parent_id IS NULL "
         "ORDER BY sort_order, id").fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [_node_row(r) for r in rows]
 
 
 # ── Init on import ─────────────────────────────────────────

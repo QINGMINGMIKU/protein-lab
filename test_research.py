@@ -21,6 +21,8 @@
 15. 研究上下文聚合 get_research_context（v0.1.2）：结构/计划占位/开放目标/stance 映射/边界/序列脱敏
 16. 评审修复（P2-1~P4-7）：stance 双端一致/写入规范化/防环/输入强转/子树统计重构
 17. 同级排序移动 move_node：上移/下移/边界拒绝/sort_order 重排规范化/API 端点
+18. v0.1.3 证据结构升级：observation 节点（白名单/叶子/分类 tag）+ 结论多实验支持
+    （supporting_exp_ids 校验/JSON 往返/上下文聚合全证据/API 端点）
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
@@ -492,5 +494,113 @@ roots_after = [r_["id"] for r_ in models.research_nodes_root()]
 assert roots_after == roots_before[:-2] + [target, roots_before[-2]], \
     f"17e 根列表序应交换末两位: {roots_before} -> {roots_after}"
 print("17e. 根节点同级移动 OK")
+
+# ── 18. v0.1.3 证据结构升级：observation 节点 + 结论多实验支持 ──
+# 设计：observation 是叶子旁注（任何节点下可挂观察/关键细节，不进必选链）；
+# conclusion 的 supporting_exp_ids = 多实验→一结论旁路引用（树父实验仍是主证据）。
+og = research.create_node("goal", "证据升级目标")[0]
+
+# 18a. observation 白名单：goal/experiment/conclusion 下都能挂；叶子；不能挂根
+o1 = research.create_node("observation", "根目标要点", parent_id=og, tag="操作要点")[0]
+oe = research.create_node("experiment", "实验A", parent_id=og)[0]
+o2 = research.create_node("observation", "实验A细节", parent_id=oe)[0]
+oc = research.create_node("conclusion", "实验A结论", parent_id=oe)[0]
+o3 = research.create_node("observation", "结论备注", parent_id=oc, tag="负结果")[0]
+for bad in ("goal", "experiment", "conclusion", "observation"):
+    ok, err = research.create_node(bad, "bad-child", parent_id=o1)
+    assert ok is None and "白名单" in err, f"18a observation 叶子不应挂 {bad}: {err}"
+ok, err = research.create_node("observation", "bad-root-obs")
+assert ok is None and "根节点必须" in err, f"18a observation 不能挂根: {err}"
+print("18a. observation 白名单/叶子/根约束 OK")
+
+# 18b. observation 分类 tag：_normalize_tag 逐项 trim
+o4 = research.create_node("observation", "带空tag", parent_id=oe,
+                          tag=" 文献事实 , 关键 ")[0]
+assert models.research_node_get(o4)["tag"] == "文献事实,关键", "观察分类 tag 应 trim"
+print("18b. observation 分类 tag 规范化 OK")
+
+# 18c. supporting_exp_ids 校验：真实实验放行/不存在拒/非法拒/仅结论/空无副作用
+e_a = models.exp_create(title="支持实验1", exp_type="BLI",
+                        params={"a280": 1.0}, results={"mean_uM": 5.0})
+e_b = models.exp_create(title="支持实验2", exp_type="SDS-PAGE",
+                        params={}, results={"条带": "单一条带"})
+models.exp_save_raw(e_b, "gel", {"analysis_version": "v-test"})
+sup = research.create_node("conclusion", "多实验支持结论", parent_id=oe,
+                           supporting_exp_ids=[e_a, e_b])[0]
+node = models.research_node_get(sup)
+assert node["supporting_exp_ids"] == [e_a, e_b], \
+    f"18c 支持实验应落库: {node['supporting_exp_ids']}"
+ok, err = research.create_node("conclusion", "坏引用", parent_id=oe,
+                               supporting_exp_ids=[99999])
+assert ok is None and "不存在" in err, f"18c 引用不存在实验应拒绝: {err}"
+for bad in (["abc"], [0], [-1], "1,2", {"id": 1}):
+    ok, err = research.create_node("conclusion", "坏引用", parent_id=oe,
+                                   supporting_exp_ids=bad)
+    assert ok is None, f"18c 非法支持实验 {bad!r} 应拒绝: {err}"
+ok, err = research.create_node("experiment", "实验不该写支持", parent_id=og,
+                               supporting_exp_ids=[e_a])
+assert ok is None and "仅结论" in err, f"18c 非结论节点写支持实验应拒绝: {err}"
+ok, err = research.create_node("conclusion", "空支持", parent_id=oe, supporting_exp_ids=[])
+assert ok and not err and models.research_node_get(ok)["supporting_exp_ids"] == [], \
+    f"18c 空支持实验应成功且落空列表: {err}"
+print("18c. supporting_exp_ids 校验 OK")
+
+# 18d. 公开形态 round-trip：get_node_with_subtree 带支持实验列表（JSON 反序列化）
+tree_sup = research.get_node_with_subtree(sup)
+assert tree_sup["supporting_exp_ids"] == [e_a, e_b], "18d 节点公开形态应带支持实验列表"
+print("18d. supporting_exp_ids JSON 往返 OK")
+
+# 18e. get_research_context 聚合：支持实验全证据 + 父实验剔除 + observations
+ctx18 = research.get_research_context(og)
+sup_entry = next(x for x in ctx18["subtree"]["conclusions"] if x["node_id"] == sup)
+assert sup_entry["supporting_exp_ids"] == [e_a, e_b], \
+    f"18e 上下文应带支持实验 id: {sup_entry['supporting_exp_ids']}"
+blocks = {x["id"]: x for x in sup_entry["supporting_experiments"]}
+assert set(blocks) == {e_a, e_b} and len(blocks) == 2, \
+    f"18e 应给全证据块: {list(blocks)}"
+assert blocks[e_a]["results"] == {"mean_uM": 5.0} and blocks[e_a]["params"] == {"a280": 1.0}, \
+    "18e 支持实验应带完整 params/results"
+assert blocks[e_b]["_raw_count"] == 1, f"18e 支持实验应带 raw 快照: {blocks[e_b]['_raw_count']}"
+# 父实验是主证据：supporting_exp_ids 写了父 id 也应剔除，不重复出现在支持块
+oe2 = research.create_node("experiment", "主证据实验", parent_id=og, exp_id=e_a)[0]
+sup2 = research.create_node("conclusion", "含父实验的支持", parent_id=oe2,
+                            supporting_exp_ids=[e_a, e_b])[0]
+sup2_entry = next(x for x in _ctx(og)["subtree"]["conclusions"] if x["node_id"] == sup2)
+assert sup2_entry["source_exp_id"] == e_a, "父实验应是主证据 source"
+assert sup2_entry["supporting_exp_ids"] == [e_b], \
+    f"父实验应从支持列表剔除: {sup2_entry['supporting_exp_ids']}"
+assert [x["id"] for x in sup2_entry["supporting_experiments"]] == [e_b], \
+    "父实验不应重复出现在支持块"
+# observations 聚合：parent 上下文（标题/类型/实验 id）
+obs18 = {x["node_id"]: x for x in ctx18["subtree"]["observations"]}
+assert obs18[o1]["parent_title"] == "证据升级目标" and obs18[o1]["parent_node_type"] == "goal", \
+    f"18e 观察应带父上下文: {obs18[o1]}"
+assert obs18[o2]["parent_node_type"] == "experiment" and obs18[o2]["parent_title"] == "实验A", \
+    f"18e 实验下观察应带父实验: {obs18[o2]}"
+assert obs18[o3]["parent_node_type"] == "conclusion", f"18e 结论下观察应带父结论: {obs18[o3]}"
+assert ctx18["stats"]["observations"] >= 4, f"18e stats 应累计观察: {ctx18['stats']}"
+print("18e. 上下文聚合（支持实验全证据/父剔除/observations）OK")
+
+# 18f. API 端点：create/update 透传 supporting_exp_ids；坏引用 400；observation 可建
+r = client.post("/api/research/nodes", json={
+    "node_type": "conclusion", "title": "API支持结论", "parent_id": oe,
+    "supporting_exp_ids": [e_a, e_b]})
+assert r.status_code == 201, f"18f API create 应 201: {r.get_data(as_text=True)[:200]}"
+api_conc = r.get_json()
+assert api_conc["supporting_exp_ids"] == [e_a, e_b], "18f API create 应回显支持实验"
+r = client.put(f"/api/research/nodes/{api_conc['id']}", json={
+    "node_type": "conclusion", "title": "API支持结论改", "parent_id": oe,
+    "tag": "支持", "supporting_exp_ids": [e_b]})
+assert r.status_code == 200 and r.get_json()["supporting_exp_ids"] == [e_b], \
+    "18f API update 应更新支持实验"
+r = client.post("/api/research/nodes", json={
+    "node_type": "conclusion", "title": "API坏引用", "parent_id": oe,
+    "supporting_exp_ids": [99999]})
+assert r.status_code == 400 and "不存在" in r.get_json()["error"], "18f API 坏引用应 400"
+r = client.post("/api/research/nodes", json={
+    "node_type": "observation", "title": "API观察", "parent_id": og, "tag": "参数"})
+assert r.status_code == 201 and r.get_json()["node_type_label"] == "观察", \
+    f"18f API 应可建 observation: {r.get_data(as_text=True)[:200]}"
+print("18f. API 端点（supporting_exp_ids 透传 / 坏引用 400 / observation 可建）OK")
 
 print("\n全部研究脉络测试通过 ✓")
