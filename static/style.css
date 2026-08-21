@@ -70,6 +70,9 @@ body {
 }
 img, svg, video { max-width: 100%; height: auto; }
 button, input, select, textarea { font-family: inherit; color: inherit; }
+a { color: var(--cyan); text-decoration: none; }
+a:hover { color: var(--cyan-deep); }
+a:visited { color: var(--cyan); }
 :focus-visible {
   outline: 2px solid var(--cyan);
   outline-offset: 2px;

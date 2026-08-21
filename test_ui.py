@@ -203,6 +203,8 @@ assert "JetBrainsMonoVariable.woff2" in css, "JetBrains Mono should be registere
 assert "IBM Plex" not in css, "IBM Plex Mono must be fully removed"
 assert '"JetBrains Mono"' in css, "JetBrains Mono should be the default UI font"
 assert "font-variant-numeric: tabular-nums" in css, "tabular numbers for data columns"
+assert "a { color: var(--cyan)" in css, "links should use the amber accent, not browser blue"
+assert "a:visited { color: var(--cyan)" in css, "visited links must not revert to browser purple"
 for tok in ("--success", "--danger", "--warning", "--info", "--rule-soft", "--accent-bg"):
     assert tok in css, f"missing semantic token {tok}"
 assert ".res-tag-chip.support" in css, "stance semantic classes missing"
