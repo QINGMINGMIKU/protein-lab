@@ -20,7 +20,7 @@ import services
 from app import app, inject_static_version
 client = app.test_client()
 
-PAGES = ("/", "/research", "/proteins", "/calculator", "/experiments")
+PAGES = ("/", "/research", "/proteins", "/calculator", "/experiments", "/compare")
 
 I18N = json.loads((STATIC / "i18n.json").read_text(encoding="utf-8"))
 EN, ZH = I18N["en"], I18N["zh-CN"]
@@ -38,6 +38,7 @@ assert 'data-i18n="nav.research"' in home, "Research Trace nav missing"
 assert 'data-i18n="nav.proteins"' in home, "Protein Library nav missing"
 assert 'data-i18n="nav.workbench"' in home, "BDA Workbench nav missing"
 assert 'data-i18n="nav.archive"' in home, "Evidence Archive nav missing"
+assert 'data-i18n="nav.compare"' in home, "Compare nav missing"
 assert 'id="langSwitch"' in home or 'data-locale-btn' in home, "language switch missing"
 assert 'id="siteMenu"' in home and 'id="menuToggle"' in home, "mobile menu missing"
 assert 'class="grid-guides"' in home, "desktop grid guides missing"
@@ -116,7 +117,8 @@ detail = client.get(f"/experiments/{eid}").get_data(as_text=True)
 assert "Load into workbench" not in detail, "non-loadable experiment must not show workbench CTA"
 assert "载入计算工具" not in detail
 assert f'href="/calculator?load_exp={eid}"' not in detail
-assert 'data-exp-types' in exps and 'data-exp-types' in detail
+assert 'data-calc-types' in exps
+assert 'data-exp-types' in detail
 
 bli = services.create_experiment(
     title="UI BLI loadable", exp_type="BLI",
@@ -127,6 +129,9 @@ bli = services.create_experiment(
 bli_html = client.get(f"/experiments/{bli['id']}").get_data(as_text=True)
 assert "Load into workbench" in bli_html
 assert f'href="/calculator?load_exp={bli["id"]}"' in bli_html
+compare = client.get("/compare").get_data(as_text=True)
+assert 'id="compareTable"' in compare
+assert 'data-calc-types' in compare
 print("6. Critical DOM IDs OK")
 
 # ── 7. Fonts.py + PyInstaller paths ───────────────────
@@ -162,6 +167,7 @@ assert "getClientRects" in ui
 assert "bigoDialogCancel" in ui
 assert "cancel.click()" in ui
 assert 'select[data-exp-types]' in js
+assert 'select[data-calc-types]' in js
 spec = (ROOT / "protein_lab.spec").read_text(encoding="utf-8")
 assert '("static", "static")' in spec
 assert '("fonts", "fonts")' not in spec

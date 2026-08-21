@@ -99,9 +99,11 @@ function todayLocal() {
   return d.toISOString().slice(0, 10);
 }
 
-async function getAutoName(expType, date) {
+async function getAutoName(expType, date, calcType) {
   try {
-    const q = new URLSearchParams({ exp_type: expType });
+    const q = new URLSearchParams();
+    if (expType) q.set("exp_type", expType);
+    if (calcType) q.set("calc_type", calcType);
     if (date) q.set("date", date);
     const r = await API.get(`/api/experiments/next-name?${q.toString()}`);
     return r.name || "";
@@ -647,17 +649,17 @@ document.addEventListener("click", function (e) {
 
 // 自动命名占位提示：输入框显示系统默认名（留空即用它）
 async function refreshAutoNamePlaceholders() {
-  const targets = {
-    concExpName: "浓度测定",
-    bliExpName: "BLI",        // BLI 浓度梯度 tab
-    bliAnaExpName: "BLI",     // BLI 分析 tab（v0.0.8）
-    aktaExpName: "AKTA",      // AKTA 峰图 tab（v0.0.9）
-    weblogoExpName: "Weblogo",
-  };
-  for (const [id, type] of Object.entries(targets)) {
+  const targets = [
+    ["concExpName", "浓度测定", "concentration"],
+    ["bliExpName", "BLI", "dilution"],
+    ["bliAnaExpName", "BLI", "bli_fit"],
+    ["aktaExpName", "AKTA", "akta"],
+    ["weblogoExpName", "Weblogo", "weblogo"],
+  ];
+  for (const [id, type, calc] of targets) {
     const el = document.getElementById(id);
     if (!el) continue;
-    const auto = await getAutoName(type);
+    const auto = await getAutoName(type, null, calc);
     el.placeholder = auto ? t("ui.exp_name_default", { name: auto }) : t("ui.exp_name_optional");
   }
 }
@@ -915,7 +917,7 @@ async function saveConcTable() {
   const ids = Object.keys(selectedProteins);
   if (!ids.length) { toast(t("toast.add_protein_first"), true); return; }
   const customName = document.getElementById("concExpName").value.trim();
-  const title = customName || await getAutoName("浓度测定")
+  const title = customName || await getAutoName("浓度测定", null, "concentration")
     || ids.map(id => selectedProteins[id].name).join(", ") + " 浓度测定";
   const oxidized = getCurrentOxidized();
 
@@ -1222,8 +1224,8 @@ async function saveBliTable() {
     });
   }
   const customName = document.getElementById("bliExpName").value.trim();
-  const title = customName || await getAutoName("BLI")
-    || Object.values(bliProteins).map(p => p.name).join(", ") + " BLI 稀释";
+  const title = customName || await getAutoName("BLI", null, "dilution")
+    || Object.values(bliProteins).map(p => p.name).join(", ") + " BLI dilution";
 
   const goal = await promptGoalAttach();
   if (goal === null) { toast(t("toast.save_cancelled")); return; }
@@ -1622,14 +1624,17 @@ async function loadExperiments() {
   updateExportLink();
   try {
     const type = document.getElementById("expTypeFilter")?.value || "";
-    const exps = await API.get(`/api/experiments?type=${encodeURIComponent(type)}`);
+    const qs = type ? `calc_type=${encodeURIComponent(type)}` : "";
+    const exps = await API.get(`/api/experiments?${qs}`);
     tbody.innerHTML = exps.map(e => {
       // 关联蛋白只显示第一个，hover 显示完整列表
       const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
       const pcell = pnames.length
         ? `<span title="${esc(e.protein_names)}">${esc(pnames[0])}${pnames.length > 1 ? t("archive.and_more", { n: pnames.length - 1 }) : ""}</span>`
         : "-";
-      const typeLabel = (window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type;
+      const typeLabel = (window.BigoI18n && BigoI18n.calcTypeLabel && e.calc_type)
+        ? BigoI18n.calcTypeLabel(e.calc_type)
+        : ((window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type);
       return `
       <tr>
         <td><input type="checkbox" class="exp-check" value="${e.id}" onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></td>
@@ -1647,7 +1652,9 @@ async function loadExperiments() {
     if (list) {
       list.innerHTML = exps.map(e => {
         const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
-        const typeLabel = (window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type;
+        const typeLabel = (window.BigoI18n && BigoI18n.calcTypeLabel && e.calc_type)
+          ? BigoI18n.calcTypeLabel(e.calc_type)
+          : ((window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type);
         return `<article class="record-card">
           <div class="record-card-head">
             <label class="record-select"><input type="checkbox" class="exp-check" value="${e.id}" onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></label>
@@ -1907,7 +1914,7 @@ async function editExpTitle(id) {
 function updateExportLink() {
   const type = document.getElementById("expTypeFilter")?.value || "";
   const link = document.getElementById("exportBtn");
-  if (link) link.href = "/api/experiments/export" + (type ? "?type=" + encodeURIComponent(type) : "");
+  if (link) link.href = "/api/experiments/export" + (type ? "?calc_type=" + encodeURIComponent(type) : "");
 }
 
 function closeExpDetail() {
@@ -2418,7 +2425,7 @@ async function enzymePlot(type) {
 
 async function downloadEnzymePlot() {
   if (!enzymeLastImage) { toast(t("toast.plot_curve_first"), true); return; }
-  const auto = await getAutoName("酶活测定") || "酶活测定";
+  const auto = await getAutoName("酶活测定", null, "enzyme") || "enzyme";
   const name = enzymeLastPlotType === "michaelis" ? t("workbench.mm") : t("workbench.kinetics");
   downloadDataUrl(enzymeLastImage, `${auto}_${name}.png`);
 }
@@ -2429,7 +2436,7 @@ async function enzymeSaveExp() {
   if (mount === null) { toast(t("toast.save_cancelled")); return; }
   let title = "";
   if (!mount.exp_id) {
-    const autoName = await getAutoName("酶活测定");
+    const autoName = await getAutoName("酶活测定", null, "enzyme");
     title = await askText(t("ui.exp_name_prompt"), autoName || enzymeData.meta.sample || t("exp_type.酶活测定"));
     if (!title) return;
   }
@@ -2502,7 +2509,7 @@ async function enzymeSaveExp() {
 // 导出作图友好 Excel（宽格式：每孔独立时间/OD 两列 + 动力学汇总），文件名用自动命名
 async function enzymeExportExcel() {
   if (!enzymeData) { toast(t("toast.upload_first"), true); return; }
-  const autoName = await getAutoName("酶活测定") || "酶活测定";
+  const autoName = await getAutoName("酶活测定", null, "enzyme") || "enzyme";
   const wells = {};
   for (const [id, wd] of Object.entries(enzymeData.wells)) {
     const info = enzymeWellInfo[id] || {};
@@ -2713,7 +2720,7 @@ function showWeblogoResult(r, count) {
   document.getElementById("weblogoResult").classList.remove("hidden");
   document.getElementById("weblogoSaveBtn").style.display = "";
   document.getElementById("weblogoExpName").style.display = "";
-  getAutoName("Weblogo").then(auto => {
+  getAutoName("Weblogo", null, "weblogo").then(auto => {
     document.getElementById("weblogoExpName").placeholder =
       auto ? t("ui.exp_name_default", { name: auto }) : t("ui.exp_name_optional");
   });
@@ -2778,14 +2785,14 @@ async function restoreWeblogo() {
 
 async function downloadWeblogo() {
   if (!weblogoLastImage) return;
-  const auto = await getAutoName("Weblogo") || "Weblogo";
+  const auto = await getAutoName("Weblogo", null, "weblogo") || "weblogo";
   downloadDataUrl(weblogoLastImage, `${auto}.png`);
 }
 
 async function saveWeblogoExp() {
   if (!weblogoLastProteins.length) return;
   const customName = document.getElementById("weblogoExpName").value.trim();
-  const title = customName || await getAutoName("Weblogo")
+  const title = customName || await getAutoName("Weblogo", null, "weblogo")
     || weblogoLastProteins.map(p => p.name).join(", ") + " Weblogo";
   try {
     await API.post("/api/experiments/from-calculation", {
@@ -3261,7 +3268,7 @@ async function bliSaveExp() {
   if (mount === null) { toast(t("toast.save_cancelled")); return; }
   let title = "";
   if (!mount.exp_id) {
-    const autoName = await getAutoName("BLI");
+    const autoName = await getAutoName("BLI", null, "bli_fit");
     title = await askText(t("ui.exp_name_prompt"), autoName || "BLI");
     if (!title) return;
   }
@@ -3607,7 +3614,7 @@ async function aktaSaveExp() {
   if (mount === null) { toast(t("toast.save_cancelled")); return; }
   let title = "";
   if (!mount.exp_id) {
-    const autoName = await getAutoName("AKTA");
+    const autoName = await getAutoName("AKTA", null, "akta");
     // 默认名优先用 zip 包名（去 .zip 扩展名），其次系统自动命名
     const zipBase = (run.name || "").replace(/\.zip$/i, "");
     title = await askText(t("ui.exp_name_prompt"), zipBase || autoName || "AKTA");
@@ -4178,9 +4185,88 @@ async function researchInit() {
   } catch (_) {}
 }
 
+function compareSelectedIds() {
+  return [...document.querySelectorAll(".compare-check:checked")].map(el => parseInt(el.value, 10)).filter(Boolean);
+}
+
+async function loadCompareCandidates() {
+  const box = document.getElementById("compareList");
+  if (!box) return;
+  const type = document.getElementById("compareTypeFilter")?.value || "";
+  const qs = type ? `calc_type=${encodeURIComponent(type)}&limit=200` : "limit=200";
+  try {
+    const exps = await API.get(`/api/experiments?${qs}`);
+    if (!exps.length) {
+      box.innerHTML = `<p class="empty-hint">${t("common.empty")}</p>`;
+      return;
+    }
+    box.innerHTML = exps.map(e => {
+      const typeLabel = (window.BigoI18n && e.calc_type)
+        ? BigoI18n.calcTypeLabel(e.calc_type) : (e.exp_type || "");
+      return `<label class="checkbox-label">
+        <input type="checkbox" class="compare-check" value="${e.id}">
+        <span><strong>${esc(e.title)}</strong>
+        <span style="color:var(--graphite);font-size:12px"> · ${esc(e.date || "")} · ${esc(typeLabel)}</span></span>
+      </label>`;
+    }).join("");
+  } catch (err) {
+    box.innerHTML = `<p class="empty-hint">${t("error.load_failed")}</p>`;
+    toast(err, true);
+  }
+}
+
+async function runCompare() {
+  const ids = compareSelectedIds();
+  const meta = document.getElementById("compareMeta");
+  const table = document.getElementById("compareTable");
+  if (!table) return;
+  if (ids.length < 2) {
+    setEvidence("compareMeta", "empty", t("compare.empty"));
+    return;
+  }
+  setEvidence("compareMeta", "processing", t("workbench.status_processing"));
+  try {
+    const r = await fetch("/api/experiments/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) {
+      const msg = data.error === "calc_type_mismatch" ? t("compare.mismatch")
+        : data.error === "need_two" ? t("compare.need_two")
+        : data.error === "not_found" ? t("compare.missing")
+        : t("error.generic");
+      setEvidence("compareMeta", "fail", msg);
+      toast(backendError(data, r.status), true);
+      return;
+    }
+    const typeLabel = window.BigoI18n ? BigoI18n.calcTypeLabel(data.calc_type) : data.calc_type;
+    setEvidence("compareMeta", data.rows.length ? "done" : "empty",
+      data.rows.length ? typeLabel : t("compare.no_metrics"));
+    const head = table.querySelector("thead");
+    const body = table.querySelector("tbody");
+    const colH = (data.columns || []).map(c => `<th>${esc(c.title)}<div style="font-weight:400;color:var(--graphite)">${esc(c.date || "")}</div></th>`).join("");
+    head.innerHTML = `<tr><th>${t("compare.pick")}</th>${colH}</tr>`;
+    body.innerHTML = (data.rows || []).map(row => {
+      const cells = (row.values || []).map(v => {
+        if (v == null) return "<td>—</td>";
+        const n = Number(v);
+        const txt = Number.isFinite(n) ? (+n.toPrecision(4)).toString() : String(v);
+        return `<td>${esc(txt)}${row.unit ? ` <span style="color:var(--graphite)">${esc(row.unit)}</span>` : ""}</td>`;
+      }).join("");
+      return `<tr class="${row.highlight ? "compare-hot" : ""}"><td>${esc(row.label)}</td>${cells}</tr>`;
+    }).join("") || `<tr><td colspan="${1 + (data.columns || []).length}">${t("compare.no_metrics")}</td></tr>`;
+  } catch (err) {
+    setEvidence("compareMeta", "fail", t("workbench.status_fail"));
+    toast(err, true);
+  }
+}
+
 // ═════════════════════════════════════════════════════
 //  Init
 // ═════════════════════════════════════════════════════
+
 function init() {
   if (document.querySelector("#proteinTable")) {
     loadProteins().catch(() => {});
@@ -4238,6 +4324,7 @@ function init() {
       renderCopyTypeTags();
       renderCopyExpList();
     }
+    if (document.getElementById("compareTable")) loadCompareCandidates();
     if (document.querySelector("#concTable")) refreshAutoNamePlaceholders();
     updateBulkBar();
     updateExpBulkBar();
@@ -4245,6 +4332,9 @@ function init() {
   const rl = document.getElementById("detailResearchList");
   if (rl && rl.dataset.expId) {
     loadResearchList(parseInt(rl.dataset.expId, 10));
+  }
+  if (document.getElementById("compareTable")) {
+    loadCompareCandidates();
   }
 }
 init();

@@ -10,9 +10,9 @@
 </div>
 
 <div class="toolbar">
-  <select id="expTypeFilter" data-exp-types onchange="loadExperiments()">
+  <select id="expTypeFilter" data-calc-types onchange="loadExperiments()">
     <option value="" data-i18n-option="archive.all_types">All types</option>
-    {% for t in exp_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+    {% for t in calc_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
   </select>
 </div>
 

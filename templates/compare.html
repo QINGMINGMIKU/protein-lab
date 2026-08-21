@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+  <h1 data-i18n="compare.title">Compare</h1>
+  <div class="page-actions">
+    <button class="btn btn-primary" onclick="runCompare()" data-i18n="compare.run">Compare selected</button>
+  </div>
+</div>
+
+<p class="page-lead" data-i18n="compare.hint">Pick two or more experiments of the same analysis type. Numbers are aligned; you still decide what they mean.</p>
+
+<div class="toolbar">
+  <select id="compareTypeFilter" data-calc-types onchange="loadCompareCandidates()">
+    <option value="" data-i18n-option="archive.all_types">All types</option>
+    {% for t in calc_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+  </select>
+</div>
+
+<div class="stack-on-narrow">
+  <div class="calc-card">
+    <h2 data-i18n="compare.pick">Experiments</h2>
+    <div id="compareList" class="compare-pick table-scroll"></div>
+  </div>
+  <div class="calc-card" style="min-width:0">
+    <p id="compareMeta" class="evidence-status"></p>
+    <div class="table-scroll">
+      <table id="compareTable" class="calc-table">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="compare-legend" data-i18n="compare.highlight_legend">Highlighted rows differ by at least 2× between the first and last column.</p>
+  </div>
+</div>
+
+{% endblock %}

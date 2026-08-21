@@ -8,16 +8,19 @@
 """
 from datetime import datetime
 
+import identity
 import models
 import research
 
 
-def auto_exp_name(exp_type: str, date: str = "") -> str:
-    """自动命名: {date}_{exp_type}_{seq:02d}，seq 为当天同类型已有标题的最大后缀 + 1"""
+def auto_exp_name(exp_type: str, date: str = "", calc_type: str = "") -> str:
+    """自动命名: {date}_{slug}_{seq:02d}，slug = calc_type（稀释与 BLI 拟合分开计数）。"""
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
-    seq = models.exp_next_seq(exp_type, date)
-    return f"{date}_{exp_type}_{seq:02d}"
+    ct = identity.normalize_calc_type(calc_type) or identity.infer_from_exp_type(exp_type)
+    slug = identity.slug_for(ct)
+    seq = models.exp_next_seq_slug(slug, date)
+    return f"{date}_{slug}_{seq:02d}"
 
 
 def coerce_int_list(values) -> list[int]:
@@ -106,9 +109,10 @@ def create_experiment(title: str, exp_type: str, protein_ids: list[int] = None,
     exp_type = (exp_type or "").strip()
     if not exp_type:
         raise ValueError("实验类型不能为空")
+    params = identity.stamp_params(params, exp_type=exp_type)
     title = (title or "").strip()
     if auto_name and not title:
-        title = auto_exp_name(exp_type, date)
+        title = auto_exp_name(exp_type, date, calc_type=params.get("calc_type") or "")
     if isinstance(protein_ids, list):
         protein_ids = coerce_int_list(protein_ids)
     params = _enrich_protein_snapshot(params, results, protein_ids)
@@ -153,6 +157,7 @@ def resave_experiment(exp_id: int, params: dict, results: dict,
     e = models.exp_get(exp_id)
     if not e:
         raise ValueError(f"实验 {exp_id} 不存在")
+    params = identity.stamp_params(params, exp_type=e.get("exp_type") or "")
     params = _enrich_protein_snapshot(params or {}, results or {}, protein_ids)
     kwargs = {"params": params, "results": results or {}}
     if notes is not None:

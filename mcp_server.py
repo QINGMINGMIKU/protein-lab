@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import models
 import services
 import research
+import compare
 from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert_concentration
 
 # ── MCP 读写契约（数据完整性规则 #6）──────────────────────
@@ -190,7 +191,8 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "exp_type": {"type": "string", "description": f"实验类型: {', '.join(models.EXP_TYPES)}"},
+                "exp_type": {"type": "string", "description": f"实验类型族: {', '.join(models.EXP_TYPES)}（兼容旧筛选）"},
+                "calc_type": {"type": "string", "description": "规范分析身份: concentration / dilution / bli_fit / akta / enzyme / weblogo / sds_page / other"},
                 "limit": {"type": "integer", "description": "返回条数上限，默认 30"}
             },
             "required": []
@@ -256,6 +258,17 @@ TOOLS = [
                 "goal_id": {"type": "integer", "description": "研究目标节点 id（根目标或子目标）"}
             },
             "required": ["goal_id"]
+        }
+    },
+    {
+        "name": "compare_experiments",
+        "description": "横切对比同类实验的关键数（WT vs variant）：KD / 浓度 / 峰 / 酶活斜率。必须 2 条及以上且 calc_type 相同。只给对齐表，不下结论。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "exp_ids": {"type": "array", "items": {"type": "integer"}, "description": "实验 id 列表，至少 2 个"}
+            },
+            "required": ["exp_ids"]
         }
     },
     {
@@ -388,10 +401,10 @@ def handle_tools_call(id_, params):
 
         elif tool_name == "list_experiments":
             exp_type = args.get("exp_type", "") or ""
+            calc_type = args.get("calc_type", "") or ""
             limit = _inum(args, tool_name, "limit", 30)
-            rows = models.exp_list(exp_type, limit)
-            # 列表只给轻量行（明细 params/results 用 get_experiment 取），AI 好扫
-            brief = [{k: row.get(k) for k in ("id", "title", "exp_type", "date", "protein_names")}
+            rows = models.exp_list(exp_type, limit, calc_type=calc_type)
+            brief = [{k: row.get(k) for k in ("id", "title", "exp_type", "calc_type", "date", "protein_names")}
                      for row in rows]
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(brief, ensure_ascii=False, indent=2)}]})
 
@@ -403,6 +416,9 @@ def handle_tools_call(id_, params):
                 return send_response(id_, {"content": [{"type": "text", "text": f"未找到实验: {exp_id}"}]})
             exp["params"] = _strip_sequences(exp.get("params"))
             exp["results"] = _strip_sequences(exp.get("results"))
+            import identity
+            exp = identity.annotate(exp)
+            exp["key_results"] = compare.key_results(exp)
             exp["_raw"] = models.exp_raw_list(exp_id, with_version=True)  # 快照元数据（含分析版本）
             exp["_raw_count"] = len(exp["_raw"])
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(exp, ensure_ascii=False, indent=2)}]})
@@ -439,6 +455,15 @@ def handle_tools_call(id_, params):
                 return send_response(id_, {"content": [{"type": "text", "text": f"未找到目标节点: {gid}"}]})
             ctx = _strip_sequences(ctx)  # IP 保护兜底：内嵌实验 params/results 一律剔序列明文
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(ctx, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "compare_experiments":
+            _need(args, tool_name, "exp_ids")
+            ids = args.get("exp_ids")
+            if not isinstance(ids, list) or len(ids) < 2:
+                raise InvalidParams(f"{tool_name}: exp_ids 须为至少 2 个整数的列表")
+            out = compare.compare_experiments(ids)
+            out = _strip_sequences(out)
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "save_experiment":
             _need(args, tool_name, "title", "exp_type")

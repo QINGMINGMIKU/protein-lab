@@ -525,6 +525,11 @@ details.advanced > summary {
 .detail-section { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px dashed var(--rule); }
 .detail-section h2 { font-size: 18px; font-weight: 400; margin-bottom: 12px; }
 
+.page-lead { color: var(--graphite); margin: -8px 0 24px; max-width: 52em; }
+.compare-pick { max-height: 420px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.compare-hot td { background: var(--instrument); font-weight: 500; }
+.compare-legend { color: var(--graphite); font-size: 12px; margin-top: 12px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

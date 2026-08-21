@@ -97,8 +97,9 @@ print("6. init_db 幂等 OK")
 # ── 7. services.create_experiment：统一写入 + 自动命名 + 校验 ──
 e7 = services.create_experiment(title="", exp_type="浓度测定", protein_ids=[pid],
                                 params={"a": 1}, results={"b": 2})
-assert e7["title"].endswith("_浓度测定_01") or "_浓度测定_" in e7["title"], f"自动命名异常: {e7['title']}"
+assert e7["title"].endswith("_concentration_01") or "_concentration_" in e7["title"], f"自动命名异常: {e7['title']}"
 assert e7["params"]["a"] == 1 and e7["results"] == {"b": 2}, "params/results 应透传"
+assert e7["params"].get("calc_type") == "concentration"
 assert e7["params"].get("proteins") and e7["params"]["proteins"][0]["id"] == pid, "绑定蛋白应附数值快照"
 # 非法 protein_ids 不抛错，静默过滤（避免 Python 原始错误文本泄漏）
 assert services.coerce_int_list(["abc", pid, None, 0, ""]) == [pid], "非 int id 应被过滤"
@@ -133,7 +134,7 @@ print("8. API 写入入口 OK")
 
 # ── 9. exp_type 单一来源：模板下拉从 models.EXP_TYPES 渲染，无硬编码漂移 ──
 exp_types = list(models.EXP_TYPES)
-assert len(exp_types) >= 6 and "酶活测定" in exp_types, f"EXP_TYPES 缺类型: {exp_types}"
+assert len(exp_types) >= 6 and "酶活测定" in exp_types and "Weblogo" in exp_types, f"EXP_TYPES 缺类型: {exp_types}"
 lst = models.exp_list()
 assert lst, "应存在实验用于详情页渲染"
 for url in ("/experiments", f"/experiments/{lst[0]['id']}"):
@@ -224,6 +225,7 @@ read_cases = [
     ("list_research_trees", {}),
     ("get_research_node", {"node_id": _rn_id}),
     ("get_research_context", {"goal_id": _rn_id}),
+    ("compare_experiments", {"exp_ids": [e7["id"], e7["id"]]}),
 ]
 before = _db_dump()
 for tool, args in read_cases:

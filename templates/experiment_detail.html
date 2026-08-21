@@ -307,7 +307,7 @@
 {# 兜底：仅当类型无法识别（或浓度/BLI 缺蛋白数据无法渲染表格）时才显示原始 JSON；酶活/Weblogo/AKTA/BLI 各自渲染，不在此列 #}
 {# 注意：exp_type 为 AKTA/BLI 不等于卡已渲染——卡还要求 results 里真有 peaks/samples。
    否则汇总型实验（如 7.17 AKTA 分析，只有结论没有峰表）会被 known 误判成已渲染而整页空白。 #}
-{% set known = calc_type in ["concentration", "dilution", "enzyme", "weblogo", "akta", "bli_fit"] or (exp.exp_type == "AKTA" and results.get("peaks")) or (exp.exp_type == "BLI" and results.get("samples")) or (exp.exp_type == "浓度测定" and not proteins and (params.get("mw_da") or params.get("epsilon_red"))) %}
+{% set known = (calc_type in ["concentration", "dilution", "enzyme", "weblogo"]) or (calc_type == "akta" and results.get("peaks")) or (calc_type == "bli_fit" and results.get("samples")) or (exp.exp_type == "AKTA" and results.get("peaks")) or (exp.exp_type == "BLI" and results.get("samples")) or (exp.exp_type == "浓度测定" and not proteins and (params.get("mw_da") or params.get("epsilon_red"))) %}
 {% if not known or (calc_type in ["concentration", "dilution"] and not proteins) %}
 {# 自由格式实验（多为 MCP save_experiment 归档，中文键）：键值表优先，嵌套 dict/列表渲染成子表格，原始 JSON 折叠保留 #}
 {% macro kv_sub(v, depth=0) %}

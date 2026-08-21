@@ -14,7 +14,7 @@ from paths import app_base_dir
 DB_PATH = os.path.join(app_base_dir(), "protein_lab.db")
 
 # 实验类型清单（单一来源）——模板下拉 / MCP 工具描述都从这读，避免各处硬编码漂移
-EXP_TYPES = ("BLI", "SDS-PAGE", "AKTA", "浓度测定", "酶活测定", "其他")
+EXP_TYPES = ("BLI", "SDS-PAGE", "AKTA", "浓度测定", "酶活测定", "Weblogo", "其他")
 
 
 def get_db(read_only: bool = False) -> sqlite3.Connection:
@@ -337,7 +337,8 @@ def _set_exp_proteins(conn: sqlite3.Connection, experiment_id: int,
                 (experiment_id, pid))
 
 
-def exp_list(exp_type: str = "", limit: int = 50) -> list[dict]:
+def exp_list(exp_type: str = "", limit: int = 50, calc_type: str = "") -> list[dict]:
+    import identity
     conn = get_db()
     base = """
         SELECT e.*, GROUP_CONCAT(p.name, ', ') as protein_names
@@ -345,14 +346,17 @@ def exp_list(exp_type: str = "", limit: int = 50) -> list[dict]:
         LEFT JOIN experiment_proteins ep ON e.id = ep.experiment_id
         LEFT JOIN proteins p ON ep.protein_id = p.id
     """
-    if exp_type:
+    fetch_limit = max(int(limit or 50), 1)
+    if calc_type:
+        fetch_limit = max(fetch_limit * 20, 500)
+    if exp_type and not calc_type:
         rows = conn.execute(
             base + "WHERE e.exp_type = ? GROUP BY e.id ORDER BY e.date DESC, e.created_at DESC LIMIT ?",
-            (exp_type, limit)).fetchall()
+            (exp_type, fetch_limit)).fetchall()
     else:
         rows = conn.execute(
             base + "GROUP BY e.id ORDER BY e.date DESC, e.created_at DESC LIMIT ?",
-            (limit,)).fetchall()
+            (fetch_limit,)).fetchall()
     conn.close()
     results = []
     for r in rows:
@@ -360,8 +364,41 @@ def exp_list(exp_type: str = "", limit: int = 50) -> list[dict]:
         d["protein_names"] = d["protein_names"] or ""
         d["params"] = _json_unwrap(d.get("params"))
         d["results"] = _json_unwrap(d.get("results"))
-        results.append(d)
+        results.append(identity.annotate(d))
+    want = identity.normalize_calc_type(calc_type)
+    if want:
+        results = [d for d in results if d.get("calc_type") == want][:limit]
     return results
+
+
+def exp_next_seq_slug(slug: str, date: str = "") -> int:
+    """自动命名序号：当天同 slug 标题 `{date}_{slug}_{NN}` 的最大后缀 + 1。
+
+    按 slug（calc_type）计，不按 exp_type 列——稀释与 BLI 拟合同属 BLI 族但序号独立。
+    """
+    conn = get_db()
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    prefix = f"{date}_{slug}_"
+    rows = conn.execute(
+        "SELECT title FROM experiments WHERE date = ?",
+        (date,)).fetchall()
+    conn.close()
+    best = 0
+    for r in rows:
+        title = r["title"] if "title" in r.keys() else r[0]
+        if not title or not str(title).startswith(prefix):
+            continue
+        tail = str(title)[len(prefix):]
+        digits = ""
+        for ch in tail:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        if digits:
+            best = max(best, int(digits))
+    return best + 1
 
 
 def exp_next_seq(exp_type: str, date: str = "") -> int:

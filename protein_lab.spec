@@ -12,6 +12,8 @@ datas = [
 # 惰性 import 的模块，PyInstaller 静态分析看不到，必须显式声明：
 #   mcp_server / fonts / waitress — app.py main 块或函数体内 import；pandas/logomaker/matplotlib — 路由内惰性 import
 hiddenimports = [
+    "identity",
+    "compare",
     "research",
     "mcp_server",
     "fonts",

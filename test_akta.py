@@ -279,11 +279,11 @@ resp = client.post("/api/akta/save", json={
     "min_height": 5, "smooth_window": 11, "source": "PD1.zip"})
 saved_t = resp.get_json()
 assert saved_t["title"] == "手动标题", saved_t["title"]
-# 无 title 也无 source → 系统自动命名 {date}_AKTA_{seq}
+# 无 title 也无 source → 系统自动命名 {date}_akta_{seq}
 resp = client.post("/api/akta/save", json={
     "session_id": sid, "channel": "UV", "min_height": 5, "smooth_window": 11})
 saved_none = resp.get_json()
-assert "_AKTA_" in saved_none["title"], saved_none["title"]
+assert "_akta_" in saved_none["title"], saved_none["title"]
 print("akta auto-title fallback OK:", saved_none["title"])
 
 # 5e. 会话守卫：无效 session → 400

@@ -370,6 +370,13 @@ def get_research_context(goal_id: int) -> dict | None:
                     "_raw": models.exp_raw_list(e["id"], with_version=True),
                 }
                 entry["exp"]["_raw_count"] = len(entry["exp"]["_raw"])
+                try:
+                    import compare as _compare
+                    import identity as _identity
+                    entry["exp"]["calc_type"] = _identity.infer_calc_type(e)
+                    entry["exp"]["key_results"] = _compare.key_results(e)
+                except Exception:
+                    pass
         experiments.append(entry)
 
     # ── 结论 epistemic status：立场（tag 首个命中词）+ 来源实验（父节点）──

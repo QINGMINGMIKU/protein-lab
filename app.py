@@ -23,6 +23,8 @@ import paths
 import models
 import services
 import research
+import identity
+import compare
 from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, sanitize_seq, parse_tecan_xlsx, fit_kinetics, sub_blank, align_wells, snap_ylim, correct_slopes, aggregate_groups
 
 app = Flask(__name__,
@@ -88,7 +90,13 @@ def page_calculator():
 
 @app.route("/experiments")
 def page_experiments():
-    return render_template("experiments.html", exp_types=models.EXP_TYPES)
+    return render_template("experiments.html", exp_types=models.EXP_TYPES,
+                           calc_types=identity.CALC_TYPES)
+
+
+@app.route("/compare")
+def page_compare():
+    return render_template("compare.html", calc_types=identity.CALC_TYPES)
 
 
 @app.route("/experiments/<int:eid>")
@@ -442,10 +450,13 @@ def api_calc_dilution():
 @app.route("/api/experiments", methods=["GET"])
 def api_exp_list():
     exp_type = request.args.get("type", "")
+    calc_type = request.args.get("calc_type", "")
     try:
         limit = int(request.args.get("limit", 50))
     except (ValueError, TypeError):
         limit = 50
+    if calc_type:
+        return jsonify(models.exp_list(calc_type=calc_type, limit=limit))
     return jsonify(models.exp_list(exp_type, limit))
 
 
@@ -454,8 +465,10 @@ def api_exp_get(eid):
     e = models.exp_get(eid)
     if not e:
         return jsonify({"error": "实验不存在"}), 404
+    e = identity.annotate(e)
     # 附原始数据快照 id（供「从实验复制」等按需拉取 payload，避免大字段常驻详情响应）
     e["_raw_ids"] = [r["id"] for r in models.exp_raw_list(e["id"])]
+    e["key_results"] = compare.key_results(e)
     return jsonify(e)
 
 
@@ -472,9 +485,25 @@ def api_exp_raw_get(eid, rid):
 def api_exp_next_name():
     """获取自动命名（供前端 prompt 默认值 / 输入框占位）"""
     exp_type = request.args.get("exp_type", "").strip()
-    if not exp_type:
+    calc_type = request.args.get("calc_type", "").strip()
+    if not exp_type and not calc_type:
         return jsonify({"error": "缺少 exp_type"}), 400
-    return jsonify({"name": services.auto_exp_name(exp_type, request.args.get("date", ""))})
+    return jsonify({"name": services.auto_exp_name(exp_type, request.args.get("date", ""),
+                                                   calc_type=calc_type)})
+
+
+@app.route("/api/experiments/compare", methods=["POST"])
+def api_exp_compare():
+    """横切对比：同类 2+ 条实验的关键数对齐。混类型 400。"""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or data.get("exp_ids") or []
+    if not isinstance(ids, list):
+        return jsonify({"error": "ids 应为整数列表"}), 400
+    out = compare.compare_experiments(ids)
+    if not out.get("ok"):
+        code = 404 if out.get("error") == "not_found" else 400
+        return jsonify(out), code
+    return jsonify(out)
 
 
 @app.route("/api/experiments", methods=["POST"])
@@ -721,7 +750,11 @@ def api_exp_export_single(eid):
 def api_exp_export():
     """导出全部（或按类型筛选）实验为 Excel"""
     exp_type = request.args.get("type", "")
-    exps = models.exp_list(exp_type, limit=9999)
+    calc_type = request.args.get("calc_type", "")
+    if calc_type:
+        exps = models.exp_list(calc_type=calc_type, limit=9999)
+    else:
+        exps = models.exp_list(exp_type, limit=9999)
     return _export_excel(exps)
 
 
@@ -1795,7 +1828,7 @@ def _akta_get_session(session_id: str):
 
 def _akta_auto_title(title: str, source: str) -> str:
     """AKTA 保存默认名：优先 zip 包名（去 .zip 扩展名，保留完整文件名含日期），
-    其次系统自动命名（services.create_experiment 的 {date}_AKTA_{seq}）。"""
+    其次系统自动命名（services.create_experiment 的 {date}_akta_{seq}）。"""
     title = (title or "").strip()
     if title:
         return title

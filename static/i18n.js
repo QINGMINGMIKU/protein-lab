@@ -7,6 +7,7 @@
       "nav.research": "Research Trace",
       "nav.proteins": "Protein Library",
       "nav.workbench": "BDA Workbench",
+      "nav.compare": "Compare",
       "nav.archive": "Evidence Archive",
       "nav.menu": "Open menu",
       "nav.close": "Close menu",
@@ -345,6 +346,7 @@
       "exp_type.AKTA": "AKTA",
       "exp_type.浓度测定": "Concentration",
       "exp_type.酶活测定": "Enzyme activity",
+      "exp_type.Weblogo": "Weblogo",
       "exp_type.其他": "Other",
       "stance.支持": "Supports",
       "stance.反驳": "Refutes",
@@ -527,7 +529,25 @@
       "toast.cannot_undo": "Cannot undo",
       "workbench.status_processing": "Processing…",
       "workbench.status_fail": "Processing failed",
-      "workbench.status_empty": "No results"
+      "workbench.status_empty": "No results",
+      "calc_type.concentration": "Concentration",
+      "calc_type.dilution": "BLI dilution",
+      "calc_type.bli_fit": "BLI fit",
+      "calc_type.akta": "AKTA",
+      "calc_type.enzyme": "Enzyme activity",
+      "calc_type.weblogo": "Weblogo",
+      "calc_type.sds_page": "SDS-PAGE",
+      "calc_type.other": "Other",
+      "compare.title": "Compare",
+      "compare.hint": "Pick two or more experiments of the same analysis type. Numbers are aligned; you still decide what they mean.",
+      "compare.pick": "Experiments",
+      "compare.run": "Compare selected",
+      "compare.empty": "Select at least two experiments.",
+      "compare.mismatch": "These records are different analyses and cannot be compared.",
+      "compare.need_two": "Need at least two experiments.",
+      "compare.missing": "One of the experiments was not found.",
+      "compare.highlight_legend": "Highlighted rows differ by at least 2× between the first and last column.",
+      "compare.no_metrics": "No numeric key results on these records."
     },
     "zh-CN": {
       "nav.brand": "Bigo.bio",
@@ -535,6 +555,7 @@
       "nav.research": "研究脉络",
       "nav.proteins": "蛋白库",
       "nav.workbench": "BDA 工作台",
+      "nav.compare": "横切对比",
       "nav.archive": "证据归档",
       "nav.menu": "打开菜单",
       "nav.close": "关闭菜单",
@@ -873,6 +894,7 @@
       "exp_type.AKTA": "AKTA",
       "exp_type.浓度测定": "浓度测定",
       "exp_type.酶活测定": "酶活测定",
+      "exp_type.Weblogo": "Weblogo",
       "exp_type.其他": "其他",
       "stance.支持": "支持",
       "stance.反驳": "反驳",
@@ -1055,7 +1077,25 @@
       "toast.cannot_undo": "无法撤销",
       "workbench.status_processing": "处理中…",
       "workbench.status_fail": "处理失败",
-      "workbench.status_empty": "没有结果"
+      "workbench.status_empty": "没有结果",
+      "calc_type.concentration": "浓度测定",
+      "calc_type.dilution": "BLI 稀释",
+      "calc_type.bli_fit": "BLI 拟合",
+      "calc_type.akta": "AKTA",
+      "calc_type.enzyme": "酶活测定",
+      "calc_type.weblogo": "Weblogo",
+      "calc_type.sds_page": "SDS-PAGE",
+      "calc_type.other": "其他",
+      "compare.title": "横切对比",
+      "compare.hint": "选择至少两条同一分析类型的实验。数字对齐后，判断仍由你来做。",
+      "compare.pick": "实验",
+      "compare.run": "对比选中",
+      "compare.empty": "请至少选两条实验。",
+      "compare.mismatch": "这些记录不是同一类分析，无法对比。",
+      "compare.need_two": "至少需要两条实验。",
+      "compare.missing": "有实验找不到。",
+      "compare.highlight_legend": "高亮行表示首列与末列相差至少 2 倍。",
+      "compare.no_metrics": "这些记录没有可对齐的关键数。"
     }
   };
   const STORAGE_KEY = "bigo.locale";
@@ -1097,6 +1137,10 @@
         const key = "exp_type." + el.value;
         if (DICTS.en[key]) el.textContent = this.t(key);
       });
+      scope.querySelectorAll("select[data-calc-types] option[value]").forEach((el) => {
+        const key = "calc_type." + el.value;
+        if (DICTS.en[key]) el.textContent = this.t(key);
+      });
       document.documentElement.lang = this._locale === "zh-CN" ? "zh-CN" : "en";
       document.querySelectorAll("[data-locale-btn]").forEach((btn) => {
         btn.setAttribute("aria-pressed", btn.getAttribute("data-locale-btn") === this._locale ? "true" : "false");
@@ -1111,6 +1155,9 @@
     },
     expTypeLabel(stored) {
       return this.t("exp_type." + stored);
+    },
+    calcTypeLabel(stored) {
+      return stored ? this.t("calc_type." + stored) : "";
     },
     nodeLabel(type) {
       return this.t("node." + type);
