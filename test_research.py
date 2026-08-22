@@ -603,4 +603,24 @@ assert r.status_code == 201 and r.get_json()["node_type_label"] == "观察", \
     f"18f API 应可建 observation: {r.get_data(as_text=True)[:200]}"
 print("18f. API 端点（supporting_exp_ids 透传 / 坏引用 400 / observation 可建）OK")
 
+# 18g. 评审修复回归：update_node 缺省 supporting_exp_ids 保留现值；float/bool/scalar 拒绝
+# 问题1：前端两处编辑 PUT（researchSave / researchChangeStance）不携带该字段，旧实现
+# 按 None→[] 写入，结论的多实验支持被静默清空——现在缺省应保留现值，[] 才显式清空。
+conc_keep = research.create_node("conclusion", "保留支持", parent_id=oe,
+                                 supporting_exp_ids=[e_a, e_b])[0]
+ok, err = research.update_node(conc_keep, "conclusion", "保留支持改", parent_id=oe)
+assert ok and not err, f"18g update 缺省支持实验应成功: {err}"
+assert models.research_node_get(conc_keep)["supporting_exp_ids"] == [e_a, e_b], \
+    "18g 缺省 supporting_exp_ids 应保留现值（模拟前端编辑 PUT）"
+ok, err = research.update_node(conc_keep, "conclusion", "保留支持改2",
+                               parent_id=oe, supporting_exp_ids=[])
+assert ok and models.research_node_get(conc_keep)["supporting_exp_ids"] == [], \
+    "18g 显式空列表应清空支持实验"
+# 问题2：裸 int(x) 把 1.9/True 静默截断成合法实验 id、标量 0 被当空列表吞掉——都应拒绝
+for bad in ([1.9], [True], [False], 0, 5):
+    ok, err = research.create_node("conclusion", "坏引用", parent_id=oe,
+                                   supporting_exp_ids=bad)
+    assert ok is None, f"18g 非整数支持实验 {bad!r} 应拒绝: {err}"
+print("18g. update 保留支持实验 / float/bool/scalar 拒绝 OK")
+
 print("\n全部研究脉络测试通过 ✓")

@@ -69,8 +69,13 @@ def _coerce_supporting_exp_ids(v, node_type: str) -> list[int]:
     None/[] → []；非空时逐项校验：(a) 整数（0/负拒绝）(b) 去重 (c) 实验存在。
     仅 conclusion 节点可用——观察/实验/目标上写它会歧义（结论才是证据汇合点），
     非空即拒绝。返回按传入序的 int 列表。
+
+    评审修复（P3）：裸 `int(x)` 会把 float 1.9 / True 静默截断成另一条合法实验 id，
+    静默挂错证据——这里显式拒绝非整数。bool 是 int 子类，`x != int(x)` 拦不住，须先
+    单独判断；float 只在整值（5.0）放行、1.9 拒绝；标量 0 走旧 `if not v` 会被当空
+    列表吞掉，改为只放行 None/空列表。
     """
-    if not v:
+    if v is None or (isinstance(v, (list, tuple)) and not v):
         return []
     if node_type != "conclusion":
         raise ValueError("supporting_exp_ids 仅结论（conclusion）节点支持")
@@ -78,17 +83,21 @@ def _coerce_supporting_exp_ids(v, node_type: str) -> list[int]:
         raise ValueError(f"supporting_exp_ids 应为实验 id 列表，收到 {v!r}")
     out = []
     for x in v:
+        if isinstance(x, bool) or not isinstance(x, (int, float, str)):
+            raise ValueError(f"supporting_exp_ids 应为实验 id 列表，收到 {v!r}")
         try:
-            x = int(x)
+            xi = int(x)
         except (TypeError, ValueError):
             raise ValueError(f"supporting_exp_ids 应为实验 id 列表，收到 {v!r}")
-        if x <= 0:
-            raise ValueError(f"supporting_exp_ids 实验 id 必须为正整数，收到 {x}")
-        if x in out:
+        if isinstance(x, float) and xi != x:
+            raise ValueError(f"supporting_exp_ids 实验 id 必须为整数，收到 {x!r}")
+        if xi <= 0:
+            raise ValueError(f"supporting_exp_ids 实验 id 必须为正整数，收到 {xi}")
+        if xi in out:
             continue
-        if not models.exp_get(x):
-            raise ValueError(f"supporting_exp_ids 引用的实验 {x} 不存在")
-        out.append(x)
+        if not models.exp_get(xi):
+            raise ValueError(f"supporting_exp_ids 引用的实验 {xi} 不存在")
+        out.append(xi)
     return out
 
 
@@ -159,16 +168,24 @@ def update_node(node_id: int, node_type: str, title: str, detail: str = "",
                 parent_id: int = None, exp_id: int = None, tag: str = "",
                 free_attach: bool = False,
                 supporting_exp_ids: list = None) -> tuple[bool, str]:
-    """全量更新研究节点（前端提交完整对象）。重挂（父变化）时重校验白名单并重排。"""
+    """全量更新研究节点（前端提交完整对象）。重挂（父变化）时重校验白名单并重排。
+
+    评审修复（P3）：supporting_exp_ids 缺省（None）= 保留现值——前端两处编辑 PUT
+    （researchSave / researchChangeStance）都不携带该字段，若按空列表写入会把结论的
+    多实验支持静默清空；显式传 [] 才是清空。非 None 时照常校验写入。
+    """
     try:
         parent_id = _coerce_id(parent_id, "parent_id")
         exp_id = _coerce_id(exp_id, "exp_id")
-        supporting_exp_ids = _coerce_supporting_exp_ids(supporting_exp_ids, node_type)
+        if supporting_exp_ids is not None:
+            supporting_exp_ids = _coerce_supporting_exp_ids(supporting_exp_ids, node_type)
     except ValueError as e:
         return False, str(e)
     node = models.research_node_get(node_id)
     if not node:
         return False, "节点不存在"
+    if supporting_exp_ids is None:
+        supporting_exp_ids = node.get("supporting_exp_ids") or []
     if node_type not in RESEARCH_NODE_TYPES:
         return False, f"未知节点类型: {node_type}"
     if not title or not title.strip():
