@@ -23,12 +23,13 @@ from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert
 
 # ── MCP 读写契约（数据完整性规则 #6）──────────────────────
 # 读工具（search/get/list/calculate_*）是纯函数：只查询 + 纯计算，零写库。
-# 唯一写工具是 save_experiment（走 services.create_experiment 统一写入入口）。
+# 写工具：save_experiment（实验归档，走 services.create_experiment 统一写入入口）
+#         + save_observation（研究脉络观察节点，走 research.create_node）。
 # 新工具必须归入二者之一；读工具若意外触库写入，由 test_models 的"读零写库"
 # 断言拦截（逐工具调用后对比库内容不变）。
 
 SERVER_VERSION = "1.1.0"
-WRITE_TOOLS = {"save_experiment"}
+WRITE_TOOLS = {"save_experiment", "save_observation"}
 
 
 def _sanitize(p: dict, include_fp: bool = False) -> dict:
@@ -281,6 +282,21 @@ TOOLS = [
             "required": ["title", "exp_type"]
         }
     },
+    {
+        "name": "save_observation",
+        "description": "在研究脉络中新增观察/关键细节节点（observation，叶子旁注，v0.1.3）。用于记录实验补充描述/操作要点/文献事实/负结果/参数，避免写成独立实验。parent_id（研究节点 id，goal/experiment/conclusion）与 exp_id（实验 id，自动解析到其研究节点，多目标挂载时挂到全部）二选一必填",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "观察标题（必填）"},
+                "detail": {"type": "string", "description": "观察详情/关键细节"},
+                "tag": {"type": "string", "description": "分类标签：操作要点/文献事实/负结果/参数（自由文本，逗号分隔可多值）"},
+                "parent_id": {"type": "integer", "description": "研究节点 id（goal/experiment/conclusion 节点），与 exp_id 二选一必填"},
+                "exp_id": {"type": "integer", "description": "实验 id，自动解析到该实验的研究节点（可能多个），与 parent_id 二选一必填"}
+            },
+            "required": ["title"]
+        }
+    },
 ]
 
 
@@ -471,6 +487,31 @@ def handle_tools_call(id_, params):
             saved["params"] = _strip_sequences(saved.get("params"))
             saved["results"] = _strip_sequences(saved.get("results"))
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(saved, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "save_observation":
+            _need(args, tool_name, "title")
+            parent_id = _inum(args, tool_name, "parent_id", None)
+            exp_id = _inum(args, tool_name, "exp_id", None)
+            if (parent_id is None) == (exp_id is None):
+                raise InvalidParams(f"{tool_name}: parent_id 与 exp_id 必须且只能给一个")
+            if parent_id is not None:
+                parents = [parent_id]
+            else:
+                if not models.exp_get(exp_id):
+                    raise InvalidParams(f"{tool_name}: 实验 {exp_id} 不存在")
+                parents = [n["id"] for n in models.research_nodes_all()
+                           if n.get("node_type") == "experiment" and n.get("exp_id") == exp_id]
+                if not parents:
+                    raise InvalidParams(f"{tool_name}: 实验 {exp_id} 尚未挂到研究脉络，请先归档到目标下")
+            created = []
+            for pid in parents:
+                nid, err = research.create_node(
+                    node_type="observation", title=args["title"],
+                    detail=args.get("detail", ""), parent_id=pid, tag=args.get("tag", ""))
+                if err:
+                    raise ValueError(f"{tool_name}: {err}")
+                created.append(models.research_node_get(nid))
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(created, ensure_ascii=False, indent=2)}]})
 
         else:
             return send_error(id_, -32601, f"Unknown tool: {tool_name}")

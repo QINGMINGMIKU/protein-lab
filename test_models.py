@@ -197,7 +197,8 @@ print("12. get_db read_only 拒绝写 OK")
 # ── 13. MCP 读写契约：读工具零写库（逐工具调用后库内容逐字节不变）──
 import contextlib, io
 import mcp_server
-assert mcp_server.WRITE_TOOLS == {"save_experiment"}, f"写工具应仅 save_experiment: {mcp_server.WRITE_TOOLS}"
+assert mcp_server.WRITE_TOOLS == {"save_experiment", "save_observation"}, \
+    f"写工具应为 save_experiment + save_observation: {mcp_server.WRITE_TOOLS}"
 names = {t["name"] for t in mcp_server.TOOLS}
 assert names == mcp_server.READ_TOOLS | mcp_server.WRITE_TOOLS, "每个工具必须归入读或写"
 # 13b 前置：种研究脉络节点 + 给 e7 挂一条含序列明文的原始快照（供脱敏断言），

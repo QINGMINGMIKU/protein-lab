@@ -623,4 +623,78 @@ for bad in ([1.9], [True], [False], 0, 5):
     assert ok is None, f"18g 非整数支持实验 {bad!r} 应拒绝: {err}"
 print("18g. update 保留支持实验 / float/bool/scalar 拒绝 OK")
 
+# ── 19. MCP save_observation 写工具 ──
+# 用户痛点：AI 把描述性陈述（如「第二轮产物活性测定，数据全噪声无效」）写成了独立实验。
+# 方案：save_observation 写观察节点——parent_id（研究节点 id）与 exp_id（实验 id）二选一必填，
+# 描述挂到对应实验/目标下而不是新开实验。exp_id 多目标挂载时挂到全部匹配实验节点。
+assert "save_observation" in mcp_server.WRITE_TOOLS, "save_observation 应为写工具"
+g19 = research.create_node("goal", "save_obs 目标")[0]
+e19 = models.exp_create(title="酶活测定_01", exp_type="酶活测定", params={}, results={})
+en19 = research.create_node("experiment", "第一轮产物活性", parent_id=g19, exp_id=e19)[0]
+
+def _mcp_obs(**kw):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mcp_server.handle_tools_call(None, {"name": "save_observation", "arguments": kw})
+    return json.loads(buf.getvalue().strip())
+
+# 19a. 按 exp_id 定位 → 挂到实验节点下；tag 规范化
+r = _mcp_obs(title="第二轮产物活性测定", detail="数据全噪声无效", tag=" 负结果 ", exp_id=e19)
+assert "error" not in r, f"19a 应成功: {r}"
+obs19 = json.loads(r["result"]["content"][0]["text"])
+assert isinstance(obs19, list) and len(obs19) == 1, f"19a 应创建 1 个观察: {obs19}"
+n = obs19[0]
+assert n["node_type"] == "observation" and n["parent_id"] == en19, f"19a 应挂到实验节点: {n}"
+assert n["tag"] == "负结果" and n["detail"] == "数据全噪声无效", f"19a 字段应透传: {n}"
+print("19a. 按 exp_id 定位（挂到实验节点 / tag 规范化）OK")
+
+# 19b. 按 parent_id 定位 → 直挂 goal
+r = _mcp_obs(title="操作要点", detail="16-18°C 诱导", tag="操作要点", parent_id=g19)
+assert "error" not in r, f"19b 应成功: {r}"
+obs19b = json.loads(r["result"]["content"][0]["text"])
+assert len(obs19b) == 1 and obs19b[0]["parent_id"] == g19 and obs19b[0]["tag"] == "操作要点", \
+    f"19b 应挂到 goal: {obs19b}"
+print("19b. 按 parent_id 定位 OK")
+
+# 19c. 参数校验：缺 title / 双参缺一 / 双参都给 / exp_id 不存在 / 类型错 → 均 -32602
+for bad_args, frag in [
+    ({"title": "", "parent_id": g19}, "缺少"),
+    ({"title": "x"}, "必须且只能给一个"),
+    ({"title": "x", "parent_id": g19, "exp_id": e19}, "必须且只能给一个"),
+    ({"title": "x", "exp_id": 99999}, "不存在"),
+    ({"title": "x", "parent_id": "abc"}, "应为整数"),
+]:
+    r = _mcp_obs(**bad_args)
+    assert r.get("error", {}).get("code") == -32602, f"19c {bad_args!r} 应返 -32602: {r}"
+    assert frag in r["error"]["message"], f"19c {bad_args!r} 文案应含 {frag!r}: {r}"
+print("19c. 参数校验（缺 title/双参互斥/exp 不存在/类型错 → -32602）OK")
+
+# 19d. 多目标挂载：同 exp 挂两个 goal → 一次 save_observation 建 2 个观察
+g19b = research.create_node("goal", "save_obs 目标2")[0]
+en19b = research.create_node("experiment", "第一轮产物活性(二)", parent_id=g19b, exp_id=e19)[0]
+r = _mcp_obs(title="同一描述挂两处", exp_id=e19)
+obs19d = json.loads(r["result"]["content"][0]["text"])
+assert len(obs19d) == 2 and sorted(o["parent_id"] for o in obs19d) == sorted([en19, en19b]), \
+    f"19d 应挂到全部实验节点: {obs19d}"
+print("19d. 多目标挂载（exp_id → 全部实验节点）OK")
+
+# 19e. 白名单拒绝 + 实验未挂树
+obs_leaf = research.create_node("observation", "叶子", parent_id=g19)[0]
+r = _mcp_obs(title="挂叶子", parent_id=obs_leaf)
+assert r["error"]["code"] == -32602 and "白名单" in r["error"]["message"], \
+    f"19e observation 下不应可挂: {r}"
+e_untree = models.exp_create(title="未挂树实验", exp_type="酶活测定", params={}, results={})
+r = _mcp_obs(title="未挂树描述", exp_id=e_untree)
+assert r["error"]["code"] == -32602 and "尚未挂到研究脉络" in r["error"]["message"], \
+    f"19e 未挂树应拒绝: {r}"
+print("19e. 白名单拒绝 / 实验未挂树拒绝 OK")
+
+# 19f. 写库验证：save_observation 后 research_nodes 新增 observation 行
+before19 = len(dump_db()["research_nodes"])
+r = _mcp_obs(title="写库验证", tag="参数", parent_id=g19)
+assert "error" not in r, f"19f 应成功: {r}"
+assert len(dump_db()["research_nodes"]) == before19 + 1, \
+    f"19f 应新增 1 行 observation: {before19} → {len(dump_db()['research_nodes'])}"
+print("19f. 写库验证 OK")
+
 print("\n全部研究脉络测试通过 ✓")
