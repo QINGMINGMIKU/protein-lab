@@ -1610,9 +1610,6 @@ async function promptGoalAttach() {
   return { new_goal: { title: t, tag: "" } };
 }
 
-// 公共：三个分析存档流（酶活/BLI/AKTA）复用：弹「保存为新建，还是挂载到已有同类实验？」
-// 默认 0 = 新建（当前行为）；选 1-N = 重挂到已有实验（覆盖结构化结果 + 追加原始快照，
-// 实验身份 / 日期 / 研究树节点保持原样）。返回 {exp_id} / {}（新建）/ null（取消=不保存）
 async function promptExpMount(expType) {
   let list = [];
   try { list = await API.get(`/api/experiments?type=${encodeURIComponent(expType)}&limit=50`); }
@@ -1632,7 +1629,6 @@ async function promptExpMount(expType) {
   if (!isNaN(n) && n >= 1 && n <= list.length) return { exp_id: list[n - 1].id };
   return {};
 }
-
 async function saveExperiment(e) {
   e.preventDefault();
   const form = document.getElementById("expForm");
