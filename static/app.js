@@ -2560,8 +2560,9 @@ async function generateWeblogo() {
   weblogoLastParams = { color_scheme: color, start, end, multimer };
   weblogoLastProteins = selected.map(p => ({ id: p.id, name: p.name }));
 
-  // 记住请求（localStorage）：切页后回来自动恢复，命中服务端缓存秒回
-  localStorage.setItem("weblogoLastRequest", JSON.stringify({
+  // 记住请求（sessionStorage）：仅当次会话内切页回来恢复，命中服务端缓存秒回；
+  // 浏览器关闭/重开后不恢复——避免跨会话自动重新生成，白耗性能
+  sessionStorage.setItem("weblogoLastRequest", JSON.stringify({
     sequences, color_scheme: color, start, end, multimer, proteins: weblogoLastProteins,
   }));
 
@@ -2581,7 +2582,7 @@ async function generateWeblogo() {
 // 切页回来自动恢复上次 weblogo 结果（服务端已缓存，通常秒回，不被中断丢失）
 async function restoreWeblogo() {
   let saved;
-  try { saved = JSON.parse(localStorage.getItem("weblogoLastRequest") || "null"); } catch (_) { return; }
+  try { saved = JSON.parse(sessionStorage.getItem("weblogoLastRequest") || "null"); } catch (_) { return; }
   if (!saved || !saved.sequences || saved.sequences.length < 2) return;
   weblogoLastParams = { color_scheme: saved.color_scheme, start: saved.start, end: saved.end, multimer: saved.multimer };
   weblogoLastProteins = saved.proteins || [];
