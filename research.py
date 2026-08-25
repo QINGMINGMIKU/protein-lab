@@ -393,15 +393,25 @@ def _exp_block(e: dict) -> dict:
     """实验记录 → 完整 exp 块（params/results + raw 快照元数据，供上下文/AI 消费）。
 
     子树实验与结论的支持实验共用（v0.1.3）——保证同一实验在两种位置给出的块一致。
+    calc_type + key_results（ui-design2 对比功能）：惰性 import identity/compare，
+    失败静默降级（旧库/缺模块时块仍完整）。
     """
     raw = models.exp_raw_list(e["id"], with_version=True)
-    return {
+    block = {
         "id": e["id"], "title": e["title"], "exp_type": e["exp_type"],
         "date": e.get("date", ""), "protein_names": e.get("protein_names", ""),
         "params": e.get("params"), "results": e.get("results"),
         "notes": e.get("notes", ""),
         "_raw": raw, "_raw_count": len(raw),
     }
+    try:
+        import compare as _compare
+        import identity as _identity
+        block["calc_type"] = _identity.infer_calc_type(e)
+        block["key_results"] = _compare.key_results(e)
+    except Exception:
+        pass
+    return block
 
 
 def get_research_context(goal_id: int) -> dict | None:

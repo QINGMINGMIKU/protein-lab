@@ -5,7 +5,7 @@
 const API = {
   async get(url) {
     const r = await fetch(url);
-    if (!r.ok) throw new Error(`请求失败 (${r.status})`);
+    if (!r.ok) throw backendError(null, r.status, `HTTP ${r.status}`);
     return r.json();
   },
   async post(url, data) {
@@ -15,7 +15,7 @@ const API = {
       body: JSON.stringify(data),
     });
     const j = await r.json();
-    if (!r.ok) throw new Error(j.error || `请求失败 (${r.status})`);
+    if (!r.ok) throw backendError(j, r.status);
     return j;
   },
   async put(url, data) {
@@ -25,17 +25,32 @@ const API = {
       body: JSON.stringify(data),
     });
     const j = await r.json();
-    if (!r.ok) throw new Error(j.error || `请求失败 (${r.status})`);
+    if (!r.ok) throw backendError(j, r.status);
     return j;
   },
   async del(url) {
     const r = await fetch(url, { method: "DELETE" });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || `删除失败 (${r.status})`);
+      throw backendError(j, r.status);
     }
   },
 };
+
+function t(key, params) {
+  return (window.BigoI18n && window.BigoI18n.t) ? window.BigoI18n.t(key, params) : key;
+}
+async function askText(title, value) {
+  if (window.BigoUI && BigoUI.prompt) {
+    return BigoUI.prompt({ title, value: value == null ? "" : String(value) });
+  }
+  return prompt(title, value == null ? "" : String(value));
+}
+function backendError(j, status, fallback) {
+  const e = new Error((j && j.error) || fallback || `HTTP ${status}`);
+  e.backend = true;
+  return e;
+}
 
 // ═════════════════════════════════════════════════════
 //  浓度单位换算 kernel（隐藏能力：6 单位互转）
@@ -53,10 +68,10 @@ const CONC_UNITS = {
 
 function convertConc(value, from, to, mw) {
   const f = CONC_UNITS[from], t = CONC_UNITS[to];
-  if (!f || !t) throw new Error(`未知单位: ${from} / ${to}`);
+  if (!f || !t) throw new Error(t("toast.unknown_unit", { from, to }));
   let base = value * f.factor;
   if (f.kind !== t.kind) {
-    if (!mw || mw <= 0) throw new Error("跨摩尔/质量换算需要分子量 mw (Da)");
+    if (!mw || mw <= 0) throw new Error(t("toast.need_mw"));
     base = f.kind === "molar" ? base * mw / 1000 : base * 1000 / mw;
   }
   return base / t.factor;
@@ -84,9 +99,11 @@ function todayLocal() {
   return d.toISOString().slice(0, 10);
 }
 
-async function getAutoName(expType, date) {
+async function getAutoName(expType, date, calcType) {
   try {
-    const q = new URLSearchParams({ exp_type: expType });
+    const q = new URLSearchParams();
+    if (expType) q.set("exp_type", expType);
+    if (calcType) q.set("calc_type", calcType);
     if (date) q.set("date", date);
     const r = await API.get(`/api/experiments/next-name?${q.toString()}`);
     return r.name || "";
@@ -106,7 +123,7 @@ function downloadDataUrl(dataUrl, filename) {
 // 下载出图区域的全部图片（单图/分图/总图通用）：多图按 alt 逐张命名保存
 async function downloadAreaImages(areaId, type) {
   const imgs = [...document.querySelectorAll(`#${areaId} img`)];
-  if (!imgs.length) { toast("请先出图", true); return; }
+  if (!imgs.length) { toast(t("toast.plot_first"), true); return; }
   const auto = (await getAutoName(type)) || type;
   const safe = s => (s || "plot").replace(/[\\/:*?"<>|]/g, "_").trim() || "plot";
   imgs.forEach((img, i) => {
@@ -127,19 +144,52 @@ function esc(s) {
 function escAttr(s) { return esc(s); }
 
 // ── Toast ────────────────────────────────────────────
+function iconClose() {
+  return `<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+}
+function setEvidence(id, phase, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.dataset.phase = phase || "";
+  el.classList.add("evidence-status");
+  el.textContent = text || "";
+}
+
 function toast(msg, error, undoAction) {
   const el = document.createElement("div");
+  let text = msg;
+  let backend = false;
+  if (msg instanceof Error) {
+    error = true;
+    text = msg.message;
+    backend = !!msg.backend;
+  }
   el.className = "toast" + (error ? " error" : "");
-  el.textContent = msg;
+  if (backend) {
+    const title = document.createElement("div");
+    title.className = "toast-title";
+    title.textContent = t("error.generic");
+    el.appendChild(title);
+    const details = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.textContent = t("error.details");
+    const pre = document.createElement("pre");
+    pre.textContent = String(text);
+    details.appendChild(sum);
+    details.appendChild(pre);
+    el.appendChild(details);
+  } else {
+    el.appendChild(document.createTextNode(String(text)));
+  }
   if (undoAction) {
     const link = document.createElement("span");
     link.className = "undo-link";
-    link.textContent = "撤销";
+    link.textContent = t("common.undo");
     link.onclick = () => { undoAction(); el.remove(); };
     el.appendChild(link);
   }
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), undoAction ? 8000 : 2500);
+  setTimeout(() => el.remove(), (undoAction || error) ? 8000 : 2500);
 }
 
 // ── Tag system ──────────────────────────────────────
@@ -183,7 +233,7 @@ function handleTagKey(event, containerId) {
   if (!val) return;
   const chip = document.createElement("span");
   chip.className = "tag-chip";
-  chip.innerHTML = `${esc(val)} <span class="chip-x" onclick="this.parentElement.remove()">✕</span>`;
+  chip.innerHTML = `${esc(val)} <button type="button" class="chip-x" onclick="this.parentElement.remove()" aria-label="${esc(t("common.close"))}">${iconClose()}</button>`;
   container.insertBefore(chip, input);
   input.value = "";
   syncTagHidden(containerId);
@@ -192,7 +242,11 @@ function handleTagKey(event, containerId) {
 function getTagChips(containerId) {
   const container = document.getElementById(containerId);
   const chips = container.querySelectorAll(".tag-chip");
-  return Array.from(chips).map(c => c.textContent.replace("✕", "").trim()).filter(Boolean).join(", ");
+  return Array.from(chips).map(c => {
+    const clone = c.cloneNode(true);
+    clone.querySelectorAll(".chip-x").forEach(x => x.remove());
+    return clone.textContent.trim();
+  }).filter(Boolean).join(", ");
 }
 
 function syncTagHidden(containerId) {
@@ -228,7 +282,7 @@ document.addEventListener("click", function (e) {
     case "show-detail":    showDetail(id); break;
     case "delete-protein": deleteProtein(id, name); break;
     case "show-exp":       showExpDetail(id); break;
-    case "delete-exp":     deleteExp(id); break;
+    case "delete-exp":     deleteExp(id, name); break;
   }
 });
 
@@ -277,30 +331,53 @@ async function loadProteins() {
     }
     tbody.innerHTML = proteins.map(p => `
       <tr>
-        <td><input type="checkbox" class="protein-check" value="${p.id}" onchange="updateBulkBar()"></td>
+        <td><input type="checkbox" class="protein-check" value="${p.id}" onchange="syncRecordCheck(this, 'protein-check'); updateBulkBar()"></td>
         <td><span class="clickable" data-action="show-detail" data-id="${p.id}">${esc(p.name)}</span></td>
         <td>${p.mw ? p.mw.toLocaleString() : "-"}</td>
         <td>${p.ext_ox || "-"}</td>
         <td>${p.abs_0_1pct ?? "-"}</td>
         <td>${renderTagChips(p.tag)}</td>
-        <td><span class="seq-preview" onclick="this.classList.toggle('expanded')" title="点击展开/收起">${esc(p.sequence)}</span></td>
-        <td><button class="btn btn-sm btn-danger" data-action="delete-protein" data-id="${p.id}" data-name="${escAttr(p.name)}">删除</button></td>
+        <td><span class="seq-preview" onclick="this.classList.toggle('expanded')" title="${esc(t("proteins.seq_toggle"))}">${esc(p.sequence)}</span></td>
+        <td><button class="btn btn-sm btn-danger" data-action="delete-protein" data-id="${p.id}" data-name="${escAttr(p.name)}">${t("common.delete")}</button></td>
       </tr>
     `).join("");
+    const list = document.getElementById("proteinList");
+    if (list) {
+      list.innerHTML = proteins.map(p => `
+        <article class="record-card">
+          <div class="record-card-head">
+            <label class="record-select"><input type="checkbox" class="protein-check" value="${p.id}" onchange="syncRecordCheck(this, 'protein-check'); updateBulkBar()"></label>
+            <h3 data-action="show-detail" data-id="${p.id}">${esc(p.name)}</h3>
+          </div>
+          <dl>
+            <dt>MW</dt><dd>${p.mw ? p.mw.toLocaleString() : "-"}</dd>
+            <dt>ε_ox</dt><dd>${p.ext_ox || "-"}</dd>
+            <dt>${t("proteins.col_tags")}</dt><dd>${renderTagChips(p.tag) || "-"}</dd>
+          </dl>
+        </article>`).join("");
+    }
     loadTagFilter();
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7" style="color:#c0392b;text-align:center;padding:20px">加载失败: ${esc(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px">${t("error.load_failed")}: ${esc(err.message)}</td></tr>`;
   }
 }
 
 async function refreshAllProteins() {
-  if (!confirm("将用当前算法重新计算所有蛋白的 MW 和消光系数，确定？")) return;
+  const ok = window.BigoUI
+    ? await BigoUI.confirm({
+        title: t("proteins.refresh"),
+        message: t("proteins.confirm_refresh"),
+        impact: t("proteins.confirm_refresh_impact"),
+        danger: true,
+      })
+    : confirm(t("proteins.confirm_refresh"));
+  if (!ok) return;
   try {
     const r = await API.post("/api/proteins/refresh-all", {});
-    toast(`已刷新 ${r.refreshed} 条蛋白`);
+    toast(t("proteins.refreshed", { n: r.refreshed }));
     loadProteins();
     loadProteinSelects();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 function showAddModal() { document.getElementById("addModal").classList.remove("hidden"); }
@@ -320,7 +397,7 @@ function loadFastaFile() {
     const textarea = document.querySelector("#importForm textarea[name=fasta]");
     textarea.value = reader.result;
     textarea.removeAttribute("required");
-    toast(`已加载: ${file.name}`);
+    toast(t("proteins.loaded_file", { name: file.name }));
   };
   reader.readAsText(file);
 }
@@ -331,22 +408,30 @@ async function addProtein(e) {
   const data = Object.fromEntries(new FormData(form));
   try {
     await API.post("/api/proteins", data);
-    toast("蛋白已添加");
+    toast(t("proteins.added"));
     closeAddModal();
     loadProteins();
     loadProteinSelects();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function deleteProtein(id, name) {
-  if (!confirm(`确定删除 "${name}"？`)) return;
+  const ok = window.BigoUI
+    ? await BigoUI.confirm({
+        title: t("common.delete"),
+        message: t("proteins.confirm_delete", { name }),
+        impact: t("proteins.confirm_delete_impact"),
+        danger: true,
+      })
+    : confirm(t("proteins.confirm_delete", { name }));
+  if (!ok) return;
   try {
     await API.del(`/api/proteins/${id}`);
-    toast("已删除");
+    toast(t("proteins.deleted"));
     loadProteins();
     loadProteinSelects();
     closeDetail();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function importFasta(e) {
@@ -357,12 +442,12 @@ async function importFasta(e) {
     const result = await API.post("/api/proteins/import", {
       fasta: data.fasta, tag: data.tag, notes: data.notes,
     });
-    toast(`导入了 ${result.imported.length} 条` +
-      (result.skipped.length ? `，跳过 ${result.skipped.length} 条重复` : ""));
+    toast(t("proteins.imported", { n: result.imported.length }) +
+      (result.skipped.length ? t("proteins.skipped", { n: result.skipped.length }) : ""));
     closeImportModal();
     loadProteins();
     loadProteinSelects();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function showDetail(id) {
@@ -371,36 +456,40 @@ async function showDetail(id) {
     currentDetailProtein = p;
     document.getElementById("detailName").textContent = p.name;
     document.getElementById("detailCreateExpBtn").onclick = () => createExpFromProtein();
+    const delBtn = document.getElementById("detailDeleteBtn");
+    if (delBtn) delBtn.onclick = () => deleteProtein(p.id, p.name);
     document.getElementById("detailContent").innerHTML = `
       <dl class="info-grid">
-        <dt>分子量</dt><dd>${p.mw ? p.mw.toLocaleString() + " Da" : "-"}</dd>
-        <dt>Trp / Tyr / Cys</dt><dd>${p.nW} / ${p.nY} / ${p.nC}</dd>
-        <dt>ε (还原态)</dt><dd>${p.ext_red || "-"} M⁻¹·cm⁻¹</dd>
-        <dt>ε (氧化态)</dt><dd>${p.ext_ox || "-"} M⁻¹·cm⁻¹</dd>
+        <dt>${t("proteins.mw")}</dt><dd>${p.mw ? p.mw.toLocaleString() + " Da" : "-"}</dd>
+        <dt>${t("proteins.wyc")}</dt><dd>${p.nW} / ${p.nY} / ${p.nC}</dd>
+        <dt>${t("proteins.ext_red")}</dt><dd>${p.ext_red || "-"} M⁻¹·cm⁻¹</dd>
+        <dt>${t("proteins.ext_ox")}</dt><dd>${p.ext_ox || "-"} M⁻¹·cm⁻¹</dd>
         <dt>Abs[0.1%]</dt><dd>${p.abs_0_1pct ?? "-"}</dd>
-        <dt>标签</dt><dd>${esc(p.tag || "-")}</dd>
-        <dt>备注</dt><dd>${esc(p.notes || "-")}</dd>
+        <dt>${t("proteins.col_tags")}</dt><dd>${esc(p.tag || "-")}</dd>
+        <dt>${t("proteins.notes")}</dt><dd>${esc(p.notes || "-")}</dd>
       </dl>
       <div class="sequence-full">${esc(p.sequence)}</div>
       <div style="margin-top:12px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          <strong style="font-size:13px">标签</strong>
-          <button class="btn btn-sm btn-outline" onclick="editProteinTags(${p.id})" id="editTagsBtn">✏️ 编辑</button>
+          <strong style="font-size:13px">${t("proteins.col_tags")}</strong>
+          <button class="btn btn-sm btn-outline" onclick="editProteinTags(${p.id})" id="editTagsBtn">${t("common.edit")}</button>
         </div>
         <div id="proteinTagsDisplay">${renderTagChips(p.tag)}</div>
         <div id="proteinTagsEdit" class="hidden" style="margin-top:4px">
           <div class="tag-input" id="detailTagInput">
-            <input type="text" placeholder="输入后回车" onkeydown="handleTagKey(event, 'detailTagInput')">
+            <input type="text" placeholder="${esc(t("proteins.tag_ph"))}" onkeydown="handleTagKey(event, 'detailTagInput')">
           </div>
           <div style="display:flex;gap:6px;margin-top:4px">
-            <button class="btn btn-sm btn-primary" onclick="saveProteinTags(${p.id})">保存</button>
-            <button class="btn btn-sm btn-outline" onclick="cancelEditTags()">取消</button>
+            <button class="btn btn-sm btn-primary" onclick="saveProteinTags(${p.id})">${t("common.save")}</button>
+            <button class="btn btn-sm btn-outline" onclick="cancelEditTags()">${t("common.cancel")}</button>
           </div>
         </div>
       </div>
     `;
-    document.getElementById("detailPanel").classList.remove("hidden");
-  } catch (err) { toast(err.message, true); }
+    const panel = document.getElementById("detailPanel");
+    panel.classList.remove("hidden");
+    if (window.BigoUI) BigoUI.openDrawer(panel);
+  } catch (err) { toast(err, true); }
 }
 
 function editProteinTags(pid) {
@@ -422,17 +511,19 @@ async function saveProteinTags(pid) {
   const tag = getTagChips("detailTagInput");
   try {
     await API.put(`/api/proteins/${pid}`, { tag });
-    toast("标签已更新");
+    toast(t("toast.tags_updated"));
     // 刷新显示
     cancelEditTags();
     showDetail(pid);
     loadProteins().catch(() => {});
     loadProteinSelects();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 function closeDetail() {
-  document.getElementById("detailPanel").classList.add("hidden");
+  const panel = document.getElementById("detailPanel");
+  if (window.BigoUI) BigoUI.closeDrawer(panel);
+  else panel.classList.add("hidden");
   currentDetailProtein = null;
 }
 
@@ -451,7 +542,7 @@ async function loadProteinSelects() {
       `<option value="${p.id}">${esc(p.name)}</option>`).join("");
     ["concProtein", "dilProtein"].forEach(id => {
       const sel = document.getElementById(id);
-      if (sel) sel.innerHTML = `<option value="">${id === "dilProtein" ? "-- 可选 --" : "-- 选择蛋白 --"}</option>${options}`;
+      if (sel) sel.innerHTML = `<option value="">${id === "dilProtein" ? t("ui.pick_protein_opt") : t("ui.pick_protein_req")}</option>${options}`;
     });
     // 实验页多选 checkbox
     const container = document.getElementById("proteinCheckboxes");
@@ -527,34 +618,49 @@ async function restoreCalcState() {
 //  Calculator Page — Tab switching
 // ═════════════════════════════════════════════════════
 
-document.addEventListener("click", function (e) {
-  const tab = e.target.closest(".tab-btn");
+const TOOL_IDS = ["conc", "dilution", "bli", "akta", "weblogo", "enzyme", "copy"];
+
+function activateTool(tabId, opts) {
+  if (!TOOL_IDS.includes(tabId)) return;
+  const tab = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
   if (!tab) return;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.add("hidden"));
   tab.classList.add("active");
-  document.getElementById("tab-" + tab.dataset.tab).classList.remove("hidden");
-  if (tab.dataset.tab === "copy") loadCopyExpList();
-  if (tab.dataset.tab === "dilution") loadBliImportExps();
-  if (tab.dataset.tab === "weblogo") { loadWeblogoProteins(); restoreWeblogo(); }
-  if (tab.dataset.tab === "enzyme") loadEnzymeProteinList();
+  const panel = document.getElementById("tab-" + tabId);
+  if (panel) panel.classList.remove("hidden");
+  if (tabId === "copy") loadCopyExpList();
+  if (tabId === "dilution") loadBliImportExps();
+  if (tabId === "weblogo") { loadWeblogoProteins(); restoreWeblogo(); }
+  if (tabId === "enzyme") loadEnzymeProteinList();
   refreshAutoNamePlaceholders();
+  if (!opts || opts.hash !== false) {
+    const url = new URL(location.href);
+    url.hash = "tool=" + tabId;
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
+}
+
+document.addEventListener("click", function (e) {
+  const tab = e.target.closest(".tab-btn");
+  if (!tab) return;
+  activateTool(tab.dataset.tab);
 });
 
 // 自动命名占位提示：输入框显示系统默认名（留空即用它）
 async function refreshAutoNamePlaceholders() {
-  const targets = {
-    concExpName: "浓度测定",
-    bliExpName: "BLI",        // BLI 浓度梯度 tab
-    bliAnaExpName: "BLI",     // BLI 分析 tab（v0.0.8）
-    aktaExpName: "AKTA",      // AKTA 峰图 tab（v0.0.9）
-    weblogoExpName: "Weblogo",
-  };
-  for (const [id, type] of Object.entries(targets)) {
+  const targets = [
+    ["concExpName", "浓度测定", "concentration"],
+    ["bliExpName", "BLI", "dilution"],
+    ["bliAnaExpName", "BLI", "bli_fit"],
+    ["aktaExpName", "AKTA", "akta"],
+    ["weblogoExpName", "Weblogo", "weblogo"],
+  ];
+  for (const [id, type, calc] of targets) {
     const el = document.getElementById(id);
     if (!el) continue;
-    const auto = await getAutoName(type);
-    el.placeholder = auto ? `实验名称（默认 ${auto}）` : "实验名称（可选）";
+    const auto = await getAutoName(type, null, calc);
+    el.placeholder = auto ? t("ui.exp_name_default", { name: auto }) : t("ui.exp_name_optional");
   }
 }
 
@@ -591,13 +697,13 @@ async function searchProteins() {
   });
 
   if (!matches.length) {
-    dropdown.innerHTML = '<div class="search-item" style="color:#888">无匹配结果</div>';
+    dropdown.innerHTML = '<div class="search-item" style="color:var(--graphite)">' + t("ui.no_match") + '</div>';
   } else {
     dropdown.innerHTML = matches.map(p => `
       <div class="search-item" onclick="addProteinToTable(${p.id})">
         <strong>${esc(p.name)}</strong>
-        <span style="color:#888;font-size:12px">${p.mw ? p.mw.toLocaleString() + ' Da' : ''} | ε=${p.ext_ox || 0}</span>
-        ${selectedProteins[p.id] ? '<span style="color:#27ae60">✓ 已选</span>' : ''}
+        <span style="color:var(--graphite);font-size:12px">${p.mw ? p.mw.toLocaleString() + ' Da' : ''} | ε=${p.ext_ox || 0}</span>
+        ${selectedProteins[p.id] ? `<span style="color:var(--cyan-deep)">✓ ${t("ui.selected_chip")}</span>` : ''}
       </div>
     `).join("");
   }
@@ -678,12 +784,12 @@ function renderChips() {
   const container = document.getElementById("selectedChips");
   const ids = Object.keys(selectedProteins);
   if (!ids.length) {
-    container.innerHTML = '<span style="color:#888;font-size:13px">搜索并添加蛋白...</span>';
+    container.innerHTML = '<span style="color:var(--graphite);font-size:13px">' + t("ui.search_add_protein") + '</span>';
     return;
   }
   container.innerHTML = ids.map(id => {
     const p = selectedProteins[id];
-    return `<span class="chip">${esc(p.name)} <button class="chip-x" onclick="removeProteinFromTable(${id})">✕</button></span>`;
+    return `<span class="chip">${esc(p.name)} <button type="button" class="chip-x" onclick="removeProteinFromTable(${id})" aria-label="${esc(t("common.close"))}">${iconClose()}</button></span>`;
   }).join("");
 }
 
@@ -691,7 +797,7 @@ function renderTable() {
   const tbody = document.querySelector("#concTable tbody");
   const ids = Object.keys(selectedProteins);
   if (!ids.length) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="13">请在上方搜索并添加蛋白</td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="13">' + t("workbench.empty_conc") + '</td></tr>';
     return;
   }
   tbody.innerHTML = ids.map(id => {
@@ -710,7 +816,7 @@ function renderTable() {
         <td><input type="number" class="cell-input target-vol" step="any" placeholder="200" value="${p._targetVol || ''}"></td>
         <td class="col-result vol-take">-</td>
         <td class="col-result vol-buffer">-</td>
-        <td><button class="btn btn-sm btn-danger" onclick="removeProteinFromTable(${id})">✕</button></td>
+        <td><button class="btn btn-sm btn-icon btn-danger" onclick="removeProteinFromTable(${id})" aria-label="${esc(t("common.delete"))}">${iconClose()}</button></td>
       </tr>
     `;
   }).join("");
@@ -720,8 +826,8 @@ function renderTable() {
 function updateConcHeaders() {
   const ths = document.querySelectorAll("#concTable thead th");
   if (ths.length < 9) return;
-  ths[6].textContent = `浓度 (${concUnit})`;
-  ths[7].textContent = `浓度 (${complementaryUnit(concUnit)})`;
+  ths[6].textContent = `${t("workbench.col_conc")} (${concUnit})`;
+  ths[7].textContent = `${t("workbench.col_conc")} (${complementaryUnit(concUnit)})`;
 }
 
 // 浓度单位切换下拉框：更新全局单位 → 重算已有行
@@ -780,7 +886,7 @@ function calcOneRow(row) {
   if (!isNaN(targetConc) && !isNaN(targetVol) && targetConc > 0 && targetVol > 0) {
     p._targetConc = targetConc; p._targetVol = targetVol;
     if (targetConc > conc_uM) {
-      row.querySelector(".vol-take").innerHTML = '<span style="color:#e74c3c">目标>当前</span>';
+      row.querySelector(".vol-take").innerHTML = '<span style="color:var(--danger)">' + t("toast.target_gt_current") + '</span>';
       row.querySelector(".vol-buffer").textContent = "-";
       p._takeVol = null; p._bufferVol = null;
     } else {
@@ -804,19 +910,19 @@ async function calcAllRows() {
   for (const row of rows) {
     if (!calcOneRow(row)) anyError = true;
   }
-  if (!anyError) toast("全部计算完成");
+  if (!anyError) toast(t("toast.calc_done"));
 }
 
 async function saveConcTable() {
   const ids = Object.keys(selectedProteins);
-  if (!ids.length) { toast("请先添加蛋白", true); return; }
+  if (!ids.length) { toast(t("toast.add_protein_first"), true); return; }
   const customName = document.getElementById("concExpName").value.trim();
-  const title = customName || await getAutoName("浓度测定")
+  const title = customName || await getAutoName("浓度测定", null, "concentration")
     || ids.map(id => selectedProteins[id].name).join(", ") + " 浓度测定";
   const oxidized = getCurrentOxidized();
 
   const goal = await promptGoalAttach();
-  if (goal === null) { toast("已取消保存"); return; }
+  if (goal === null) { toast(t("toast.save_cancelled")); return; }
 
   try {
     const saved = await API.post("/api/experiments/from-calculation", {
@@ -846,8 +952,8 @@ async function saveConcTable() {
       calc_result: [],
       ...goal,
     });
-    toast(saved.goal_node_id ? "已保存 · 已挂研究脉络" : "已保存为实验记录");
-  } catch (err) { toast(err.message, true); }
+    toast(saved.goal_node_id ? t("toast.saved_linked") : t("toast.saved_record"));
+  } catch (err) { toast(err, true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -862,7 +968,7 @@ async function loadBliImportExps() {
   if (!sel || sel.options.length > 1) return;  // already loaded
   try {
     const exps = await API.get("/api/experiments?type=浓度测定&limit=50");
-    sel.innerHTML = '<option value="">-- 从浓度实验导入 --</option>' +
+    sel.innerHTML = '<option value="">' + t("workbench.import_conc") + '</option>' +
       exps.map(e => `<option value="${e.id}">${esc(e.title)} (${e.date || ""})</option>`).join("");
   } catch (_) { /* non-critical */ }
 }
@@ -881,7 +987,7 @@ async function importBliFromExp() {
     let params = e.params;
     if (typeof params === "string") params = JSON.parse(params);
     const proteins = (params && params.proteins) || [];
-    if (!proteins.length) { toast("该实验无蛋白数据", true); return; }
+    if (!proteins.length) { toast(t("toast.no_protein_data"), true); return; }
 
     let added = 0;
     for (const prot of proteins) {
@@ -904,10 +1010,10 @@ async function importBliFromExp() {
       };
       added++;
     }
-    if (!added) { toast("所有蛋白已存在或浓度无效", true); return; }
+    if (!added) { toast(t("toast.proteins_exist_or_invalid"), true); return; }
     renderBliTable();
-    toast(`已导入 ${added} 个蛋白`);
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.imported_n", { n: added }));
+  } catch (err) { toast(err, true); }
 }
 
 // ── Search proteins for BLI ─────────────────────────
@@ -920,12 +1026,12 @@ async function searchBliProteins() {
     p.name.toLowerCase().includes(q.toLowerCase())
   );
   if (!matches.length) {
-    dropdown.innerHTML = '<div class="search-item" style="color:#888">无匹配结果</div>';
+    dropdown.innerHTML = '<div class="search-item" style="color:var(--graphite)">' + t("ui.no_match") + '</div>';
   } else {
     dropdown.innerHTML = matches.map(p => `
       <div class="search-item" onclick="addBliProtein(${p.id})">
         <strong>${esc(p.name)}</strong>
-        ${bliProteins[p.id] ? '<span style="color:#27ae60">✓ 已添加</span>' : ''}
+        ${bliProteins[p.id] ? `<span style="color:var(--cyan-deep)">✓ ${t("ui.added_chip")}</span>` : ''}
       </div>
     `).join("");
   }
@@ -960,7 +1066,7 @@ function renderBliTable() {
   const tbody = document.querySelector("#bliTable tbody");
   const ids = Object.keys(bliProteins);
   if (!ids.length) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">请从浓度表导入蛋白，或在上方搜索添加</td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">' + t("workbench.empty_dil") + '</td></tr>';
     return;
   }
   tbody.innerHTML = ids.map(id => {
@@ -974,7 +1080,7 @@ function renderBliTable() {
         <td><input type="number" class="cell-input bli-nsteps" value="${b.steps}" min="2" max="24" style="width:55px"></td>
         <td><input type="number" class="cell-input bli-vol" step="any" value="${b.vol}" style="width:70px"></td>
         <td><input type="number" class="cell-input bli-dead" step="any" value="${b.dead}" style="width:65px"></td>
-        <td><button class="btn btn-sm btn-danger" onclick="removeBliProtein(${id})">✕</button></td>
+        <td><button class="btn btn-sm btn-icon btn-danger" onclick="removeBliProtein(${id})" aria-label="${esc(t("common.delete"))}">${iconClose()}</button></td>
       </tr>
     `;
   }).join("");
@@ -1007,7 +1113,7 @@ async function calcBliOneRow(row) {
   p.steps = v.nsteps; p.vol = v.vol; p.dead = v.dead;
 
   if (isNaN(v.stock) || isNaN(v.start) || isNaN(v.factor) || isNaN(v.nsteps) || isNaN(v.vol)) {
-    return { error: "参数不完整" };
+    return { error: t("toast.params_incomplete") };
   }
   try {
     return await API.post("/api/calc/dilution", {
@@ -1025,14 +1131,14 @@ async function calcBliOneRow(row) {
 
 async function calcAllBliRows() {
   const rows = document.querySelectorAll("#bliTable tbody tr[data-bli-protein-id]");
-  if (!rows.length) { toast("请先添加蛋白", true); return; }
+  if (!rows.length) { toast(t("toast.add_protein_first"), true); return; }
   const results = {};
   for (const row of rows) {
     const r = await calcBliOneRow(row);
     if (r) results[row.dataset.bliProteinId] = r;
   }
   renderBliResults(results);
-  toast("BLI 计算完成");
+  toast(t("toast.bli_calc_done"));
 }
 
 // ── Render BLI results ───────────────────────────────
@@ -1063,12 +1169,12 @@ function renderBliResults(results) {
     };
     html += `
       <div class="result-box" style="margin-bottom:14px">
-        <strong>${esc(p.name)}</strong> (母液 ${r.stock_conc_uM} μM, ${r.dilution_factor}× 稀释, ${r.n_steps} 步)
-        <table style="margin-top:6px"><thead><tr><th>#</th><th>浓度 (${dilUnit})</th><th>总体积 (μL)</th><th>取上步 (μL)</th><th>缓冲液 (μL)</th></tr></thead>
+        <strong>${esc(p.name)}</strong> (${t("workbench.stock_c")} ${r.stock_conc_uM} μM, ${r.dilution_factor}×, ${r.n_steps} ${t("workbench.steps")})
+        <div class="table-scroll"><table class="calc-table" style="margin-top:6px"><thead><tr><th>#</th><th>${t("workbench.col_conc")} (${dilUnit})</th><th>${t("workbench.total_vol")}</th><th>${t("workbench.from_prev")}</th><th>${t("workbench.col_buffer")}</th></tr></thead>
         <tbody>${r.steps.map(s => `
           <tr><td>${s.step}</td><td>${fmtConc(s.conc_uM)}</td><td>${s.total_vol_uL}</td><td>${s.stock_vol_uL}</td><td>${s.buffer_vol_uL}</td></tr>
-        `).join("")}</tbody></table>
-        <p style="margin-top:6px;font-size:13px;color:#666">第一步总需求 ≈ ${r.steps[0].total_vol_uL} μL（含递推稀释裕量）</p>
+        `).join("")}</tbody></table></div>
+        <p style="margin-top:6px;font-size:13px;color:var(--graphite)">${t("detail.first_demand", { v: r.steps[0].total_vol_uL })}</p>
       </div>`;
   }
   container.innerHTML = html;
@@ -1085,7 +1191,7 @@ function changeDilUnit() {
 // ── Save BLI table as experiment ─────────────────────
 async function saveBliTable() {
   const ids = Object.keys(bliProteins);
-  if (!ids.length) { toast("请先添加蛋白并计算", true); return; }
+  if (!ids.length) { toast(t("toast.add_protein_and_calc"), true); return; }
   // 收集最新参数 + 结果
   const rows = document.querySelectorAll("#bliTable tbody tr[data-bli-protein-id]");
   const proteins = [];
@@ -1118,11 +1224,11 @@ async function saveBliTable() {
     });
   }
   const customName = document.getElementById("bliExpName").value.trim();
-  const title = customName || await getAutoName("BLI")
-    || Object.values(bliProteins).map(p => p.name).join(", ") + " BLI 稀释";
+  const title = customName || await getAutoName("BLI", null, "dilution")
+    || Object.values(bliProteins).map(p => p.name).join(", ") + " BLI dilution";
 
   const goal = await promptGoalAttach();
-  if (goal === null) { toast("已取消保存"); return; }
+  if (goal === null) { toast(t("toast.save_cancelled")); return; }
 
   try {
     const saved = await API.post("/api/experiments/from-calculation", {
@@ -1136,8 +1242,8 @@ async function saveBliTable() {
       ...goal,
     });
     renderBliResults(dilutionResults);
-    toast(saved.goal_node_id ? "已保存 · 已挂研究脉络" : "已保存为实验记录");
-  } catch (err) { toast(err.message, true); }
+    toast(saved.goal_node_id ? t("toast.saved_linked") : t("toast.saved_record"));
+  } catch (err) { toast(err, true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -1150,32 +1256,34 @@ let copyAllExps = [];
 let copyTypeFilter = "all";
 
 const COPY_TYPE_META = {
-  "浓度测定": { icon: "🧪", css: "conc", label: "浓度" },
-  "BLI 浓度梯度": { icon: "📊", css: "dilution", label: "BLI" },
-  "BLI 分析": { icon: "🧫", css: "bli", label: "BLI 分析" },
-  "酶活测定": { icon: "⚡", css: "enzyme", label: "酶活" },
-  "Weblogo": { icon: "🧬", css: "weblogo", label: "Logo" },
-  "AKTA": { icon: "📈", css: "akta", label: "AKTA" },
+  "浓度测定": { css: "conc", labelKey: "workbench.tab.conc" },
+  "BLI 浓度梯度": { css: "dilution", labelKey: "workbench.tab.dilution" },
+  "BLI 分析": { css: "bli", labelKey: "workbench.tab.bli" },
+  "酶活测定": { css: "enzyme", labelKey: "workbench.tab.enzyme" },
+  "Weblogo": { css: "weblogo", labelKey: "workbench.tab.weblogo" },
+  "AKTA": { css: "akta", labelKey: "workbench.tab.akta" },
 };
 
 function copyExpTypeInfo(e) {
   const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
   const calcType = params.calc_type || "";
-  if (calcType === "concentration") return COPY_TYPE_META["浓度测定"];
-  if (calcType === "dilution") return COPY_TYPE_META["BLI 浓度梯度"];
-  if (calcType === "enzyme") return COPY_TYPE_META["酶活测定"];
-  if (calcType === "weblogo") return COPY_TYPE_META["Weblogo"];
-  if (calcType === "akta") return COPY_TYPE_META["AKTA"];
-  if (calcType === "bli_fit") return COPY_TYPE_META["BLI 分析"];
-  // fallback: 旧存档（v0.0.8 无 calc_type）——BLI 分析靠 exp_type=="BLI" + results.samples 判别，
-  // 与 BLI 浓度梯度（calc_type=dilution，恒有 calc_type）区分开
-  if (isBliExp(e)) return COPY_TYPE_META["BLI 分析"];
-  // fallback: match exp_type
-  for (const [key, meta] of Object.entries(COPY_TYPE_META)) {
-    if ((e.exp_type || "").includes(key.replace("测定", "").replace("浓度梯度", "")))
-      return meta;
+  let meta = null;
+  if (calcType === "concentration") meta = COPY_TYPE_META["浓度测定"];
+  else if (calcType === "dilution") meta = COPY_TYPE_META["BLI 浓度梯度"];
+  else if (calcType === "enzyme") meta = COPY_TYPE_META["酶活测定"];
+  else if (calcType === "weblogo") meta = COPY_TYPE_META["Weblogo"];
+  else if (calcType === "akta") meta = COPY_TYPE_META["AKTA"];
+  else if (calcType === "bli_fit") meta = COPY_TYPE_META["BLI 分析"];
+  else if (isBliExp(e)) meta = COPY_TYPE_META["BLI 分析"];
+  else {
+    for (const [key, m] of Object.entries(COPY_TYPE_META)) {
+      if ((e.exp_type || "").includes(key.replace("测定", "").replace("浓度梯度", ""))) {
+        meta = m; break;
+      }
+    }
   }
-  return { icon: "📋", css: "other", label: "其他" };
+  if (!meta) return { css: "other", label: t("copy.filter.other") };
+  return { css: meta.css, label: t(meta.labelKey) };
 }
 
 // AKTA 判定：新存档靠 params.calc_type=="akta"，旧存档（v0.0.9 早期无 calc_type）靠 exp_type 兜底
@@ -1203,29 +1311,29 @@ async function loadCopyExpList() {
     copyAllExps = await API.get("/api/experiments?limit=100");
     renderCopyExpList();
     renderCopyTypeTags();
-  } catch (err) { document.getElementById("copyExpList").innerHTML = '<p style="color:#888;text-align:center;padding:40px">加载失败</p>'; }
+  } catch (err) { document.getElementById("copyExpList").innerHTML = '<p style="color:var(--graphite);text-align:center;padding:40px">' + t("copy.load_failed") + '</p>'; }
 }
 
 function renderCopyTypeTags() {
   const counts = { all: copyAllExps.length };
   for (const e of copyAllExps) {
-    const t = copyExpTypeInfo(e);
-    counts[t.css] = (counts[t.css] || 0) + 1;
+    const info = copyExpTypeInfo(e);
+    counts[info.css] = (counts[info.css] || 0) + 1;
   }
   const tags = [
-    { key: "all", label: "全部", icon: "📋" },
-    { key: "conc", label: "浓度", icon: "🧪" },
-    { key: "dilution", label: "BLI", icon: "📊" },
-    { key: "bli", label: "BLI 分析", icon: "🧫" },
-    { key: "enzyme", label: "酶活", icon: "⚡" },
-    { key: "weblogo", label: "Logo", icon: "🧬" },
-    { key: "akta", label: "AKTA", icon: "📈" },
-    { key: "other", label: "其他", icon: "📋" },
-  ].filter(t => counts[t.key]);
-  document.getElementById("copyTypeTags").innerHTML = tags.map(t =>
-    `<span class="copy-type-tag ${t.key}${copyTypeFilter === t.key ? ' active' : ''}"
-          onclick="copyTypeFilter='${t.key}';renderCopyTypeTags();renderCopyExpList()">
-      ${t.icon} ${t.label} <span style="opacity:.6">${counts[t.key]}</span>
+    { key: "all", labelKey: "copy.filter.all" },
+    { key: "conc", labelKey: "copy.filter.conc" },
+    { key: "dilution", labelKey: "copy.filter.dilution" },
+    { key: "bli", labelKey: "copy.filter.bli" },
+    { key: "enzyme", labelKey: "copy.filter.enzyme" },
+    { key: "weblogo", labelKey: "copy.filter.weblogo" },
+    { key: "akta", labelKey: "copy.filter.akta" },
+    { key: "other", labelKey: "copy.filter.other" },
+  ].filter(tag => counts[tag.key]);
+  document.getElementById("copyTypeTags").innerHTML = tags.map(tag =>
+    `<span class="copy-type-tag ${tag.key}${copyTypeFilter === tag.key ? ' active' : ''}"
+          onclick="copyTypeFilter='${tag.key}';renderCopyTypeTags();renderCopyExpList()">
+      ${t(tag.labelKey)} <span style="opacity:.6">${counts[tag.key]}</span>
     </span>`
   ).join("");
 }
@@ -1243,7 +1351,7 @@ function renderCopyExpList() {
     exps = exps.filter(e => (e.title || "").toLowerCase().includes(q) || (e.protein_names || "").toLowerCase().includes(q));
   }
   if (!exps.length) {
-    container.innerHTML = '<p style="color:#888;font-size:13px;text-align:center;padding:40px">无匹配实验</p>';
+    container.innerHTML = '<p style="color:var(--graphite);font-size:13px;text-align:center;padding:40px">' + t("ui.no_matching_exp") + '</p>';
     return;
   }
   container.innerHTML = exps.map(e => {
@@ -1253,20 +1361,20 @@ function renderCopyExpList() {
     const wells = params.wells || params.well_info || {};
     let detail = "";
     if (params.calc_type === "enzyme") {
-      detail = `${Object.keys(wells).length} 孔 | ${params.meta?.sample || ""}`;
+      detail = t("copy.wells_n", { n: Object.keys(wells).length }) + " | " + (params.meta?.sample || "");
     } else if (isAktaExp(e)) {
-      detail = `通道 ${params.channel || "?"} | ${params.source || "已存档"}`;
+      detail = t("copy.channel", { ch: params.channel || "?" }) + " | " + (params.source || t("ui.archived"));
     } else if (isBliExp(e)) {
       const results = typeof e.results === "string" ? safeJson(e.results) : e.results || {};
       const nSamples = results.samples ? Object.keys(results.samples).length : 0;
-      detail = `${nSamples} 样本 | ${params.source || "已存档"}`;
+      detail = t("copy.samples_n", { n: nSamples }) + " | " + (params.source || t("ui.archived"));
     } else if (proteins.length) {
-      detail = `${proteins.length} 蛋白 | ${proteins.map(p => p.name).join(", ")}`;
+      detail = t("copy.proteins_n", { n: proteins.length }) + " | " + proteins.map(p => p.name).join(", ");
     } else {
-      detail = e.protein_names || "无蛋白数据";
+      detail = e.protein_names || t("copy.no_protein");
     }
     return `<div class="copy-card" onclick="selectCopyExp(${e.id})" id="copy-card-${e.id}">
-      <div class="copy-type-badge ${ti.css}">${ti.icon}</div>
+      <div class="copy-type-badge ${ti.css}">${esc(ti.label)}</div>
       <div class="copy-card-body">
         <div class="copy-card-title">${esc(e.title)}</div>
         <div class="copy-card-sub">${e.date || ""} · ${ti.label} · ${esc(detail)}</div>
@@ -1289,40 +1397,37 @@ async function selectCopyExp(eid) {
     const wells = params.wells || params.well_info || {};
 
     if (calcType === "concentration" && proteins.length) {
-      detailHtml = `<b>${proteins.length} 个蛋白</b><br>` +
+      detailHtml = `<b>${t("copy.proteins_n", { n: proteins.length })}</b><br>` +
         proteins.map(p => `· ${esc(p.name)}: A₂₈₀=${p.a280 ?? "?"}, ${p.conc_uM ?? "?"} μM`).join("<br>");
     } else if (calcType === "dilution" && proteins.length) {
-      detailHtml = `<b>${proteins.length} 个蛋白</b><br>` +
-        proteins.map(p => `· ${esc(p.name)}: ${p.stock_uM}→${p.start_uM} μM, ${p.factor}×${p.steps}步`).join("<br>");
+      detailHtml = `<b>${t("copy.proteins_n", { n: proteins.length })}</b><br>` +
+        proteins.map(p => `· ${esc(p.name)}: ${t("workbench.dil_summary", { c: p.stock_uM, s: p.start_uM, f: p.factor, n: p.steps })}`).join("<br>");
     } else if (calcType === "enzyme") {
       const withData = Object.entries(wells).filter(([_, w]) => w.fit || w.times);
-      detailHtml = `<b>${Object.keys(wells).length} 孔</b> (${withData.length} 有数据)<br>` +
+      detailHtml = `<b>${t("copy.wells_n", { n: Object.keys(wells).length })}</b> (${withData.length})<br>` +
         `${params.meta?.sample || ""} | ${params.meta?.wavelength || "?"} nm`;
-      const negWells = Object.entries(wells).filter(([_, w]) => w.ref === "neg" || w.ref === "blank");
-      if (negWells.length) detailHtml += `<br>阴性/空白: ${negWells.map(([id]) => id).join(", ")}`;
     } else if (calcType === "weblogo") {
-      detailHtml = `<b>${proteins.length} 条序列</b> | ${params.positions || "?"} 位点`;
+      detailHtml = `<b>${t("detail.seq_n", { n: proteins.length })}</b> | ${params.positions || "?"} `;
     } else if (isAktaExp(e)) {
-      detailHtml = `<b>通道 ${esc(params.channel || "?")}</b>` +
-        (params.source ? ` | 源文件 ${esc(params.source)}` : "") +
-        (params.xmin || params.xmax ? ` | 体积 ${params.xmin ?? 0}–${params.xmax ?? "∞"} mL` : "");
+      detailHtml = `<b>${t("copy.channel", { ch: params.channel || "?" })}</b>` +
+        (params.source ? ` | ${esc(params.source)}` : "") +
+        (params.xmin || params.xmax ? ` | ${params.xmin ?? 0}–${params.xmax ?? "∞"} mL` : "");
     } else if (isBliExp(e)) {
       const results = typeof e.results === "string" ? safeJson(e.results) : e.results || {};
       const nSamples = results.samples ? Object.keys(results.samples).length : 0;
-      detailHtml = `<b>${nSamples} 样本</b>` +
-        (params.source ? ` | 源文件 ${esc(params.source)}` : "") +
-        (params.smooth_window ? ` | 平滑 ${params.smooth_window}` : "");
+      detailHtml = `<b>${t("copy.samples_n", { n: nSamples })}</b>` +
+        (params.source ? ` | ${esc(params.source)}` : "");
     } else {
-      detailHtml = `${e.protein_names || "无蛋白"} | ${e.notes || "无额外信息"}`;
+      detailHtml = `${e.protein_names || t("detail.no_protein")} | ${e.notes || "—"}`;
     }
 
-    const targetLabel = calcType === "enzyme" ? "酶活计算" : calcType === "dilution" ? "BLI 浓度梯度" : calcType === "weblogo" ? "Weblogo" : isAktaExp(e) ? "AKTA 峰图" : isBliExp(e) ? "BLI 分析" : "蛋白浓度";
+    const targetLabel = ti.label;
 
     document.getElementById("copyPreviewTitle").textContent = e.title;
-    document.getElementById("copyPreviewMeta").innerHTML = `<span class="copy-type-tag ${ti.css}">${ti.icon} ${ti.label}</span> ${e.date || ""} → <b>${targetLabel}</b>`;
+    document.getElementById("copyPreviewMeta").innerHTML = `<span class="copy-type-tag ${ti.css}">${esc(ti.label)}</span> ${e.date || ""} → <b>${targetLabel}</b>`;
     document.getElementById("copyPreviewDetail").innerHTML = detailHtml;
     document.getElementById("copyPreview").classList.remove("hidden");
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // helper: safe JSON parse
@@ -1338,7 +1443,7 @@ function latestRawId(exp) {
 }
 
 async function applyCopyAndSwitch() {
-  if (!copyCache) { toast("请先选择实验", true); return; }
+  if (!copyCache) { toast(t("toast.pick_experiment"), true); return; }
   const params = typeof copyCache.params === "string" ? JSON.parse(copyCache.params) : copyCache.params || {};
   const calcType = params.calc_type || "";
 
@@ -1371,13 +1476,13 @@ async function applyCopyAndSwitch() {
     enzymeLastPlotType = null;
     renderEnzymeTimePanel();
     document.getElementById("enzymeMeta").textContent =
-      `${emeta.sample || ""} | ${emeta.wavelength || "?"} nm | ${Object.keys(wells).length} wells (复制)`;
+      `${emeta.sample || ""} | ${emeta.wavelength || "?"} nm | ${Object.keys(wells).length} wells (${t("copy.copied")})`;
     renderPlate();
     if (Object.values(enzymeWellInfo).some(i => i.fit)) {
       renderEnzymeTable(Object.keys(wells));
     }
     document.querySelector(".tab-btn[data-tab='enzyme']").click();
-    toast(`已加载 ${Object.keys(wells).length} 个孔位数据`);
+    toast(t("toast.loaded_wells", { n: Object.keys(wells).length }));
     return;
   }
 
@@ -1401,14 +1506,14 @@ async function applyCopyAndSwitch() {
     }
     renderBliTable();
     document.querySelector(".tab-btn[data-tab='dilution']").click();
-    toast(`已加载 ${proteins.length} 个蛋白`);
+    toast(t("toast.loaded_proteins", { n: proteins.length }));
     return;
   }
 
   if (isBliExp(copyCache)) {
     // 复制到 BLI 分析 Tab — 从实验原始快照重建会话（曲线数据在 experiment_raw，规则 #8 可复现）
     const rid = latestRawId(copyCache);
-    if (!rid) { toast("该实验无原始快照可复制", true); return; }
+    if (!rid) { toast(t("toast.no_raw_snapshot"), true); return; }
     try {
       const raw = await API.get(`/api/experiments/${copyCache.id}/raw/${rid}`);
       const data = await API.post("/api/bli/restore", {
@@ -1426,22 +1531,22 @@ async function applyCopyAndSwitch() {
       renderBliCurves();
       // 揭示分析结果区（与上传路径一致：bliSampleList 在 #bliAnalyzed 内，默认 hidden）
       document.getElementById("bliMeta").textContent =
-        `${copyCache.title || "已存档"} | ${data.n_sensors} 传感器 | ${bliSamples.length} 样本（快照）`;
+        `${copyCache.title || t("toast.saved")} | ${t("workbench.sensors_n", { n: data.n_sensors })} | ${t("copy.samples_n", { n: bliSamples.length })}`;
       document.getElementById("bliAnalyzed").classList.remove("hidden");
       document.getElementById("bliKdWrap").classList.add("hidden");
       document.getElementById("bliPlotArea").innerHTML = "";
       refreshBliPlaceholder();
       document.querySelector(".tab-btn[data-tab='bli']").click();
       bliPlot();
-      toast(`已载入 ${bliSamples.length} 个样本（来自快照）`);
-    } catch (err) { toast(err.message, true); }
+      toast(t("toast.loaded_bli_samples", { n: bliSamples.length }));
+    } catch (err) { toast(err, true); }
     return;
   }
 
   if (isAktaExp(copyCache)) {
     // 复制到 AKTA Tab — 从实验原始快照重建会话（曲线数据在 experiment_raw）
     const rid = latestRawId(copyCache);
-    if (!rid) { toast("该实验无原始快照可复制", true); return; }
+    if (!rid) { toast(t("toast.no_raw_snapshot"), true); return; }
     try {
       const raw = await API.get(`/api/experiments/${copyCache.id}/raw/${rid}`);
       const data = await API.post("/api/akta/restore", {
@@ -1460,7 +1565,7 @@ async function applyCopyAndSwitch() {
       renderAktaRuns();
       // 揭示分析结果区（与上传路径一致：aktaRunList 在 #aktaAnalyzed 内，默认 hidden）
       document.getElementById("aktaMeta").textContent =
-        `1 文件（快照） | 1 成功 | ${run.channels.length} 通道`;
+        `${t("workbench.files_ok", { n: 1, ok: 1 })} | ${t("workbench.channels_n", { n: run.channels.length })}`;
       document.getElementById("aktaEventsInfo").textContent = "";
       document.getElementById("aktaAnalyzed").classList.remove("hidden");
       document.getElementById("aktaPeakTableWrap").classList.add("hidden");
@@ -1468,13 +1573,13 @@ async function applyCopyAndSwitch() {
       refreshAktaPlaceholder();
       document.querySelector(".tab-btn[data-tab='akta']").click();
       aktaPlot();
-      toast(`已载入 ${run.channels.length} 个通道（来自快照）`);
-    } catch (err) { toast(err.message, true); }
+      toast(t("toast.loaded_akta_channels", { n: run.channels.length }));
+    } catch (err) { toast(err, true); }
     return;
   }
 
   // 默认: 浓度实验 → Tab 1
-  if (!copyCache.protein_ids) { toast("无蛋白数据可复制", true); return; }
+  if (!copyCache.protein_ids) { toast(t("toast.no_proteins_to_copy"), true); return; }
   if (!allProteins.length) {
     allProteins = await API.get("/api/proteins");
   }
@@ -1495,7 +1600,7 @@ async function applyCopyAndSwitch() {
     renderTable();
   }
   document.querySelector(".tab-btn[data-tab='conc']").click();
-  toast("已加载蛋白列表，可修改 A280 后重新计算");
+  toast(t("toast.loaded_protein_list"));
 }
 
 // 详情页「载入计算工具」深链：/calculator?load_exp=<id> → 把该实验载入对应计算 tab
@@ -1503,10 +1608,10 @@ async function applyCopyAndSwitch() {
 async function loadExpIntoCalc(expId) {
   try {
     const exp = await API.get(`/api/experiments/${expId}`);
-    if (!exp || exp.error) { toast("载入实验数据失败", true); return; }
+    if (!exp || exp.error) { toast(t("toast.load_exp_failed"), true); return; }
     copyCache = exp;
     await applyCopyAndSwitch();
-  } catch (err) { toast(err.message || "载入实验数据失败", true); }
+  } catch (err) { toast(err.backend ? err : backendError(null, 0, err.message || t("toast.load_exp_failed")), true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -1519,33 +1624,57 @@ async function loadExperiments() {
   updateExportLink();
   try {
     const type = document.getElementById("expTypeFilter")?.value || "";
-    const exps = await API.get(`/api/experiments?type=${encodeURIComponent(type)}`);
+    const qs = type ? `calc_type=${encodeURIComponent(type)}` : "";
+    const exps = await API.get(`/api/experiments?${qs}`);
     tbody.innerHTML = exps.map(e => {
       // 关联蛋白只显示第一个，hover 显示完整列表
       const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
       const pcell = pnames.length
-        ? `<span title="${esc(e.protein_names)}">${esc(pnames[0])}${pnames.length > 1 ? " 等" : ""}</span>`
+        ? `<span title="${esc(e.protein_names)}">${esc(pnames[0])}${pnames.length > 1 ? t("archive.and_more", { n: pnames.length - 1 }) : ""}</span>`
         : "-";
+      const typeLabel = (window.BigoI18n && BigoI18n.calcTypeLabel && e.calc_type)
+        ? BigoI18n.calcTypeLabel(e.calc_type)
+        : ((window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type);
       return `
       <tr>
-        <td><input type="checkbox" class="exp-check" value="${e.id}" onchange="updateExpBulkBar()"></td>
+        <td><input type="checkbox" class="exp-check" value="${e.id}" onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></td>
         <td class="exp-date">${e.date || "-"}</td>
-        <td><a href="/experiments/${e.id}" style="color:#4361ee;font-weight:500;text-decoration:none">${esc(e.title)}</a></td>
-        <td class="exp-type"><span class="badge">${esc(e.exp_type)}</span></td>
+        <td><a href="/experiments/${e.id}">${esc(e.title)}</a></td>
+        <td class="exp-type"><span class="badge">${esc(typeLabel)}</span></td>
         <td>${pcell}</td>
         <td>${esc((e.notes || "").substring(0, 40))}</td>
-        <td><button class="btn btn-sm btn-danger" data-action="delete-exp" data-id="${e.id}">删除</button></td>
-        <td><a class="btn btn-sm btn-outline" href="/api/experiments/${e.id}/export" title="导出此实验">📥</a></td>
+        <td><button class="btn btn-sm btn-danger" data-action="delete-exp" data-id="${e.id}" data-name="${escAttr(e.title)}">${t("common.delete")}</button></td>
+        <td><a class="btn btn-sm btn-outline" href="/api/experiments/${e.id}/export" title="${esc(t("archive.export_one"))}">${t("common.export")}</a></td>
       </tr>
     `;
     }).join("");
+    const list = document.getElementById("expList");
+    if (list) {
+      list.innerHTML = exps.map(e => {
+        const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
+        const typeLabel = (window.BigoI18n && BigoI18n.calcTypeLabel && e.calc_type)
+          ? BigoI18n.calcTypeLabel(e.calc_type)
+          : ((window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type);
+        return `<article class="record-card">
+          <div class="record-card-head">
+            <label class="record-select"><input type="checkbox" class="exp-check" value="${e.id}" onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></label>
+            <h3><a href="/experiments/${e.id}">${esc(e.title)}</a></h3>
+          </div>
+          <dl>
+            <dt>${t("archive.col_date")}</dt><dd>${esc(e.date || "-")}</dd>
+            <dt>${t("archive.col_type")}</dt><dd>${esc(typeLabel)}</dd>
+            <dt>${t("archive.col_protein")}</dt><dd>${esc(pnames[0] || "-")}${pnames.length > 1 ? t("archive.and_more", { n: pnames.length - 1 }) : ""}</dd>
+          </dl>
+        </article>`;
+      }).join("");
+    }
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" style="color:#c0392b;text-align:center;padding:20px">加载失败: ${esc(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px">${t("error.load_failed")}: ${esc(err.message)}</td></tr>`;
   }
 }
 
 function showExpAddModal(prefill = null) {
-  document.getElementById("expModalTitle").textContent = prefill?.title || "新建实验";
+  document.getElementById("expModalTitle").textContent = t("archive.new");
   document.getElementById("expModal").classList.remove("hidden");
   loadGoalOptions();  // v0.1.1：拉研究目标下拉
   if (prefill) {
@@ -1577,7 +1706,7 @@ async function loadGoalOptions() {
     const list = await API.get("/api/research/goals");
     const sel = document.getElementById("expGoalSel");
     if (!sel) return;
-    sel.innerHTML = '<option value="">-- 暂不关联 --</option>'
+    sel.innerHTML = '<option value="">' + t("archive.no_goal") + '</option>'
       + list.map(g => `<option value="${g.id}">${esc(g.title)}${g.tag ? "  · " + esc(g.tag) : ""}</option>`).join("");
   } catch (_) { /* 拉不到不阻塞保存 */ }
 }
@@ -1598,35 +1727,47 @@ function readGoalAttachFromForm(prefix = "exp") {
 async function promptGoalAttach() {
   let goals = [];
   try { goals = await API.get("/api/research/goals"); } catch (_) { return {}; }
-  const lines = ["0. (暂不关联)"];
-  goals.forEach((g, i) => lines.push(`${i + 1}. ${g.title}${g.tag ? "  · " + g.tag : ""}`));
-  lines.push("", "新目标请直接输入标题（自动建为根 goal）");
-  const ans = prompt("属于哪个研究目标？\n\n" + lines.join("\n"), "0");
-  if (ans === null) return null;  // 取消存档
-  const t = ans.trim();
-  if (!t || t === "0") return {};
-  const n = parseInt(t, 10);
-  if (!isNaN(n) && n >= 1 && n <= goals.length) return { goal_id: goals[n - 1].id };
-  return { new_goal: { title: t, tag: "" } };
+  const options = [{ id: 0, label: t("ui.pick_goal_none") }].concat(
+    goals.map(g => ({ id: g.id, label: g.title + (g.tag ? "  · " + g.tag : "") }))
+  );
+  if (window.BigoUI && BigoUI.pick) {
+    const picked = await BigoUI.pick({
+      title: t("ui.pick_goal"),
+      options,
+      allowCustom: true,
+      customLabel: t("ui.pick_goal_new"),
+    });
+    if (picked === null) return null;
+    if (picked.custom) return { new_goal: { title: picked.custom, tag: "" } };
+    const item = picked.item;
+    if (!item || !item.id) return {};
+    return { goal_id: item.id };
+  }
+  return {};
 }
 
 async function promptExpMount(expType) {
   let list = [];
   try { list = await API.get(`/api/experiments?type=${encodeURIComponent(expType)}&limit=50`); }
   catch (_) { return {}; }
-  const lines = ["0. (新建实验 — 默认)"];
-  list.forEach((e, i) => {
-    const t = e.title || `实验 #${e.id}`;
-    lines.push(`${i + 1}. [${e.id}] ${t}${e.date ? "  ·  " + e.date : ""}`);
-  });
-  if (!list.length) lines.push("", "（暂无同类实验可挂载）");
-  lines.push("", "选 1-N 挂到已有实验（研究脉络节点不变），回车新建");
-  const ans = prompt(`保存方式？实验类型「${expType}」\n\n` + lines.join("\n"), "0");
-  if (ans === null) return null;  // 取消保存
-  const t = ans.trim();
-  if (!t || t === "0") return {};
-  const n = parseInt(t, 10);
-  if (!isNaN(n) && n >= 1 && n <= list.length) return { exp_id: list[n - 1].id };
+  const options = [{ id: 0, label: t("ui.pick_mount_new") }].concat(
+    list.map(e => ({
+      id: e.id,
+      label: `[${e.id}] ${e.title || t("ui.exp_fallback", { id: e.id })}${e.date ? "  ·  " + e.date : ""}`,
+    }))
+  );
+  if (window.BigoUI && BigoUI.pick) {
+    const picked = await BigoUI.pick({
+      title: t("ui.pick_mount"),
+      message: t("exp_type." + expType),
+      impact: list.length ? t("ui.pick_mount_hint") : t("ui.no_mount_targets"),
+      options,
+    });
+    if (picked === null) return null;
+    const item = picked.item;
+    if (!item || !item.id) return {};
+    return { exp_id: item.id };
+  }
   return {};
 }
 async function saveExperiment(e) {
@@ -1641,7 +1782,7 @@ async function saveExperiment(e) {
     try {
       data[k] = (data[k] && data[k].trim()) ? JSON.parse(data[k]) : {};
     } catch (_) {
-      toast(`${k} 不是有效的 JSON`, true);
+      toast(t("toast.invalid_json", { k }), true);
       return;
     }
   }
@@ -1652,39 +1793,40 @@ async function saveExperiment(e) {
       params: data.params, results: data.results, notes: data.notes,
       ...readGoalAttachFromForm("exp"),
     });
-    toast(saved.goal_node_id ? "实验已保存 · 已挂研究脉络" : "实验已保存");
+    toast(saved.goal_node_id ? t("toast.saved_exp_linked") : t("toast.saved_exp"));
     closeExpModal();
     loadExperiments();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function showExpDetail(id) {
   try {
     const e = await API.get(`/api/experiments/${id}`);
     const titleEl = document.getElementById("expDetailTitle");
-    titleEl.innerHTML = `<span id="expDetailTitleText">${esc(e.title)}</span> <button class="btn btn-sm btn-outline" onclick="editExpTitle(${e.id})" style="margin-left:8px">✏️ 编辑</button>`;
+    titleEl.innerHTML = `<span id="expDetailTitleText">${esc(e.title)}</span> <button class="btn btn-sm btn-outline" onclick="editExpTitle(${e.id})" style="margin-left:8px">${t("common.edit")}</button>`;
     const paramsStr = JSON.stringify(e.params || {}, null, 2);
     const resultsStr = JSON.stringify(e.results || {}, null, 2);
+    const typeLabel = (window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type;
     document.getElementById("expDetailContent").innerHTML = `
       <dl class="info-grid">
-        <dt>类型</dt><dd>${esc(e.exp_type)}</dd>
-        <dt>日期</dt><dd>${e.date || "-"}</dd>
-        <dt>关联蛋白</dt><dd>${esc(e.protein_names || "无")}</dd>
-        <dt>备注</dt><dd id="expDetailNotes">${esc(e.notes || "-")}</dd>
-        <dt>研究脉络</dt>
+        <dt>${t("detail.type")}</dt><dd>${esc(typeLabel)}</dd>
+        <dt>${t("detail.date")}</dt><dd>${e.date || "-"}</dd>
+        <dt>${t("detail.proteins")}</dt><dd>${esc(e.protein_names || t("detail.no_protein"))}</dd>
+        <dt>${t("detail.notes")}</dt><dd id="expDetailNotes">${esc(e.notes || "-")}</dd>
+        <dt>${t("detail.research")}</dt>
         <dd>
-          <div id="detailResearchList" style="display:inline">（加载中…）</div>
-          <button class="btn btn-sm btn-outline" onclick="attachGoalPrompt(${e.id})" style="margin-left:8px">+ 关联到其他目标</button>
+          <div id="detailResearchList" style="display:inline">${t("detail.loading")}</div>
+          <button class="btn btn-sm btn-outline" onclick="attachGoalPrompt(${e.id})" style="margin-left:8px">${t("detail.attach_goal")}</button>
         </dd>
       </dl>
-      <div style="margin-top:12px"><strong>实验参数</strong></div>
-      <pre style="background:#f8f9fb;padding:10px;border-radius:6px;font-size:12px;max-height:150px;overflow:auto">${esc(paramsStr)}</pre>
-      <div style="margin-top:8px"><strong>实验结果</strong></div>
-      <pre style="background:#f8f9fb;padding:10px;border-radius:6px;font-size:12px;max-height:200px;overflow:auto">${esc(resultsStr)}</pre>
+      <div style="margin-top:12px"><strong>${t("detail.params")}</strong></div>
+      <pre style="background:var(--instrument);padding:10px;border:1px solid var(--rule);font-size:12px;max-height:150px;overflow:auto">${esc(paramsStr)}</pre>
+      <div style="margin-top:8px"><strong>${t("detail.results")}</strong></div>
+      <pre style="background:var(--instrument);padding:10px;border:1px solid var(--rule);font-size:12px;max-height:200px;overflow:auto">${esc(resultsStr)}</pre>
     `;
     document.getElementById("expDetailPanel").classList.remove("hidden");
     loadResearchList(e.id);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function loadResearchList(expId) {
@@ -1694,9 +1836,9 @@ async function loadResearchList(expId) {
     const trees = await API.get("/api/research/nodes");
     const links = [];
     for (const root of trees) collectLinks(root, root, expId, links);
-    if (!links.length) { el.textContent = "（暂未关联）"; return; }
+    if (!links.length) { el.textContent = t("ui.unlinked"); return; }
     el.innerHTML = links.map(l => `<a href="/research?root=${l.goalId}" target="_blank">${esc(l.goalTitle)}</a>`).join(" · ");
-  } catch (_) { el.textContent = "（加载失败）"; }
+  } catch (_) { el.textContent = t("error.load_failed"); }
 }
 
 // 沿父链回溯到最近 goal：matchedExperiment 是命中的 experiment 节点，逐层上溯 parent_id
@@ -1713,21 +1855,36 @@ function collectLinks(node, nearestGoalSoFar, expId, out) {
 
 async function attachGoalPrompt(expId) {
   let goals = [];
-  try { goals = await API.get("/api/research/goals"); } catch (_) { toast("加载目标失败", true); return; }
-  const lines = goals.map((g, i) => `${i + 1}. ${g.title}${g.tag ? "  · " + g.tag : ""}`).join("\n");
-  const ans = prompt("关联到哪个目标？\n\n" + (lines || "（暂无目标）"), "");
-  if (ans === null) return;
-  const t = ans.trim();
-  if (!t) return;
-  const n = parseInt(t, 10);
+  try { goals = await API.get("/api/research/goals"); } catch (_) { toast(t("toast.goals_failed"), true); return; }
+  const options = goals.map(g => ({ id: g.id, label: g.title + (g.tag ? "  · " + g.tag : "") }));
+  if (!options.length && window.BigoUI && BigoUI.prompt) {
+    const custom = await BigoUI.prompt({ title: t("detail.attach_goal"), label: t("ui.pick_goal_new") });
+    if (!custom) return;
+    try {
+      await API.post(`/api/experiments/${expId}/attach-goal`, { new_goal: { title: custom, tag: "" } });
+      toast(t("toast.attached"));
+      loadResearchList(expId);
+    } catch (err) { toast(err, true); }
+    return;
+  }
+  const picked = window.BigoUI && BigoUI.pick
+    ? await BigoUI.pick({
+        title: t("detail.attach_goal"),
+        options,
+        allowCustom: true,
+        customLabel: t("ui.pick_goal_new"),
+      })
+    : null;
+  if (!picked) return;
   let body;
-  if (!isNaN(n) && n >= 1 && n <= goals.length) body = { goal_id: goals[n - 1].id };
-  else body = { new_goal: { title: t, tag: "" } };
+  if (picked.custom) body = { new_goal: { title: picked.custom, tag: "" } };
+  else if (picked.item && picked.item.id) body = { goal_id: picked.item.id };
+  else return;
   try {
     await API.post(`/api/experiments/${expId}/attach-goal`, body);
-    toast("已关联");
+    toast(t("toast.attached"));
     loadResearchList(expId);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function editExpTitle(id) {
@@ -1735,7 +1892,7 @@ async function editExpTitle(id) {
   const current = titleEl.textContent;
   const input = document.createElement("input");
   input.type = "text"; input.value = current;
-  input.style.cssText = "font-size:18px;font-weight:600;padding:4px 8px;border:1px solid #d0d0d0;border-radius:4px;width:300px";
+  input.style.cssText = "font-size:18px;font-weight:600;padding:4px 8px;border:1px solid var(--rule);width:300px";
   titleEl.replaceWith(input);
   input.focus();
   input.onblur = input.onkeydown = async function (ev) {
@@ -1743,8 +1900,8 @@ async function editExpTitle(id) {
     const newTitle = input.value.trim() || current;
     try {
       await API.put(`/api/experiments/${id}`, { title: newTitle });
-      toast("已更新");
-    } catch (err) { toast(err.message, true); }
+      toast(t("toast.updated"));
+    } catch (err) { toast(err, true); }
     showExpDetail(id);
   };
 }
@@ -1753,20 +1910,29 @@ async function editExpTitle(id) {
 function updateExportLink() {
   const type = document.getElementById("expTypeFilter")?.value || "";
   const link = document.getElementById("exportBtn");
-  if (link) link.href = "/api/experiments/export" + (type ? "?type=" + encodeURIComponent(type) : "");
+  if (link) link.href = "/api/experiments/export" + (type ? "?calc_type=" + encodeURIComponent(type) : "");
 }
 
 function closeExpDetail() {
   document.getElementById("expDetailPanel").classList.add("hidden");
 }
 
-async function deleteExp(id) {
-  if (!confirm("确定删除该实验记录？")) return;
+async function deleteExp(id, name) {
+  const label = name || ("#" + id);
+  const ok = window.BigoUI
+    ? await BigoUI.confirm({
+        title: t("common.delete"),
+        message: t("archive.confirm_delete_named", { name: label }),
+        impact: t("archive.confirm_delete_impact"),
+        danger: true,
+      })
+    : confirm(t("archive.confirm_delete_named", { name: label }));
+  if (!ok) return;
   try {
     await API.del(`/api/experiments/${id}`);
-    toast("已删除");
+    toast(t("toast.deleted"));
     loadExperiments();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ── Pre-fill from protein page ──────────────────────
@@ -1795,10 +1961,10 @@ let enzymeData = null;         // {meta, wells: {A1: {times, od}, ...}}
 const ENZYME_ANALYSIS_VERSION = "enzyme-1.0";  // raw 快照分析版本（与 BLI/AKTA 一致约定）
 let enzymeSelection = new Set();
 let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw}}
-// 参考角色 → 自动命名标签（●样品/○空白/⊖阴性/⊕阳性）。角色名是自动生成的、不算自定义名，
+// 角色自动名识别（批量改名/参考按钮覆盖判定）：角色名是自动生成的、不算自定义名，
 // 批量改名可覆盖（enzymeShouldAutoRename 放行）；自定义名仍跳过不覆盖。
-const ENZYME_ROLE_LABELS = { "": "样品", blank: "空白", neg: "阴性", pos: "阳性" };
-const ENZYME_ROLE_NAMES = Object.values(ENZYME_ROLE_LABELS);
+// 中英兜底：英文界面（默认 en）下 "Sample"/"Blank" 等角色名也能被识别。
+const ENZYME_ROLE_NAMES = ["样品", "空白", "阴性", "阳性", "Sample", "Blank", "Negative", "Positive"];
 let enzymeLastImage = null;    // 最近一次曲线图 base64（供下载）
 let enzymeLastPlotType = null; // kinetics | michaelis
 let enzymeTimePoints = [];     // 时间点列表（秒，升序，全孔共享网格）
@@ -1812,10 +1978,14 @@ async function uploadEnzymeFile() {
   if (!file) return;
   const form = new FormData();
   form.append("file", file);
+  setEvidence("enzymeMeta", "processing", t("workbench.status_processing"));
   try {
     const r = await fetch("/api/enzyme/parse", { method: "POST", body: form });
     const data = await r.json();
-    if (!r.ok) { toast(data.error, true); return; }
+    if (!r.ok) {
+      setEvidence("enzymeMeta", "fail", t("workbench.status_fail"));
+      toast(backendError(data, r.status), true); return;
+    }
     enzymeData = data;
     enzymeSelection.clear();
     enzymeWellInfo = {};
@@ -1827,12 +1997,16 @@ async function uploadEnzymeFile() {
     enzymeLastPlotType = null;
     renderEnzymeTimePanel();
     renderPlate();
-    document.getElementById("enzymeMeta").textContent =
-      `${data.meta.sample || file.name} | ${data.meta.wavelength || "?"} nm | ${Object.keys(data.wells).length} wells`;
+    const nWells = Object.keys(data.wells).length;
+    setEvidence("enzymeMeta", nWells ? "done" : "empty",
+      `${data.meta.sample || file.name} | ${data.meta.wavelength || "?"} nm | ${t("detail.wells_n", { n: nWells })}`);
     document.getElementById("enzymeTable").classList.add("hidden");
     document.getElementById("enzymePlotArea").innerHTML = "";
-    toast("解析完成");
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.parsed"));
+  } catch (err) {
+    setEvidence("enzymeMeta", "fail", t("workbench.status_fail"));
+    toast(err, true);
+  }
 }
 
 function renderPlate() {
@@ -1901,8 +2075,8 @@ function renderEnzymeTimeAxis() {
   // 端点读数
   const eLo = document.getElementById("enzymeTimeLoLabel");
   const eHi = document.getElementById("enzymeTimeHiLabel");
-  if (eLo) eLo.textContent = "起始 " + enzymeTimePoints[enzymeTimeLo] + " s";
-  if (eHi) eHi.textContent = "终止 " + enzymeTimePoints[enzymeTimeHi] + " s";
+  if (eLo) eLo.textContent = t("workbench.time_lo", { t: enzymeTimePoints[enzymeTimeLo] });
+  if (eHi) eHi.textContent = t("workbench.time_hi", { t: enzymeTimePoints[enzymeTimeHi] });
   updateEnzymeTimeBadge();
 }
 
@@ -1910,8 +2084,11 @@ function updateEnzymeTimeBadge() {
   const el = document.getElementById("enzymeTimeCount");
   if (!el || !enzymeTimePoints.length) return;
   const n = enzymeTimeHi - enzymeTimeLo + 1;
-  el.textContent = `已选 ${n}/${enzymeTimePoints.length} 个时间点（${enzymeTimePoints[enzymeTimeLo]}s — ${enzymeTimePoints[enzymeTimeHi]}s）`;
-  el.style.color = n < 2 ? "#e74c3c" : "#888";  // <2 点无法拟合斜率，标红提醒
+  el.textContent = t("workbench.time_selected", {
+    n, total: enzymeTimePoints.length,
+    lo: enzymeTimePoints[enzymeTimeLo], hi: enzymeTimePoints[enzymeTimeHi],
+  });
+  el.style.color = n < 2 ? "var(--danger)" : "var(--graphite)";  // <2 点无法拟合斜率，标红提醒
 }
 
 function enzymeTimeIndexFromEvent(e) {
@@ -2014,7 +2191,7 @@ function updateWellForm() {
   const form = document.getElementById("wellForm");
   const fit = document.getElementById("wellFit");
   if (enzymeSelection.size === 0) {
-    detail.textContent = "选择孔位查看详情"; detail.classList.remove("hidden");
+    detail.textContent = t("workbench.pick_well"); detail.classList.remove("hidden");
     form.classList.add("hidden"); fit.classList.add("hidden");
     return;
   }
@@ -2037,9 +2214,9 @@ function updateWellForm() {
     document.getElementById("wellProtein").value = "";
     document.getElementById("enzymeProteinSearch").value = "";
   }
-  document.getElementById("wellName").placeholder = `${enzymeSelection.size} 个孔选中`;
+  document.getElementById("wellName").placeholder = t("toast.pick_wells_n", { n: enzymeSelection.size });
   document.getElementById("wellGroup").placeholder =
-    enzymeSelection.size > 1 ? `同时设置 ${enzymeSelection.size} 个孔的组` : "同组孔取平均作图";
+    enzymeSelection.size > 1 ? t("workbench.well_group_n", { n: enzymeSelection.size }) : t("workbench.well_group_ph");
 
   // 参考孔按钮状态
   const ref = info.ref;
@@ -2130,11 +2307,12 @@ function _escRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function enzymeBatchConc() {
-  if (enzymeSelection.size < 2) { toast("请选中多个孔", true); return; }
-  const start = parseFloat(prompt("起始浓度:"));
+async function enzymeBatchConc() {
+  if (enzymeSelection.size < 2) { toast(t("toast.select_multi_wells"), true); return; }
+  const startRaw = await askText(t("ui.start_conc"), "");
+  const start = parseFloat(startRaw);
   if (isNaN(start)) return;
-  const factor = parseFloat(prompt("每孔递增倍数（如 2 表示 2× 递增）:", "2")) || 2;
+  const factor = parseFloat(await askText(t("ui.step_factor"), "2")) || 2;
   const unit = document.getElementById("wellConcUnit").value;
   const mw = parseFloat(document.getElementById("wellMW").value) || null;
   const ids = Array.from(enzymeSelection).sort();
@@ -2152,16 +2330,16 @@ function enzymeBatchConc() {
   });
   renderPlate();
   updateWellForm();
-  toast(`已设置 ${ids.length} 孔，起始 ${start}，${factor}× 递增`);
+  toast(t("toast.batch_conc_set", { n: ids.length, start, factor }));
 }
 
 async function enzymeCalcSelected() {
-  if (!enzymeSelection.size) { toast("请先选中孔位", true); return; }
+  if (!enzymeSelection.size) { toast(t("toast.select_wells"), true); return; }
   await enzymeCalc(Array.from(enzymeSelection));
 }
 
 async function enzymeCalcAll(silent = false) {
-  if (!enzymeData) { toast("请先上传数据", true); return; }
+  if (!enzymeData) { toast(t("toast.upload_first"), true); return; }
   await enzymeCalc(Object.keys(enzymeData.wells), silent);
 }
 
@@ -2192,9 +2370,9 @@ async function enzymeCalc(wellIds, silent = false) {
     renderEnzymeTable(wellIds);
     updateWellForm();
     const bg = r.bg;
-    const msg = bg ? `计算完成 (已扣除背景 ${bg.count} 个孔, 均值 ΔOD/min=${bg.avg.toFixed(6)})` : "计算完成";
+    const msg = bg ? t("workbench.calc_bg", { n: bg.count, avg: bg.avg.toFixed(6) }) : t("toast.calc_done");
     if (!silent) toast(msg);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 function renderEnzymeTable(wellIds) {
@@ -2204,21 +2382,21 @@ function renderEnzymeTable(wellIds) {
   tbody.innerHTML = wellIds.map(id => {
     const info = enzymeWellInfo[id] || {};
     const f = info.fit || {};
-    const refLabel = info.ref === "blank" ? "空白" : info.ref === "neg" ? "阴性" : info.ref === "pos" ? "阳性" : "样品";
+    const refLabel = info.ref === "blank" ? t("workbench.blank") : info.ref === "neg" ? t("workbench.neg") : info.ref === "pos" ? t("workbench.pos") : t("workbench.sample_well");
     return `<tr>
       <td>${id}</td><td>${esc(info.name || "")}</td>
-      <td style="color:#888">${esc(info.group || "")}</td>
+      <td style="color:var(--graphite)">${esc(info.group || "")}</td>
       <td>${refLabel}</td>
       <td>${info.conc_ng_ml ?? "-"}</td><td>${info.conc_uM ?? "-"}</td>
-      <td>${f.blank_corrected ? (f.slope_corrected?.toFixed(5) + ' <span style=color:#888;font-size:11px>(校正)</span>') : (f.slope?.toFixed(5) || "-")}</td>
-      <td style="color:${f.r2 != null && f.r2 < 0.95 ? '#e74c3c' : '#333'}">${f.r2 ?? "-"}</td>
+      <td>${f.blank_corrected ? (f.slope_corrected?.toFixed(5) + ' <span style=color:var(--graphite);font-size:11px>(' + t("workbench.corrected") + ')</span>') : (f.slope?.toFixed(5) || "-")}</td>
+      <td style="color:${f.r2 != null && f.r2 < 0.95 ? 'var(--danger)' : 'var(--carbon)'}">${f.r2 ?? "-"}</td>
       <td>${info.activity ?? "-"}</td>
     </tr>`;
   }).join("");
 }
 
 async function enzymePlot(type) {
-  if (!enzymeData) { toast("请先上传数据", true); return; }
+  if (!enzymeData) { toast(t("toast.upload_first"), true); return; }
   const ids = enzymeSelection.size ? Array.from(enzymeSelection) : Object.keys(enzymeData.wells);
   const alignStart = document.getElementById("enzymeAlignStart")?.checked || false;
   const alignEnd = document.getElementById("enzymeAlignEnd")?.checked || false;
@@ -2259,28 +2437,28 @@ async function enzymePlot(type) {
     enzymeLastImage = r.image;
     enzymeLastPlotType = type;
     document.getElementById("enzymePlotArea").innerHTML =
-      `<img src="${r.image}" style="max-width:100%;border-radius:8px" alt="plot">
+      `<img src="${r.image}" style="max-width:100%" alt="plot">
        <div style="margin-top:8px">
-         <button class="btn btn-sm btn-outline" onclick="downloadEnzymePlot()">📥 下载 PNG</button>
+         <button class="btn btn-sm btn-outline" onclick="downloadEnzymePlot()">${t("workbench.download_png")}</button>
        </div>`;
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function downloadEnzymePlot() {
-  if (!enzymeLastImage) { toast("请先生成曲线图", true); return; }
-  const auto = await getAutoName("酶活测定") || "酶活测定";
-  const name = enzymeLastPlotType === "michaelis" ? "MM曲线" : "动力学曲线";
+  if (!enzymeLastImage) { toast(t("toast.plot_curve_first"), true); return; }
+  const auto = await getAutoName("酶活测定", null, "enzyme") || "enzyme";
+  const name = enzymeLastPlotType === "michaelis" ? t("workbench.mm") : t("workbench.kinetics");
   downloadDataUrl(enzymeLastImage, `${auto}_${name}.png`);
 }
 
 async function enzymeSaveExp() {
-  if (!enzymeData) { toast("请先上传数据", true); return; }
+  if (!enzymeData) { toast(t("toast.upload_first"), true); return; }
   const mount = await promptExpMount("酶活测定");
-  if (mount === null) { toast("已取消保存"); return; }
+  if (mount === null) { toast(t("toast.save_cancelled")); return; }
   let title = "";
   if (!mount.exp_id) {
-    const autoName = await getAutoName("酶活测定");
-    title = prompt("实验名称:", autoName || enzymeData.meta.sample || "酶活测定");
+    const autoName = await getAutoName("酶活测定", null, "enzyme");
+    title = await askText(t("ui.exp_name_prompt"), autoName || enzymeData.meta.sample || t("exp_type.酶活测定"));
     if (!title) return;
   }
 
@@ -2314,7 +2492,7 @@ async function enzymeSaveExp() {
   let goal = {};
   if (!mount.exp_id) {
     goal = await promptGoalAttach();
-    if (goal === null) { toast("已取消保存"); return; }
+    if (goal === null) { toast(t("toast.save_cancelled")); return; }
   }
 
   try {
@@ -2344,15 +2522,15 @@ async function enzymeSaveExp() {
       ...mount,
       ...goal,
     });
-    toast(mount.exp_id ? `已重挂到实验 #${mount.exp_id}（追加原始快照）`
-      : (saved.goal_node_id ? "已保存 · 已挂研究脉络" : "已保存为实验记录"));
-  } catch (err) { toast(err.message, true); }
+    toast(mount.exp_id ? t("toast.remounted", { id: mount.exp_id })
+      : (saved.goal_node_id ? t("toast.saved_linked") : t("toast.saved_record")));
+  } catch (err) { toast(err, true); }
 }
 
 // 导出作图友好 Excel（宽格式：每孔独立时间/OD 两列 + 动力学汇总），文件名用自动命名
 async function enzymeExportExcel() {
-  if (!enzymeData) { toast("请先上传数据", true); return; }
-  const autoName = await getAutoName("酶活测定") || "酶活测定";
+  if (!enzymeData) { toast(t("toast.upload_first"), true); return; }
+  const autoName = await getAutoName("酶活测定", null, "enzyme") || "enzyme";
   const wells = {};
   for (const [id, wd] of Object.entries(enzymeData.wells)) {
     const info = enzymeWellInfo[id] || {};
@@ -2373,7 +2551,7 @@ async function enzymeExportExcel() {
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || `导出失败 (${r.status})`);
+      throw backendError(j, r.status, t("toast.export_failed", { status: r.status }));
     }
     const blob = await r.blob();
     const a = document.createElement("a");
@@ -2383,8 +2561,8 @@ async function enzymeExportExcel() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-    toast("已导出作图 Excel");
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.exported_plot"));
+  } catch (err) { toast(err, true); }
 }
 
 let enzymeProteinList = [];
@@ -2405,9 +2583,9 @@ async function enzymeSearchProtein() {
   );
   dropdown.innerHTML = matches.length
     ? matches.map(p => `<div class="search-item" onclick="enzymeSelectProtein(${p.id},'${esc(p.name)}')">
-        <strong>${esc(p.name)}</strong><span style="color:#888;font-size:11px">${p.mw?.toLocaleString()} Da</span>
+        <strong>${esc(p.name)}</strong><span style="color:var(--graphite);font-size:11px">${p.mw?.toLocaleString()} Da</span>
       </div>`).join("")
-    : '<div class="search-item" style="color:#888">无匹配</div>';
+    : `<div class="search-item" style="color:var(--graphite)">${t("workbench.no_match")}</div>`;
   dropdown.classList.remove("hidden");
 }
 
@@ -2438,8 +2616,8 @@ async function enzymeLinkProtein(pid) {
     document.getElementById("wellName").value = p.name;
     document.getElementById("wellMW").value = p.mw;
     renderPlate();
-    toast(`已关联 ${enzymeSelection.size} 个孔到蛋白: ${p.name}`);
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.linked_wells", { n: enzymeSelection.size, name: p.name }));
+  } catch (err) { toast(err, true); }
 }
 
 // 关闭搜索下拉
@@ -2452,13 +2630,20 @@ document.addEventListener("click", function (e) {
 
 function enzymeSetRef(refType) {
   // 参考角色写进命名，不落空：●样品→"样品"、○空白→"空白"、⊖阴性→"阴性"、⊕阳性→"阳性"
-  const label = ENZYME_ROLE_LABELS[refType || ""];
+  const roleLabels = {
+    "": t("workbench.sample_well"),
+    blank: t("workbench.blank"),
+    neg: t("workbench.neg"),
+    pos: t("workbench.pos"),
+  };
+  const label = roleLabels[refType || ""];
+  const roleNames = ENZYME_ROLE_NAMES.concat(Object.values(roleLabels));
   for (const id of enzymeSelection) {
     if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
     enzymeWellInfo[id].ref = refType;
     // 空命名或当前是角色名 → 跟随按钮；自定义命名不覆盖
     const cur = enzymeWellInfo[id].name || "";
-    if (!cur || ENZYME_ROLE_NAMES.includes(cur)) enzymeWellInfo[id].name = label;
+    if (!cur || roleNames.includes(cur)) enzymeWellInfo[id].name = label;
   }
   updateWellForm();
   renderPlate();
@@ -2512,7 +2697,7 @@ function renderWeblogoProteinList(filter) {
     `<label class="checkbox-label" style="display:flex!important;flex-direction:row!important;align-items:center!important;gap:4px!important;margin-bottom:2px!important;cursor:pointer;padding:2px 4px">
       <input type="checkbox" class="weblogo-protein-check" value="${p.id}"> ${esc(p.name)}
     </label>`
-  ).join("") || '<span style="color:#888">无匹配蛋白</span>';
+  ).join("") || `<span style="color:var(--graphite)">${t("workbench.no_match_protein")}</span>`;
 }
 
 async function loadWeblogoTagFilter() {
@@ -2549,22 +2734,22 @@ function showWeblogoResult(r, count) {
   document.getElementById("weblogoImage").src = r.image;
   const notes = [];
   const p = weblogoLastParams || {};
-  if (p.multimer > 1) notes.push(`${p.multimer} 聚体裁剪`);
-  if (p.start || p.end) notes.push(`位点 ${r.range ? r.range[0] + "–" + r.range[1] : ""}`);
+  if (p.multimer > 1) notes.push(t("workbench.multimer_cropped", { n: p.multimer }));
+  if (p.start || p.end) notes.push(t("workbench.pos_span", { lo: r.range ? r.range[0] : "", hi: r.range ? r.range[1] : "" }));
   document.getElementById("weblogoInfo").textContent =
-    `${count} 条序列, ${r.positions} 个位置` + (notes.length ? " (" + notes.join(", ") + ")" : "");
+    t("workbench.seq_pos", { n: count, pos: r.positions }) + (notes.length ? " (" + notes.join(", ") + ")" : "");
   document.getElementById("weblogoResult").classList.remove("hidden");
   document.getElementById("weblogoSaveBtn").style.display = "";
   document.getElementById("weblogoExpName").style.display = "";
-  getAutoName("Weblogo").then(auto => {
+  getAutoName("Weblogo", null, "weblogo").then(auto => {
     document.getElementById("weblogoExpName").placeholder =
-      auto ? `实验名称（默认 ${auto}）` : "实验名称（可选）";
+      auto ? t("ui.exp_name_default", { name: auto }) : t("ui.exp_name_optional");
   });
 }
 
 async function generateWeblogo() {
   const checked = document.querySelectorAll(".weblogo-protein-check:checked");
-  if (checked.length < 2) { toast("至少选择 2 个蛋白", true); return; }
+  if (checked.length < 2) { toast(t("toast.weblogo_min_proteins"), true); return; }
 
   const ids = Array.from(checked).map(cb => parseInt(cb.value));
   const selected = weblogoAllProteins.filter(p => ids.includes(p.id));
@@ -2573,7 +2758,7 @@ async function generateWeblogo() {
   // 检查序列是否等长
   const n = sequences[0].length;
   if (sequences.some(s => s.length !== n)) {
-    toast("所选蛋白序列长度不一致，无法对齐", true); return;
+    toast(t("toast.weblogo_len_mismatch"), true); return;
   }
 
   const color = document.getElementById("weblogoColor").value;
@@ -2592,13 +2777,13 @@ async function generateWeblogo() {
   const genBtn = document.getElementById("weblogoGenBtn");
   const origText = genBtn.textContent;
   genBtn.disabled = true;
-  genBtn.textContent = "⏳ 生成中…";
+  genBtn.textContent = t("workbench.generating");
   try {
     const r = await API.post("/api/weblogo", { sequences, color_scheme: color, start, end, multimer });
     weblogoLastImage = r.image;
     showWeblogoResult(r, selected.length);
-    toast("Weblogo 已生成");
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.weblogo_done"));
+  } catch (err) { toast(err, true); }
   finally { genBtn.disabled = false; genBtn.textContent = origText; }
 }
 
@@ -2616,20 +2801,20 @@ async function restoreWeblogo() {
     });
     weblogoLastImage = r.image;
     showWeblogoResult(r, weblogoLastProteins.length || saved.sequences.length);
-    toast("已恢复上次的 Weblogo 结果");
+    toast(t("toast.weblogo_restored"));
   } catch (_) { /* 首次生成被中断/渲染失败：忽略，用户重新生成即可 */ }
 }
 
 async function downloadWeblogo() {
   if (!weblogoLastImage) return;
-  const auto = await getAutoName("Weblogo") || "Weblogo";
+  const auto = await getAutoName("Weblogo", null, "weblogo") || "weblogo";
   downloadDataUrl(weblogoLastImage, `${auto}.png`);
 }
 
 async function saveWeblogoExp() {
   if (!weblogoLastProteins.length) return;
   const customName = document.getElementById("weblogoExpName").value.trim();
-  const title = customName || await getAutoName("Weblogo")
+  const title = customName || await getAutoName("Weblogo", null, "weblogo")
     || weblogoLastProteins.map(p => p.name).join(", ") + " Weblogo";
   try {
     await API.post("/api/experiments/from-calculation", {
@@ -2644,8 +2829,8 @@ async function saveWeblogoExp() {
       },
       calc_result: {},
     });
-    toast("已保存为实验记录");
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.saved_record"));
+  } catch (err) { toast(err, true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -2653,26 +2838,44 @@ async function saveWeblogoExp() {
 // ═════════════════════════════════════════════════════
 
 // ── Proteins bulk ─────────────────────────────────────
+function recordCheckedIds(cls) {
+  const ids = [];
+  const seen = new Set();
+  document.querySelectorAll("." + cls + ":checked").forEach(cb => {
+    if (seen.has(cb.value)) return;
+    seen.add(cb.value);
+    ids.push(parseInt(cb.value, 10));
+  });
+  return ids;
+}
+function recordAllCount(cls) {
+  return new Set([...document.querySelectorAll("." + cls)].map(cb => cb.value)).size;
+}
+function syncRecordCheck(el, cls) {
+  document.querySelectorAll("." + cls).forEach(cb => {
+    if (cb.value === el.value) cb.checked = el.checked;
+  });
+}
+
 function toggleSelectAllProteins(el) {
   document.querySelectorAll(".protein-check").forEach(cb => cb.checked = el.checked);
   updateBulkBar();
 }
 
 function updateBulkBar() {
-  const checked = document.querySelectorAll(".protein-check:checked");
+  const ids = recordCheckedIds("protein-check");
   const bar = document.getElementById("bulkBar");
   const count = document.getElementById("bulkCount");
   if (!bar || !count) return;
-  if (checked.length) {
+  if (ids.length) {
     bar.classList.remove("hidden");
-    count.textContent = `已选 ${checked.length} 项`;
+    count.textContent = t("workbench.selected_n", { n: ids.length });
   } else {
     bar.classList.add("hidden");
   }
-  // 同步全选框
-  const all = document.querySelectorAll(".protein-check");
   const selAll = document.getElementById("selectAllProteins");
-  if (selAll) selAll.checked = all.length > 0 && checked.length === all.length;
+  const allN = recordAllCount("protein-check");
+  if (selAll) selAll.checked = allN > 0 && ids.length === allN;
 }
 
 function clearSelection() {
@@ -2682,38 +2885,57 @@ function clearSelection() {
 }
 
 async function batchDeleteProteins() {
-  const checked = document.querySelectorAll(".protein-check:checked");
-  if (!checked.length) return;
-  if (!confirm(`确定删除选中的 ${checked.length} 个蛋白？`)) return;
-  const ids = Array.from(checked).map(cb => parseInt(cb.value));
+  const ids = recordCheckedIds("protein-check");
+  if (!ids.length) return;
+  const ok = window.BigoUI
+    ? await BigoUI.confirm({
+        title: t("proteins.delete_selected"),
+        message: t("proteins.confirm_batch_delete", { n: ids.length }),
+        impact: t("proteins.confirm_delete_impact"),
+        danger: true,
+      })
+    : confirm(t("proteins.confirm_batch_delete", { n: ids.length }));
+  if (!ok) return;
   try {
     const r = await API.post("/api/proteins/batch-delete", { ids });
-    toast(`已删除 ${r.deleted} 个蛋白`, false, () => undoRestore());
+    toast(t("toast.deleted_n_proteins", { n: r.deleted }), false, () => undoRestore());
     clearSelection();
     loadProteins().catch(() => {});
     loadProteinSelects();
     closeDetail();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function deleteAllProteins() {
-  if (!confirm("⚠️ 确定删除全部蛋白？此操作可以撤销。")) return;
-  if (prompt("输入「全部删除」确认:") !== "全部删除") { toast("已取消", true); return; }
+  const ok = window.BigoUI
+    ? await BigoUI.confirm({
+        title: t("proteins.delete_all"),
+        message: t("proteins.confirm_delete_all"),
+        impact: t("proteins.confirm_delete_all_impact"),
+        danger: true,
+      })
+    : confirm(t("proteins.confirm_delete_all"));
+  if (!ok) return;
+  const phrase = t("proteins.confirm_phrase");
+  const typed = window.BigoUI
+    ? await BigoUI.prompt({ title: t("proteins.type_confirm", { phrase }), value: "" })
+    : prompt(t("proteins.type_confirm", { phrase }));
+  if (typed !== phrase) { toast(t("proteins.cancelled"), true); return; }
   try {
     const r = await API.post("/api/proteins/delete-all", {});
-    toast(`已删除全部 ${r.deleted} 个蛋白`, false, () => undoRestore());
+    toast(t("toast.deleted_all_proteins", { n: r.deleted }), false, () => undoRestore());
     document.getElementById("selectAllProteins").checked = false;
     loadProteins().catch(() => {});
     loadProteinSelects();
     closeDetail();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ── 批量改标签 ─────────────────────────────────────────
 function batchEditTags() {
-  const checked = document.querySelectorAll(".protein-check:checked");
-  if (!checked.length) { toast("请先选中蛋白", true); return; }
-  document.getElementById("batchTagCount").textContent = checked.length;
+  const ids = recordCheckedIds("protein-check");
+  if (!ids.length) { toast(t("toast.select_proteins"), true); return; }
+  document.getElementById("batchTagCount").textContent = ids.length;
   document.getElementById("batchTagModal").classList.remove("hidden");
   document.getElementById("batchTagAddInput").querySelector("input").focus();
 }
@@ -2730,20 +2952,19 @@ function closeBatchTagModal() {
 }
 
 async function applyBatchTags() {
-  const checked = document.querySelectorAll(".protein-check:checked");
-  if (!checked.length) { closeBatchTagModal(); return; }
+  const ids = recordCheckedIds("protein-check");
+  if (!ids.length) { closeBatchTagModal(); return; }
   const add = document.getElementById("batchTagAddHidden").value;
   const remove = document.getElementById("batchTagRemoveHidden").value;
-  if (!add && !remove) { toast("请添加或移除至少一个标签", true); return; }
-  const ids = Array.from(checked).map(cb => parseInt(cb.value));
+  if (!add && !remove) { toast(t("toast.need_tag_change"), true); return; }
   try {
     const r = await API.post("/api/proteins/batch-tags", { ids, add, remove });
-    toast(`已更新 ${r.updated} 个蛋白的标签`);
+    toast(t("toast.updated_n_tags", { n: r.updated }));
     closeBatchTagModal();
     loadProteins().catch(() => {});
     loadProteinSelects();
     loadTagFilter();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ── Experiments bulk ──────────────────────────────────
@@ -2753,19 +2974,19 @@ function toggleSelectAllExps(el) {
 }
 
 function updateExpBulkBar() {
-  const checked = document.querySelectorAll(".exp-check:checked");
+  const ids = recordCheckedIds("exp-check");
   const bar = document.getElementById("expBulkBar");
   const count = document.getElementById("expBulkCount");
   if (!bar || !count) return;
-  if (checked.length) {
+  if (ids.length) {
     bar.classList.remove("hidden");
-    count.textContent = `已选 ${checked.length} 项`;
+    count.textContent = t("workbench.selected_n", { n: ids.length });
   } else {
     bar.classList.add("hidden");
   }
-  const all = document.querySelectorAll(".exp-check");
   const selAll = document.getElementById("selectAllExps");
-  if (selAll) selAll.checked = all.length > 0 && checked.length === all.length;
+  const allN = recordAllCount("exp-check");
+  if (selAll) selAll.checked = allN > 0 && ids.length === allN;
 }
 
 function clearExpSelection() {
@@ -2775,27 +2996,46 @@ function clearExpSelection() {
 }
 
 async function batchDeleteExperiments() {
-  const checked = document.querySelectorAll(".exp-check:checked");
-  if (!checked.length) return;
-  if (!confirm(`确定删除选中的 ${checked.length} 条实验？`)) return;
-  const ids = Array.from(checked).map(cb => parseInt(cb.value));
+  const ids = recordCheckedIds("exp-check");
+  if (!ids.length) return;
+  const ok = window.BigoUI
+    ? await BigoUI.confirm({
+        title: t("archive.delete_selected"),
+        message: t("archive.confirm_batch", { n: ids.length }),
+        impact: t("archive.confirm_delete_impact"),
+        danger: true,
+      })
+    : confirm(t("archive.confirm_batch", { n: ids.length }));
+  if (!ok) return;
   try {
     const r = await API.post("/api/experiments/batch-delete", { ids });
-    toast(`已删除 ${r.deleted} 条实验`, false, () => undoRestore());
+    toast(t("toast.deleted_n_exps", { n: r.deleted }), false, () => undoRestore());
     clearExpSelection();
     loadExperiments().catch(() => {});
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function deleteAllExperiments() {
-  if (!confirm("⚠️ 确定删除全部实验？此操作可以撤销。")) return;
-  if (prompt("输入「全部删除」确认:") !== "全部删除") { toast("已取消", true); return; }
+  const ok = window.BigoUI
+    ? await BigoUI.confirm({
+        title: t("archive.delete_all"),
+        message: t("archive.confirm_all"),
+        impact: t("archive.confirm_all_impact"),
+        danger: true,
+      })
+    : confirm(t("archive.confirm_all"));
+  if (!ok) return;
+  const phrase = t("proteins.confirm_phrase");
+  const typed = window.BigoUI
+    ? await BigoUI.prompt({ title: t("proteins.type_confirm", { phrase }), value: "" })
+    : prompt(t("proteins.type_confirm", { phrase }));
+  if (typed !== phrase) { toast(t("proteins.cancelled"), true); return; }
   try {
     const r = await API.post("/api/experiments/delete-all", {});
-    toast(`已删除全部 ${r.deleted} 条实验`, false, () => undoRestore());
+    toast(t("toast.deleted_all_exps", { n: r.deleted }), false, () => undoRestore());
     document.getElementById("selectAllExps").checked = false;
     loadExperiments().catch(() => {});
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // ── Undo ──────────────────────────────────────────────
@@ -2803,14 +3043,14 @@ async function undoRestore() {
   try {
     const r = await API.post("/api/undo", {});
     if (r.ok) {
-      toast(`已撤销: ${r.restored} 已恢复`);
+      toast(t("toast.undone", { n: r.restored }));
       loadProteins().catch(() => {});
       loadExperiments().catch(() => {});
       loadProteinSelects();
     } else {
-      toast(r.error || "无法撤销", true);
+      toast(r.error || t("toast.cannot_undo"), true);
     }
-  } catch (err) { toast("撤销失败: " + err.message, true); }
+  } catch (err) { toast(t("toast.undo_failed", { msg: err.message }), true); }
 }
 
 // ═════════════════════════════════════════════════════
@@ -2829,10 +3069,14 @@ async function uploadBliFile() {
   if (!file) return;
   const form = new FormData();
   form.append("file", file);
+  setEvidence("bliMeta", "processing", t("workbench.status_processing"));
   try {
     const r = await fetch("/api/bli/analyze", { method: "POST", body: form });
     const data = await r.json();
-    if (!r.ok) { toast(data.error, true); return; }
+    if (!r.ok) {
+      setEvidence("bliMeta", "fail", t("workbench.status_fail"));
+      toast(backendError(data, r.status), true); return;
+    }
     bliSession = data.session_id;
     bliSamples = data.samples || [];
     bliSelectedSample = bliSamples[0]?.sample || "";
@@ -2841,14 +3085,18 @@ async function uploadBliFile() {
     bliActiveCurves = new Set(bliSamples.flatMap(s => s.labels || []));  // 默认全选进入数据
     renderBliSamples();
     renderBliCurves();
-    document.getElementById("bliMeta").textContent =
-      `${file.name} | ${data.n_sensors} 传感器 | ${bliSamples.length} 样本`;
+    const phase = bliSamples.length ? "done" : "empty";
+    setEvidence("bliMeta", phase,
+      `${file.name} | ${t("workbench.sensors_n", { n: data.n_sensors })} | ${t("copy.samples_n", { n: bliSamples.length })}`);
     document.getElementById("bliAnalyzed").classList.remove("hidden");
     document.getElementById("bliKdWrap").classList.add("hidden");
     document.getElementById("bliPlotArea").innerHTML = "";
     refreshBliPlaceholder();
-    toast("解析完成");
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.parsed"));
+  } catch (err) {
+    setEvidence("bliMeta", "fail", t("workbench.status_fail"));
+    toast(err, true);
+  }
 }
 
 function renderBliSamples() {
@@ -2857,8 +3105,8 @@ function renderBliSamples() {
     <tr>
       <td><strong>${esc(s.sample)}</strong></td>
       <td>${s.n_curves}</td>
-      <td style="font-size:12px;color:#666">${(s.concs || []).map(c => formatConc(c, "nM")).join(" / ")}</td>
-      <td><button class="btn btn-sm btn-outline bli-pick" data-sample="${escAttr(s.sample)}">${bliSelectedSample === s.sample ? "✓ 选中" : "拟合"}</button></td>
+      <td style="font-size:12px;color:var(--graphite)">${(s.concs || []).map(c => formatConc(c, "nM")).join(" / ")}</td>
+      <td><button class="btn btn-sm btn-outline bli-pick" data-sample="${escAttr(s.sample)}">${bliSelectedSample === s.sample ? t("workbench.selected_mark") : t("workbench.fit")}</button></td>
     </tr>`).join("");
 }
 
@@ -2880,8 +3128,8 @@ function renderBliCurves() {
     <tr>
       <td><input type="checkbox" class="bli-curve-cb" data-label="${escAttr(r.label)}" ${bliActiveCurves.has(r.label) ? "checked" : ""}></td>
       <td style="font-size:12px">${esc(r.label)}</td>
-      <td style="font-size:12px;color:#666">${esc(r.sample)}</td>
-      <td style="font-size:12px;color:#666">${formatConc(r.conc, "nM")} nM</td>
+      <td style="font-size:12px;color:var(--graphite)">${esc(r.sample)}</td>
+      <td style="font-size:12px;color:var(--graphite)">${formatConc(r.conc, "nM")} nM</td>
     </tr>`).join("");
   updateBliCurveMaster();
 }
@@ -2895,7 +3143,7 @@ function updateBliCurveMaster() {
   const nOn = all.filter(r => bliActiveCurves.has(r.label)).length;
   master.checked = nOn === all.length;
   master.indeterminate = nOn > 0 && nOn < all.length;
-  if (stats) stats.textContent = `已选 ${nOn}/${all.length}`;
+  if (stats) stats.textContent = nOn + "/" + all.length;
 }
 
 function bliToggleAllCurves() {
@@ -2973,36 +3221,36 @@ function bliParams() {
 }
 
 async function bliPlot() {
-  if (!bliSession) { toast("请先上传数据", true); return; }
+  if (!bliSession) { toast(t("toast.upload_first"), true); return; }
   const mode = (document.getElementById("bliPlotMode") || {}).value || "overlay";
   try {
     const r = await API.post("/api/bli/plot", { ...bliParams(), separate: mode === "separate" });
     const area = document.getElementById("bliPlotArea");
     if (mode === "separate" && r.images) {
       area.innerHTML = Object.entries(r.images).map(([sid, img]) =>
-        `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px">
+        `<div class="calc-card" style="padding:12px;margin-bottom:10px">
           <div style="font-weight:600;margin-bottom:6px">${esc(sid)}</div>
           <img src="${img}" style="max-width:100%" alt="${esc(sid)}">
         </div>`).join("");
       bliLastPlot = null;
     } else {
       area.innerHTML =
-        `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-          <img src="${r.image}" style="max-width:100%" alt="传感器图">
+        `<div class="calc-card" style="padding:12px">
+          <img src="${r.image}" style="max-width:100%" alt="${esc(t("workbench.sensorgram"))}">
         </div>`;
       bliLastPlot = r.image;
     }
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function bliFitSelected() {
-  if (!bliSession || !bliSelectedSample) { toast("请先选择样本", true); return; }
+  if (!bliSession || !bliSelectedSample) { toast(t("toast.pick_sample"), true); return; }
   try {
     const r = await API.post("/api/bli/fit", { ...bliParams(), sample: bliSelectedSample });
     bliKdResult = r;
     document.getElementById("bliKdWrap").classList.remove("hidden");
     document.getElementById("bliKdTables").innerHTML = renderBliKd(bliSelectedSample, r);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // 单样本 KD 结果渲染（点样本行重拟合 → 更新这张卡片；拟合失败显示错误卡）
@@ -3010,40 +3258,40 @@ function renderBliKd(sample, res) {
   if (!res || res.error) {
     return `<div class="calc-card" style="padding:12px;margin-bottom:10px">
       <div style="font-weight:600;margin-bottom:4px">${esc(sample)}</div>
-      <div style="color:#c00;font-size:13px">拟合失败：${esc(res.error || "未知错误")}</div>
+      <div style="color:var(--danger);font-size:13px">${t("toast.fit_failed")}: ${esc(res.error || t("error.generic"))}</div>
     </div>`;
   }
   const phase = res.phase || {};
   const methods = ["standard", "split", "joint", "steady", "mixed"];
   const rows = methods.map(m => {
     const v = res[m];
-    if (!v) return `<tr><td>${m}</td><td colspan="4" style="color:#888">拟合失败</td></tr>`;
+    if (!v) return `<tr><td>${m}</td><td colspan="4" style="color:var(--graphite)">${t("workbench.fit_failed_row")}</td></tr>`;
     const kd = v.kd != null && isFinite(v.kd) ? `${formatConc(v.kd, "nM")} nM` : "—";
     const kon = v.kon != null && isFinite(v.kon) ? (+v.kon).toExponential(2) : "—";
     const koff = v.koff != null && isFinite(v.koff) ? (+v.koff).toExponential(2) : "—";
-    const extra = v.kd_steady_mixed != null ? `KD(稳态) ${formatConc(v.kd_steady_mixed, "nM")}` :
-                 (v.kd_kinetic_mixed != null ? `KD(动力学) ${formatConc(v.kd_kinetic_mixed, "nM")}` : "");
+    const extra = v.kd_steady_mixed != null ? t("workbench.kd_steady", { v: formatConc(v.kd_steady_mixed, "nM") }) :
+                 (v.kd_kinetic_mixed != null ? t("workbench.kd_kinetic", { v: formatConc(v.kd_kinetic_mixed, "nM") }) : "");
     return `<tr><td><strong>${m}</strong></td><td>${kd}</td><td>${kon}</td><td>${koff}</td><td>${extra}</td></tr>`;
   }).join("");
   return `<div class="calc-card" style="padding:12px;margin-bottom:10px">
-    <div style="font-size:13px;color:#555;margin-bottom:6px">
-      样本 <strong>${esc(sample)}</strong> · 相界 assoc ${phase.t_assoc?.toFixed(1)} s → dissoc ${phase.t_dissoc?.toFixed(1)} s
+    <div style="font-size:13px;color:var(--graphite);margin-bottom:6px">
+      ${t("workbench.sample_phase", { sample: esc(sample), ta: phase.t_assoc?.toFixed(1) ?? "—", td: phase.t_dissoc?.toFixed(1) ?? "—" })}
     </div>
-    <table class="calc-table">
-      <thead><tr><th>方法</th><th>KD</th><th>kon (1/M·s)</th><th>koff (1/s)</th><th>备注</th></tr></thead>
+    <div class="table-scroll"><table class="calc-table">
+      <thead><tr><th>${t("workbench.method")}</th><th>KD</th><th>${t("workbench.kon")}</th><th>${t("workbench.koff")}</th><th>${t("workbench.notes_col")}</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>
+    </table></div>
   </div>`;
 }
 
 async function bliSaveExp() {
-  if (!bliSession) { toast("请先上传数据", true); return; }
+  if (!bliSession) { toast(t("toast.upload_first"), true); return; }
   const mount = await promptExpMount("BLI");
-  if (mount === null) { toast("已取消保存"); return; }
+  if (mount === null) { toast(t("toast.save_cancelled")); return; }
   let title = "";
   if (!mount.exp_id) {
-    const autoName = await getAutoName("BLI");
-    title = prompt("实验名称:", autoName || "BLI 分析");
+    const autoName = await getAutoName("BLI", null, "bli_fit");
+    title = await askText(t("ui.exp_name_prompt"), autoName || "BLI");
     if (!title) return;
   }
   try {
@@ -3054,13 +3302,13 @@ async function bliSaveExp() {
       source: document.getElementById("bliFile").files[0]?.name || "",
       ...mount,
     });
-    toast(mount.exp_id ? `已重挂到实验 #${mount.exp_id}（追加原始曲线快照）`
-      : "已保存为实验记录（含原始曲线快照）");
-  } catch (err) { toast(err.message, true); }
+    toast(mount.exp_id ? t("toast.remounted_curves", { id: mount.exp_id })
+      : t("toast.saved_record"));
+  } catch (err) { toast(err, true); }
 }
 
 async function bliExport() {
-  if (!bliSession) { toast("请先上传数据", true); return; }
+  if (!bliSession) { toast(t("toast.upload_first"), true); return; }
   try {
     const r = await fetch("/api/bli/export", {
       method: "POST",
@@ -3069,10 +3317,10 @@ async function bliExport() {
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || `导出失败 (${r.status})`);
+      throw backendError(j, r.status, t("toast.export_failed", { status: r.status }));
     }
     const blob = await r.blob();
-    const fname = prompt("导出文件名:", "BLI_KD汇总.xlsx");
+    const fname = await askText(t("ui.export_name"), "BLI_KD.xlsx");
     if (!fname) return;
     const fn = /\.xlsx$/i.test(fname) ? fname : fname + ".xlsx";
     const a = document.createElement("a");
@@ -3082,8 +3330,8 @@ async function bliExport() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-    toast("已导出 BLI 分析 Excel");
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.exported_bli"));
+  } catch (err) { toast(err, true); }
 }
 
 // 兼容入口：BLI/AKTA 上传后刷新各自输入框占位（统一走 refreshAutoNamePlaceholders）
@@ -3103,10 +3351,14 @@ async function uploadAktaFile() {
   if (!files.length) return;
   const form = new FormData();
   files.forEach(f => form.append("file", f));
+  setEvidence("aktaMeta", "processing", t("workbench.status_processing"));
   try {
     const r = await fetch("/api/akta/analyze", { method: "POST", body: form });
     const data = await r.json();
-    if (!r.ok) { toast(data.error, true); return; }
+    if (!r.ok) {
+      setEvidence("aktaMeta", "fail", t("workbench.status_fail"));
+      toast(backendError(data, r.status), true); return;
+    }
     aktaRuns = (data.runs || []).map(run => {
       if (run.error) return { ...run, channels: [], uv_channels: [], events: {}, meta: {} };
       const uv = run.uv_channels && run.uv_channels[0];
@@ -3121,8 +3373,9 @@ async function uploadAktaFile() {
     const okRuns = aktaRuns.filter(r => !r.error);
     const errRuns = aktaRuns.filter(r => r.error);
     const totalCh = okRuns.reduce((n, r) => n + r.channels.length, 0);
-    document.getElementById("aktaMeta").textContent =
-      `${files.length} 文件 | ${okRuns.length} 成功${errRuns.length ? ` / ${errRuns.length} 失败` : ""} | ${totalCh} 通道`;
+    const phase = okRuns.length ? "done" : "fail";
+    setEvidence("aktaMeta", phase,
+      `${t("workbench.files_ok", { n: files.length, ok: okRuns.length })}${errRuns.length ? t("workbench.files_fail", { n: errRuns.length }) : ""} | ${t("workbench.channels_n", { n: totalCh })}`);
     renderAktaRuns();
     document.getElementById("aktaEventsInfo").textContent =
       errRuns.map(r => `${r.name}: ${r.error}`).join("；");
@@ -3130,9 +3383,12 @@ async function uploadAktaFile() {
     document.getElementById("aktaPeakTableWrap").classList.add("hidden");
     document.getElementById("aktaPlotArea").innerHTML = "";
     refreshAktaPlaceholder();
-    if (okRuns.length) { toast(`解析完成：${okRuns.length} 个文件`); }
-    else { toast("全部文件解析失败", true); }
-  } catch (err) { toast(err.message, true); }
+    if (okRuns.length) { toast(t("toast.parsed_n_files", { n: okRuns.length })); }
+    else { toast(t("toast.parse_all_failed"), true); }
+  } catch (err) {
+    setEvidence("aktaMeta", "fail", t("workbench.status_fail"));
+    toast(err, true);
+  }
 }
 
 function renderAktaRuns() {
@@ -3140,25 +3396,25 @@ function renderAktaRuns() {
   if (!box) return;
   box.innerHTML = aktaRuns.map((run, ri) => {
     if (run.error) {
-      return `<div style="border:1px solid #f0c0c0;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;background:#fff7f7">
-        <strong style="color:#c0392b">${esc(run.name)}</strong>
-        <span style="color:#888;margin-left:8px">${esc(run.error)}</span>
+      return `<div class="calc-card" style="padding:8px 10px;margin-bottom:8px;font-size:13px;border-color:var(--danger);background:var(--danger-bg)">
+        <strong style="color:var(--danger)">${esc(run.name)}</strong>
+        <span style="color:var(--graphite);margin-left:8px">${esc(run.error)}</span>
       </div>`;
     }
     const chOpts = run.channels.map(ch =>
       `<option value="${escAttr(ch.name)}" ${ch.name === run.channel ? "selected" : ""}>${esc(ch.name)} (${esc(ch.data_type)}${ch.unit ? " " + esc(ch.unit) : ""}, ${ch.n_points}pts)</option>`).join("");
     const evInfo = Object.entries(run.events || {}).map(([k, v]) => `${k}:${v}`).join(" ");
     const checked = run.checked === false ? "" : "checked";
-    return `<div style="border:1px solid ${aktaCurrentRun === ri ? "#4361ee" : "#e0e0e0"};border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;background:${aktaCurrentRun === ri ? "#f0f5ff" : "#fff"}" data-run="${ri}">
+    return `<div class="calc-card" style="padding:8px 10px;margin-bottom:8px;font-size:13px;${aktaCurrentRun === ri ? "outline:2px solid var(--cyan);outline-offset:2px;" : ""}" data-run="${ri}">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <div style="display:inline-flex;align-items:center;gap:6px">
           <input type="checkbox" class="akta-run-check" data-run="${ri}" ${checked} onclick="event.stopPropagation()">
           <strong style="cursor:pointer" class="akta-run-select">${esc(run.name)}</strong>
         </div>
-        <span style="color:#888;font-size:12px">${evInfo || "无事件"}</span>
+        <span style="color:var(--graphite);font-size:12px">${evInfo || t("workbench.no_events")}</span>
       </div>
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center">
-        <select class="akta-run-channel" data-run="${ri}" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:12px">${chOpts}</select>
+        <select class="akta-run-channel" data-run="${ri}" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid var(--rule);font-size:12px">${chOpts}</select>
       </div>
     </div>`;
   }).join("");
@@ -3234,30 +3490,30 @@ function aktaParams(run) {
 
 async function aktaPlot() {
   const run = aktaRuns[aktaCurrentRun];
-  if (!run || run.error || !run.channel) { toast("请先选择文件/通道", true); return; }
+  if (!run || run.error || !run.channel) { toast(t("toast.pick_file_channel"), true); return; }
   try {
     const r = await API.post("/api/akta/plot", aktaParams(run));
     document.getElementById("aktaPlotArea").innerHTML =
-      `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+      `<div class="calc-card" style="padding:12px">
         <div style="font-weight:600;margin-bottom:6px;font-size:14px">${esc(run.name)} — ${esc(run.channel)}</div>
-        <img src="${r.image}" style="max-width:100%" alt="AKTA 峰图">
+        <img src="${r.image}" style="max-width:100%" alt="${esc(run.name)}">
       </div>`;
     renderAktaPeaks(r.peaks || [], run);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 // 出图入口：分图模式 = 每文件一张；总图模式 = 所有曲线叠一张
 // 只出勾选（akta-run-check）的文件
 async function aktaBatchPlot() {
   const okRuns = aktaRuns.filter(r => !r.error && r.channel && r.checked !== false);
-  if (!okRuns.length) { toast("没有勾选可出图的文件", true); return; }
+  if (!okRuns.length) { toast(t("toast.no_checked_files"), true); return; }
   const mode = document.getElementById("aktaPlotMode").value;
   const area = document.getElementById("aktaPlotArea");
   const normOn = document.getElementById("aktaNormalize").checked;
 
   if (mode === "overlay") {
-    if (okRuns.length < 2) { toast("总图至少需要 2 个文件", true); return; }
-    area.innerHTML = `<p style="color:#888;font-size:13px">正在生成总图（${okRuns.length} 个文件）...</p>`;
+    if (okRuns.length < 2) { toast(t("toast.overlay_need_two"), true); return; }
+    area.innerHTML = `<p style="color:var(--graphite);font-size:13px">${t("workbench.plotting_overlay", { n: okRuns.length })}</p>`;
     try {
       const r = await API.post("/api/akta/overlay", {
         runs: okRuns.map(run => ({
@@ -3273,26 +3529,26 @@ async function aktaBatchPlot() {
         show_events: document.getElementById("aktaShowEvents").checked,
         highlight_frac: document.getElementById("aktaHighlightFrac").checked,
       });
-      area.innerHTML = `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-        <div style="font-weight:600;margin-bottom:6px;font-size:14px">总图（${okRuns.length} 个文件${normOn ? " · 归一化" : ""}）</div>
-        <img src="${r.image}" style="max-width:100%" alt="AKTA 总图">
+      area.innerHTML = `<div class="calc-card" style="padding:12px">
+        <div style="font-weight:600;margin-bottom:6px;font-size:14px">${normOn ? t("workbench.overlay_title_norm", { n: okRuns.length }) : t("workbench.overlay_title", { n: okRuns.length })}</div>
+        <img src="${r.image}" style="max-width:100%" alt="${esc(t("workbench.overlay_title", { n: okRuns.length }))}">
       </div>`;
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { toast(err, true); }
     return;
   }
 
   // 分图模式
-  area.innerHTML = `<p style="color:#888;font-size:13px">正在批量生成 ${okRuns.length} 张图...</p>`;
+  area.innerHTML = `<p style="color:var(--graphite);font-size:13px">${t("workbench.plotting_n", { n: okRuns.length })}</p>`;
   let html = "";
   for (const run of okRuns) {
     try {
       const r = await API.post("/api/akta/plot", aktaParams(run));
-      html += `<div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:12px">
+      html += `<div class="calc-card" style="padding:12px;margin-bottom:12px">
         <div style="font-weight:600;margin-bottom:6px;font-size:14px">${esc(run.name)} — ${esc(run.channel)}</div>
         <img src="${r.image}" style="max-width:100%" alt="${esc(run.name)}">
       </div>`;
     } catch (err) {
-      html += `<div style="border:1px solid #f0c0c0;border-radius:8px;padding:8px;margin-bottom:8px;color:#c0392b;font-size:13px">${esc(run.name)}: ${esc(err.message)}</div>`;
+      html += `<div class="calc-card" style="padding:8px;margin-bottom:8px;color:var(--danger);font-size:13px">${esc(run.name)}: ${esc(err.message)}</div>`;
     }
   }
   area.innerHTML = html;
@@ -3304,13 +3560,13 @@ function renderAktaPeaks(peaks, run) {
   if (!wrap || !tbody) return;
   if (!peaks.length) {
     wrap.classList.remove("hidden");
-    tbody.innerHTML = `<tr><td colspan="7" style="color:#888;text-align:center">未检测到峰（可调低最小峰高或缩小范围）</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="color:var(--graphite);text-align:center">${t("toast.no_peaks")}</td></tr>`;
     return;
   }
   wrap.classList.remove("hidden");
   const cur = run.target_peak || 0;
   tbody.innerHTML = peaks.map((p, i) => `
-    <tr style="${i === cur ? "background:#f0f5ff" : ""}">
+    <tr style="${i === cur ? "background:var(--accent-bg)" : ""}">
       <td>${i + 1}</td>
       <td>${p.apex_vol}</td>
       <td>${p.height}</td>
@@ -3318,7 +3574,7 @@ function renderAktaPeaks(peaks, run) {
       <td>${p.start_vol}</td>
       <td>${p.end_vol}</td>
       <td>${p.half_width}</td>
-      <td><button class="btn btn-sm btn-outline akta-peak-target" data-run-idx="${aktaCurrentRun}" data-peak="${i}">${i === cur ? "✓ 目标" : "目标"}</button></td>
+      <td><button class="btn btn-sm btn-outline akta-peak-target" data-run-idx="${aktaCurrentRun}" data-peak="${i}">${i === cur ? t("workbench.is_target") : t("workbench.target")}</button></td>
     </tr>`).join("");
 }
 
@@ -3335,7 +3591,7 @@ document.addEventListener("click", function (e) {
 
 async function aktaExport() {
   const run = aktaRuns[aktaCurrentRun];
-  if (!run || run.error || !run.channel) { toast("请先选择文件/通道", true); return; }
+  if (!run || run.error || !run.channel) { toast(t("toast.pick_file_channel"), true); return; }
   // 作图数据覆盖全部勾选的 run（每个样品两列），峰表/曲线 sheet 仍用当前 run
   const okRuns = aktaRuns.filter(r => !r.error && r.channel && r.checked !== false);
   try {
@@ -3353,12 +3609,12 @@ async function aktaExport() {
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      throw new Error(j.error || `导出失败 (${r.status})`);
+      throw backendError(j, r.status, t("toast.export_failed", { status: r.status }));
     }
     const blob = await r.blob();
     // 文件名默认用 zip 包名（去 .zip），允许用户自定义
     const zipBase = (run.name || "").replace(/\.zip$/i, "") || run.channel;
-    let fname = prompt("导出文件名:", `${zipBase}_峰表.xlsx`);
+    let fname = await askText(t("ui.export_name"), `${zipBase}_peaks.xlsx`);
     if (!fname) return;
     if (!/\.xlsx$/i.test(fname)) fname += ".xlsx";
     const a = document.createElement("a");
@@ -3368,22 +3624,22 @@ async function aktaExport() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-    toast(`已导出峰表 Excel（${okRuns.length} 个样品作图数据）`);
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.exported_peaks", { n: okRuns.length }));
+  } catch (err) { toast(err, true); }
 }
 
 
 async function aktaSaveExp() {
   const run = aktaRuns[aktaCurrentRun];
-  if (!run || run.error || !run.channel) { toast("请先选择文件/通道", true); return; }
+  if (!run || run.error || !run.channel) { toast(t("toast.pick_file_channel"), true); return; }
   const mount = await promptExpMount("AKTA");
-  if (mount === null) { toast("已取消保存"); return; }
+  if (mount === null) { toast(t("toast.save_cancelled")); return; }
   let title = "";
   if (!mount.exp_id) {
-    const autoName = await getAutoName("AKTA");
+    const autoName = await getAutoName("AKTA", null, "akta");
     // 默认名优先用 zip 包名（去 .zip 扩展名），其次系统自动命名
     const zipBase = (run.name || "").replace(/\.zip$/i, "");
-    title = prompt("实验名称:", zipBase || autoName || "AKTA 峰图");
+    title = await askText(t("ui.exp_name_prompt"), zipBase || autoName || "AKTA");
     if (!title) return;
   }
   try {
@@ -3394,9 +3650,9 @@ async function aktaSaveExp() {
       source: run.name || "",
       ...mount,
     });
-    toast(mount.exp_id ? `已重挂到实验 #${mount.exp_id}（追加原始曲线快照）`
-      : "已保存为实验记录（含原始曲线快照）");
-  } catch (err) { toast(err.message, true); }
+    toast(mount.exp_id ? t("toast.remounted_curves", { id: mount.exp_id })
+      : t("toast.saved_record"));
+  } catch (err) { toast(err, true); }
 }
 
 function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
@@ -3471,8 +3727,8 @@ async function researchMove(id, dir) {
       const n = researchFindNode(id);
       if (n) renderResearchDetail(n);
     }
-    toast("已移动");
-  } catch (err) { toast(err.message, true); }
+    toast(t("toast.moved"));
+  } catch (err) { toast(err, true); }
 }
 
 // lineflow 卡片角标 ▾ 切换：折叠/展开子层
@@ -3489,7 +3745,7 @@ function researchRender(force) {
   const q = (document.getElementById("researchQuery").value || "").trim();
   const tag = document.getElementById("researchTagFilter").value || "";
   const prot = document.getElementById("researchProteinFilter").value || "";
-  if (!researchState.trees.length && force) { researchLoad().catch(() => {}); return; }
+  if (force) { researchLoad().catch(() => {}); return; }
   const flowEl = document.getElementById("researchFlow");
   const backEl = document.getElementById("researchFlowBack");
   const emptyEl = document.getElementById("researchEmpty");
@@ -3526,71 +3782,53 @@ function researchRender(force) {
 }
 
 function renderResearchFlow(flowEl, trees, q, tag, prot) {
-  // lineflow 渲染：纯文本流（DOM 树 + CSS border-left），不用 SVG / 不用绝对定位 / 不用卡片固定宽
-  // 设计见 docs/research-lineflow-design.md
   const filtering = !!(q || tag || prot);
-  // 过滤态：不在子树的也渲染（dim 类），保留上下文；非过滤态：整棵渲染
-  const html = trees.map(t => renderLineflowTree(t, q, tag, prot, filtering)).join("");
-  flowEl.innerHTML = html || '<div class="empty-hint">没有匹配的节点</div>';
+  const html = trees.map(tnode => renderEvidenceNode(tnode, q, tag, prot, filtering)).join("");
+  flowEl.innerHTML = html
+    ? `<ul class="evidence-chain">${html}</ul>`
+    : `<div class="empty-hint">${t("research.empty_filter")}</div>`;
   flowEl.style.width = "";
   flowEl.style.height = "";
 }
 
-// 递归渲染一棵树。filterSkip 是显式"过滤跳过"路径（filtering 态用）。
-// filtering 必须作为参数显式传——之前是 renderResearchFlow 的局部 const，
-// 闭包内取不到导致全树走"过滤态不命中"分支塌成单行（line 3438 死循环 bug）。
-// 横向直线 lineflow：每层一行 flex，卡片化 + 箭头 → 串联
-// 设计：每层同辈并排（flex-direction: row），子层在父下方新行（再 flex + 左缩进）
-// 卡片结构：type icon + 标题 + stance chip（conclusion）+ 普通 tag chips + 折叠角标 ▾
-// 箭头：CSS 伪元素 .lf-stack:not(:last-child)::after 画 "→"
-// 折叠：researchState.collapsed（Set<nodeId>）——子层缺省展开，▾ 切换
-// 返回：仅产本节点的子层 .lf-row HTML（不含本节点卡片——卡片在 caller 已画）
-function renderLineflowChildren(node, q, tag, prot, filtering) {
+function renderEvidenceNode(node, q, tag, prot, filtering) {
   if (filtering && !researchFilterMatch(node, q, tag, prot)) return "";
+  const dim = (q || tag || prot) && !researchNodeMatch(node, q, tag, prot) ? " dim" : "";
+  const sel = researchState.selectedId === node.id ? " selected" : "";
   const kids = node.children || [];
-  if (!kids.length || researchState.collapsed.has(node.id)) return "";
-  const fromCls = node.free_attach ? " from-free" : ` from-${node.node_type}`;
-  return `<div class="lf-row${fromCls}">${kids.map(c =>
-    `<div class="lf-stack" data-id="${c.id}">${lineflowCard(c, false, q, tag, prot)}${renderLineflowChildren(c, q, tag, prot, filtering)}</div>`
-  ).join("")}</div>`;
-}
-
-function renderLineflowTree(node, q, tag, prot, filtering) {
-  if (filtering && !researchFilterMatch(node, q, tag, prot)) {
-    return `<div class="lf-stack" data-id="${node.id}">${lineflowCard(node, true, q, tag, prot)}</div>`;
-  }
-  return `<div class="lf-tree-node" data-id="${node.id}">${lineflowCard(node, false, q, tag, prot)}${renderLineflowChildren(node, q, tag, prot, filtering)}</div>`;
-}
-
-// 单卡片（去 emoji 版）：标题 + stance chip（conclusion）+ 普通 tag chips + 折叠角标 + 自由挂载标
-// 类型不靠 icon——左缘色条（.lf-card--{type}）+ hover tooltip（node_type_label）表达
-function lineflowCard(node, isSkip, q, tag, prot) {
-  const isSel = researchState.selectedId === node.id;
-  const dim = (q || tag || prot) && !researchNodeMatch(node, q, tag, prot) ? " lf-dim" : "";
-  const sel = isSel ? " lf-sel" : "";
-  const skip = isSkip ? " lf-skip" : "";
+  const collapsed = researchState.collapsed.has(node.id);
+  const childHtml = kids.length && !collapsed
+    ? `<ul class="evidence-chain">${kids.map(c => renderEvidenceNode(c, q, tag, prot, filtering)).join("")}</ul>`
+    : "";
+  const freeCls = node.free_attach ? " free-attach" : "";
   const stance = node.node_type === "conclusion" ? lineflowStanceChip(node.tag) : "";
   const tags = (node.tag || "").split(",").map(s => s.trim()).filter(Boolean)
-    .filter(t => !["支持", "反驳", "部分", "不确定"].includes(t))
-    .map(t => `<span class="lf-tag">${esc(t)}</span>`).join("");
-  const free = node.free_attach ? `<span class="lf-free" title="自由挂载（逃生舱）">自由</span>` : "";
-  const hasKids = (node.children || []).length > 0;
-  const collapsed = researchState.collapsed.has(node.id);
-  const collapseBtn = hasKids
-    ? `<button class="lf-collapse" onclick="event.stopPropagation();researchToggle(${node.id})" title="${collapsed ? "展开" : "折叠"}">${collapsed ? "▸" : "▾"}</button>`
+    .filter(tg => !["支持", "反驳", "部分", "不确定"].includes(tg))
+    .map(tg => `<span class="lf-tag">${esc(tg)}</span>`).join("");
+  const free = node.free_attach ? `<span class="lf-free">${t("research.free")}</span>` : "";
+  const collapseBtn = kids.length
+    ? `<button class="lf-collapse" onclick="event.stopPropagation();researchToggle(${node.id})" title="${collapsed ? t("research.expand") : t("research.collapse")}">${collapsed ? "+" : "−"}</button>`
     : "";
-  return `<div class="lf-card lf-card--${node.node_type}${dim}${sel}${skip}" title="${esc(node.node_type_label || node.node_type)}" onclick="researchSelect(${node.id})">
-    <span class="lf-title">${esc(node.title)}</span>
-    ${stance}${tags}${free}${collapseBtn}
-  </div>`;
+  return `<li class="${freeCls}">
+    <div class="evidence-node evidence-node--${node.node_type}${dim}${sel}" onclick="researchSelect(${node.id})">
+      <span class="evidence-title">${esc(node.title)}</span>
+      <span class="evidence-type">${t("node." + node.node_type)}</span>
+      ${stance}${tags}${free}${collapseBtn}
+    </div>
+    ${childHtml}
+  </li>`;
 }
 
-// 结论 stance chip（仅 conclusion 节点，标题旁的窄色 chip，只标 stance 词）
 function lineflowStanceChip(tag) {
   const key = resStanceKey(tag);
-  if (key === "other") return "";  // 无 stance 词 = 不画 chip（避免空 chip）
-  const labels = { support: "✓ 支持", rebut: "✗ 反驳", partial: "△ 部分", uncertain: "○ 不确定" };
-  return `<span class="lf-stance lf-stance--${key}">${esc(labels[key])}</span>`;
+  if (key === "other") return "";
+  const labels = {
+    support: t("stance.支持"),
+    rebut: t("stance.反驳"),
+    partial: t("stance.部分"),
+    uncertain: t("stance.不确定"),
+  };
+  return `<span class="stance-chip ${key}">${esc(labels[key])}</span>`;
 }
 
 // ── 根目标列表（/research 默认首页：列全部根目标，点进单根流程图）──
@@ -3608,21 +3846,21 @@ function researchRootStats(root) {
 function researchRootCard(root) {
   const { nodes, exps } = researchRootStats(root);
   const tags = (root.tag || "").split(",").map(s => s.trim()).filter(Boolean);
-  const idx = researchState.trees.findIndex(t => t.id === root.id);
+  const idx = researchState.trees.findIndex(tr => tr.id === root.id);
   return `<div class="res-root-card" onclick="researchOpenRoot(${root.id})">
     <div class="res-root-top">
-      <span class="res-root-count">${nodes} 节点 · ${exps} 实验</span>
+      <span class="res-root-count">${t("research.nodes_exps", { nodes, exps })}</span>
       <span class="res-root-actions">
         <button class="btn btn-sm" ${idx <= 0 ? "disabled" : ""}
-                onclick="event.stopPropagation();researchMove(${root.id}, 'up')" title="上移">↑</button>
+                onclick="event.stopPropagation();researchMove(${root.id}, 'up')" title="${t("research.move_up")}">↑</button>
         <button class="btn btn-sm" ${idx < 0 || idx >= researchState.trees.length - 1 ? "disabled" : ""}
-                onclick="event.stopPropagation();researchMove(${root.id}, 'down')" title="下移">↓</button>
-        <button class="btn btn-sm" onclick="event.stopPropagation();researchEdit(${root.id})">编辑</button>
-        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();researchDelete(${root.id})">删除</button>
+                onclick="event.stopPropagation();researchMove(${root.id}, 'down')" title="${t("research.move_down")}">↓</button>
+        <button class="btn btn-sm" onclick="event.stopPropagation();researchEdit(${root.id})">${t("common.edit")}</button>
+        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();researchDelete(${root.id})">${t("common.delete")}</button>
       </span>
     </div>
     <div class="res-root-title">${esc(root.title)}</div>
-    ${tags.length ? `<div class="res-flow-tags">${tags.map(t => esc(t)).join(" · ")}</div>` : ""}
+    ${tags.length ? `<div class="res-flow-tags">${tags.map(tg => esc(tg)).join(" · ")}</div>` : ""}
   </div>`;
 }
 
@@ -3630,7 +3868,7 @@ function renderResearchRootList(flowEl, q, tag, prot) {
   const matched = researchState.trees.filter(r => researchFilterMatch(r, q, tag, prot));
   flowEl.innerHTML = matched.length
     ? `<div class="res-root-list">${matched.map(researchRootCard).join("")}</div>`
-    : '<div class="empty-hint">没有匹配的根目标</div>';
+    : `<div class="empty-hint">${t("research.empty_roots")}</div>`;
   flowEl.style.width = "";
   flowEl.style.height = "";
 }
@@ -3654,9 +3892,7 @@ function researchBackToList() {
   researchRender();
 }
 
-// lineflow 重设计后，旧的横向流程图布局 researchFlowLayout + researchFlowCard 已删。
-// 旧 .res-flow-card / .res-flow-svg 等死样式已从 style.css 移除（v0.1.2 UI 优化轮）。
-// 结论 stance 配色由 CSS .lf-stance--* 接管，lineflowCard 直接调 resStanceKey 取 key。
+// 结论 stance 配色由 CSS .res-tag-chip.support/rebut/partial/uncertain 接管（语义 token）。
 function resStanceKey(tag) {
   const m = { 支持: "support", 反驳: "rebut", 部分: "partial", 不确定: "uncertain" };
   for (const t of String(tag || "").split(",").map(s => s.trim())) {
@@ -3664,30 +3900,24 @@ function resStanceKey(tag) {
   }
   return "other";
 }
-const RES_STANCE_CHIP = {
-  support: { bg: "#e8f5e9", fg: "#2e7d32" },
-  rebut:   { bg: "#ffebee", fg: "#c62828" },
-  partial: { bg: "#fff3e0", fg: "#e65100" },
-  uncertain: { bg: "#f5f5f5", fg: "#757575" },
-};
-function resTagChip(t) {
-  const c = RES_STANCE_CHIP[resStanceKey(t)];
-  return c
-    ? `<span class="res-tag-chip" style="background:${c.bg};color:${c.fg}">${esc(t)}</span>`
-    : `<span class="res-tag-chip">${esc(t)}</span>`;
+function resTagChip(tag) {
+  const key = resStanceKey(tag);
+  const label = key !== "other" ? t("stance." + tag) : tag;
+  return `<span class="res-tag-chip ${key}">${esc(label)}</span>`;
 }
 
 async function researchSelect(id) {
   let node;
   try { node = await API.get(`/api/research/nodes/${id}`); }
-  catch (err) { toast(err.message, true); return; }
+  catch (err) { toast(err, true); return; }
   researchState.selectedId = id;
   researchRender();
   renderResearchChain(node.chain || []);
   renderResearchDetail(node);
   const detailEl = document.getElementById("researchDetail");
   detailEl.classList.remove("hidden");
-  detailEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (window.BigoUI) BigoUI.openDrawer(detailEl);
+  else detailEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function renderResearchChain(chain) {
@@ -3705,20 +3935,19 @@ function renderResearchDetail(node) {
   let expCard = "";
   if (node.experiment) {
     const e = node.experiment;
+    const typeLabel = (window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type;
     expCard = `<div class="res-exp-card">
-      <div class="res-exp-card-head">关联实验</div>
+      <div class="res-exp-card-head">${t("research.linked_exp")}</div>
       <a class="res-exp-card-title" href="/experiments/${e.id}">${esc(e.title)}</a>
-      <div class="res-exp-card-meta">${esc(e.exp_type)} · ${esc(e.date || "")} · #${e.id}</div>
+      <div class="res-exp-card-meta">${esc(typeLabel)} · ${esc(e.date || "")} · #${e.id}</div>
     </div>`;
   } else if (node.node_type === "experiment") {
-    expCard = `<div class="res-exp-card res-exp-placeholder">计划占位（未归档实验）</div>`;
+    expCard = `<div class="res-exp-card res-exp-placeholder">${t("research.planned")}</div>`;
   }
   const kidChips = kids.length
-    ? `<div class="res-kids"><span class="res-kids-label">直接子节点</span>` +
+    ? `<div class="res-kids"><span class="res-kids-label">${t("research.children")}</span>` +
       kids.map(k => `<span class="res-chain-link" onclick="researchSelect(${k.id})">${esc(k.title)}</span>`).join(" · ") + "</div>"
     : "";
-  // stance 控件：仅 conclusion 节点显示（v0.1.2 增量）
-  // 复用 tag 字段：选 stance → 移除旧 stance 词 + 加入新；选「清除」→ 移除所有 stance 词
   const currentStance = resStanceKey(node.tag);
   const currentStanceValue = currentStance === "support" ? "支持"
     : currentStance === "rebut" ? "反驳"
@@ -3726,30 +3955,29 @@ function renderResearchDetail(node) {
     : currentStance === "uncertain" ? "不确定" : "";
   const stanceCtrl = node.node_type === "conclusion"
     ? `<div class="res-stance-ctrl">
-        <span class="res-stance-label">立场</span>
+        <span class="res-stance-label">${t("research.stance")}</span>
         <select id="detailStanceSel" data-prev="${esc(currentStanceValue)}" onchange="researchChangeStance(${node.id}, this.value)">
-          <option value=""${currentStanceValue === "" ? " selected" : ""}>（清除）</option>
-          <option value="支持"${currentStanceValue === "支持" ? " selected" : ""}>✓ 支持</option>
-          <option value="反驳"${currentStanceValue === "反驳" ? " selected" : ""}>✗ 反驳</option>
-          <option value="部分"${currentStanceValue === "部分" ? " selected" : ""}>△ 部分</option>
-          <option value="不确定"${currentStanceValue === "不确定" ? " selected" : ""}>○ 不确定</option>
+          <option value=""${currentStanceValue === "" ? " selected" : ""}>${t("research.stance_clear")}</option>
+          <option value="支持"${currentStanceValue === "支持" ? " selected" : ""}>${t("stance.支持")}</option>
+          <option value="反驳"${currentStanceValue === "反驳" ? " selected" : ""}>${t("stance.反驳")}</option>
+          <option value="部分"${currentStanceValue === "部分" ? " selected" : ""}>${t("stance.部分")}</option>
+          <option value="不确定"${currentStanceValue === "不确定" ? " selected" : ""}>${t("stance.不确定")}</option>
         </select>
        </div>`
     : "";
-  // 同级排序：↑/↓ 上移下移（首位/末位禁用；sibling 序取自 researchState 缓存树）
   const cachedNode = researchFindNode(node.id) || node;
   const sibs = researchSiblings(cachedNode);
   const sIdx = sibs.findIndex(s => s.id === node.id);
   const moveCtrl = `
       <button class="btn btn-sm" ${sIdx <= 0 ? "disabled" : ""}
-              onclick="researchMove(${node.id}, 'up')" title="同级上移">↑</button>
+              onclick="researchMove(${node.id}, 'up')" title="${t("research.move_up")}">↑</button>
       <button class="btn btn-sm" ${sIdx < 0 || sIdx >= sibs.length - 1 ? "disabled" : ""}
-              onclick="researchMove(${node.id}, 'down')" title="同级下移">↓</button>`;
+              onclick="researchMove(${node.id}, 'down')" title="${t("research.move_down")}">↓</button>`;
   document.getElementById("researchDetailContent").innerHTML = `
     <div class="res-detail-meta">
-      <span class="res-badge res-badge-${node.node_type}">${node.node_type_label}</span>
-      ${node.free_attach ? '<span class="res-free">自由挂载</span>' : ""}
-      ${tags.map(t => node.node_type === "conclusion" ? resTagChip(t) : `<span class="res-tag-chip">${esc(t)}</span>`).join("")}
+      <span class="res-badge res-badge-${node.node_type}">${t("node." + node.node_type)}</span>
+      ${node.free_attach ? `<span class="res-free">${t("research.free")}</span>` : ""}
+      ${tags.map(tg => node.node_type === "conclusion" ? resTagChip(tg) : `<span class="res-tag-chip">${esc(tg)}</span>`).join("")}
       <span class="res-detail-id">#${node.id}</span>
     </div>
     ${stanceCtrl}
@@ -3758,9 +3986,9 @@ function renderResearchDetail(node) {
     ${kidChips}
     <div class="res-detail-actions">
       ${moveCtrl}
-      <button class="btn btn-primary" onclick="researchAddChild(${node.id})">加子节点</button>
-      <button class="btn" onclick="researchEdit(${node.id})">编辑</button>
-      <button class="btn btn-danger" onclick="researchDelete(${node.id})">删除子树</button>
+      <button class="btn btn-primary" onclick="researchAddChild(${node.id})">${t("research.add_child")}</button>
+      <button class="btn" onclick="researchEdit(${node.id})">${t("common.edit")}</button>
+      <button class="btn btn-danger" onclick="researchDelete(${node.id})">${t("research.delete_tree")}</button>
     </div>`;
 }
 
@@ -3773,7 +4001,7 @@ async function researchChangeStance(nodeId, stanceValue) {
   let curNode = researchFindNode(nodeId);
   if (!curNode) {
     try { curNode = await API.get(`/api/research/nodes/${nodeId}`); }
-    catch (err) { toast(err.message, true); if (sel) sel.value = prevValue; return; }
+    catch (err) { toast(err, true); if (sel) sel.value = prevValue; return; }
   }
   const STANCE_KEYWORDS = ["支持", "反驳", "部分", "不确定"];
   const parts = String(curNode.tag || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -3798,9 +4026,9 @@ async function researchChangeStance(nodeId, stanceValue) {
     // 重新选中刷新详情面板（detail panel 不会自动重建——研究脉络 load 后 selectedId 保留即可）
     const refreshed = researchFindNode(nodeId);
     if (refreshed) renderResearchDetail(refreshed);
-    toast("立场已更新");
+    toast(t("toast.stance_updated"));
   } catch (err) {
-    toast(err.message, true);
+    toast(err, true);
     if (sel) sel.value = prevValue;  // 失败时回滚 UI
   }
 }
@@ -3824,7 +4052,7 @@ function researchOpenModal(mode, node, parent) {
   expSearch.value = "";
   researchExpFilter();
   if (mode === "edit" && node) {
-    document.getElementById("researchModalTitle").textContent = "编辑节点";
+    document.getElementById("researchModalTitle").textContent = t("common.edit");
     nid.value = node.id;
     pid.value = node.parent_id || "";
     typeSel.value = node.node_type;
@@ -3834,7 +4062,7 @@ function researchOpenModal(mode, node, parent) {
     expSel.value = node.exp_id || "";
     freeChk.checked = !!node.free_attach;
   } else {
-    document.getElementById("researchModalTitle").textContent = mode === "root" ? "新增根目标" : "新增子节点";
+    document.getElementById("researchModalTitle").textContent = mode === "root" ? t("research.add_root") : t("research.add_child");
     nid.value = "";
     pid.value = parent ? parent.id : "";
     typeSel.value = researchFirstAllowed(parent ? parent.node_type : null);
@@ -3857,7 +4085,9 @@ function researchAddChild(parentId) {
 function researchEdit(id) { researchOpenModal("edit", researchFindNode(id) || null, null); }
 function researchCloseModal() { document.getElementById("researchModal").classList.add("hidden"); }
 function researchCloseDetail() {
-  document.getElementById("researchDetail").classList.add("hidden");
+  const el = document.getElementById("researchDetail");
+  if (window.BigoUI) BigoUI.closeDrawer(el);
+  else el.classList.add("hidden");
   document.getElementById("researchChain").classList.add("hidden");
   researchState.selectedId = null;
   researchRender();
@@ -3881,28 +4111,38 @@ async function researchSave(e) {
     if (id) await API.put(`/api/research/nodes/${id}`, payload);
     else await API.post("/api/research/nodes", payload);
     researchCloseModal();
-    toast(id ? "已更新" : "已添加");
+    toast(id ? t("toast.updated") : t("toast.saved"));
     await researchLoad();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 async function researchDelete(id) {
   const node = researchFindNode(id);
-  const label = node ? `「${node.title}」及其整棵子树` : `节点 #${id}`;
-  if (!confirm(`确认删除 ${label}？子树一并删除，不可恢复。`)) return;
+  const label = node ? node.title : `#${id}`;
+  const ok = window.BigoUI
+    ? await BigoUI.confirm({
+        title: t("research.delete_tree"),
+        message: t("research.confirm_delete", { label }),
+        impact: t("research.confirm_delete_impact"),
+        danger: true,
+      })
+    : confirm(t("research.confirm_delete", { label }));
+  if (!ok) return;
   try {
     await API.del(`/api/research/nodes/${id}`);
     if (researchState.selectedId === id) researchCloseDetail();
-    toast("已删除");
+    toast(t("toast.deleted"));
     await researchLoad();
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { toast(err, true); }
 }
 
 function researchExpFill() {
   const sel = document.getElementById("researchExpSel");
-  sel.innerHTML = '<option value="">-- 计划占位（未归档）--</option>' +
-    researchState.experiments.map(e =>
-      `<option value="${e.id}">${esc(e.date || "")} ${esc(e.title)} — ${esc(e.exp_type)}</option>`).join("");
+  sel.innerHTML = '<option value="">' + t("research.exp_placeholder") + '</option>' +
+    researchState.experiments.map(e => {
+      const typeLabel = (window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type;
+      return `<option value="${e.id}">${esc(e.date || "")} ${esc(e.title)} — ${esc(typeLabel)}</option>`;
+    }).join("");
 }
 function researchExpFilter() {
   const q = (document.getElementById("researchExpSearch").value || "").toLowerCase();
@@ -3920,7 +4160,7 @@ function researchFillTagFilter() {
     if (n.children) stack.push(...n.children);
   }
   const cur = sel.value;
-  sel.innerHTML = '<option value="">全部标签</option>' +
+  sel.innerHTML = '<option value="">' + t("research.all_tags") + '</option>' +
     [...seen].sort().map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
   sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
 }
@@ -3930,7 +4170,7 @@ function researchFillProteinFilter() {
   researchState.experiments.forEach(e =>
     (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean).forEach(p => seen.add(p)));
   const cur = sel.value;
-  sel.innerHTML = '<option value="">全部蛋白</option>' +
+  sel.innerHTML = '<option value="">' + t("research.all_proteins") + '</option>' +
     [...seen].sort().map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
   sel.value = [...sel.options].some(o => o.value === cur) ? cur : "";
 }
@@ -3956,9 +4196,88 @@ async function researchInit() {
   } catch (_) {}
 }
 
+function compareSelectedIds() {
+  return [...document.querySelectorAll(".compare-check:checked")].map(el => parseInt(el.value, 10)).filter(Boolean);
+}
+
+async function loadCompareCandidates() {
+  const box = document.getElementById("compareList");
+  if (!box) return;
+  const type = document.getElementById("compareTypeFilter")?.value || "";
+  const qs = type ? `calc_type=${encodeURIComponent(type)}&limit=200` : "limit=200";
+  try {
+    const exps = await API.get(`/api/experiments?${qs}`);
+    if (!exps.length) {
+      box.innerHTML = `<p class="empty-hint">${t("common.empty")}</p>`;
+      return;
+    }
+    box.innerHTML = exps.map(e => {
+      const typeLabel = (window.BigoI18n && e.calc_type)
+        ? BigoI18n.calcTypeLabel(e.calc_type) : (e.exp_type || "");
+      return `<label class="checkbox-label">
+        <input type="checkbox" class="compare-check" value="${e.id}">
+        <span><strong>${esc(e.title)}</strong>
+        <span style="color:var(--graphite);font-size:12px"> · ${esc(e.date || "")} · ${esc(typeLabel)}</span></span>
+      </label>`;
+    }).join("");
+  } catch (err) {
+    box.innerHTML = `<p class="empty-hint">${t("error.load_failed")}</p>`;
+    toast(err, true);
+  }
+}
+
+async function runCompare() {
+  const ids = compareSelectedIds();
+  const meta = document.getElementById("compareMeta");
+  const table = document.getElementById("compareTable");
+  if (!table) return;
+  if (ids.length < 2) {
+    setEvidence("compareMeta", "empty", t("compare.empty"));
+    return;
+  }
+  setEvidence("compareMeta", "processing", t("workbench.status_processing"));
+  try {
+    const r = await fetch("/api/experiments/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) {
+      const msg = data.error === "calc_type_mismatch" ? t("compare.mismatch")
+        : data.error === "need_two" ? t("compare.need_two")
+        : data.error === "not_found" ? t("compare.missing")
+        : t("error.generic");
+      setEvidence("compareMeta", "fail", msg);
+      toast(backendError(data, r.status), true);
+      return;
+    }
+    const typeLabel = window.BigoI18n ? BigoI18n.calcTypeLabel(data.calc_type) : data.calc_type;
+    setEvidence("compareMeta", data.rows.length ? "done" : "empty",
+      data.rows.length ? typeLabel : t("compare.no_metrics"));
+    const head = table.querySelector("thead");
+    const body = table.querySelector("tbody");
+    const colH = (data.columns || []).map(c => `<th>${esc(c.title)}<div style="font-weight:400;color:var(--graphite)">${esc(c.date || "")}</div></th>`).join("");
+    head.innerHTML = `<tr><th>${t("compare.pick")}</th>${colH}</tr>`;
+    body.innerHTML = (data.rows || []).map(row => {
+      const cells = (row.values || []).map(v => {
+        if (v == null) return "<td>—</td>";
+        const n = Number(v);
+        const txt = Number.isFinite(n) ? (+n.toPrecision(4)).toString() : String(v);
+        return `<td>${esc(txt)}${row.unit ? ` <span style="color:var(--graphite)">${esc(row.unit)}</span>` : ""}</td>`;
+      }).join("");
+      return `<tr class="${row.highlight ? "compare-hot" : ""}"><td>${esc(row.label)}</td>${cells}</tr>`;
+    }).join("") || `<tr><td colspan="${1 + (data.columns || []).length}">${t("compare.no_metrics")}</td></tr>`;
+  } catch (err) {
+    setEvidence("compareMeta", "fail", t("workbench.status_fail"));
+    toast(err, true);
+  }
+}
+
 // ═════════════════════════════════════════════════════
 //  Init
 // ═════════════════════════════════════════════════════
+
 function init() {
   if (document.querySelector("#proteinTable")) {
     loadProteins().catch(() => {});
@@ -3990,11 +4309,43 @@ function init() {
   const loadExpId = parseInt(new URLSearchParams(location.search).get("load_exp"), 10);
   if (loadExpId && document.querySelector("#concTable")) {
     loadExpIntoCalc(loadExpId);
+  } else if (document.querySelector(".tab-btn")) {
+    const m = (location.hash || "").match(/tool=([a-z]+)/);
+    if (m) activateTool(m[1], { hash: false });
+    else {
+      const active = document.querySelector(".tab-btn.active");
+      if (active) activateTool(active.dataset.tab);
+    }
   }
-  // 独立实验详情页（/experiments/<id>）：渲染研究脉络关联（列表页走 showExpDetail）
+  window.addEventListener("hashchange", () => {
+    if (document.querySelector(".tab-btn")) {
+      const m = (location.hash || "").match(/tool=([a-z]+)/);
+      if (m) activateTool(m[1], { hash: false });
+    }
+  });
+  document.addEventListener("bigo:locale", () => {
+    if (document.querySelector("#proteinTable")) loadProteins().catch(() => {});
+    if (document.querySelector("#expTable")) loadExperiments().catch(() => {});
+    if (document.querySelector("#researchFlow")) {
+      researchFillTagFilter();
+      researchFillProteinFilter();
+      researchRender();
+    }
+    if (document.getElementById("copyTypeTags") && copyAllExps.length) {
+      renderCopyTypeTags();
+      renderCopyExpList();
+    }
+    if (document.getElementById("compareTable")) loadCompareCandidates();
+    if (document.querySelector("#concTable")) refreshAutoNamePlaceholders();
+    updateBulkBar();
+    updateExpBulkBar();
+  });
   const rl = document.getElementById("detailResearchList");
   if (rl && rl.dataset.expId) {
     loadResearchList(parseInt(rl.dataset.expId, 10));
+  }
+  if (document.getElementById("compareTable")) {
+    loadCompareCandidates();
   }
 }
 init();
