@@ -8,6 +8,7 @@ onedir（非 onefile）：免启动解压、杀毒误报低、进程冷启动 <1
 datas = [
     ("templates", "templates"),
     ("static", "static"),                    # includes static/fonts (Inter, JetBrains Mono, Noto Sans SC)
+    ("system_prompt.py", "."),               # get_system_prompt 工具的返回内容（mcp_server 运行时读文件）
 ]
 # 惰性 import 的模块，PyInstaller 静态分析看不到，必须显式声明：
 #   mcp_server / fonts / waitress — app.py main 块或函数体内 import；pandas/logomaker/matplotlib — 路由内惰性 import

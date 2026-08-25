@@ -18,7 +18,7 @@
   - 酶活计算 — TECAN xlsx 解析 + 96 孔板 UI + 动力学拟合 + Michaelis-Menten + 阴性扣除
   - 从实验复制 — 历史实验卡片回填
 - **实验归档**：一键保存 / Excel 导出 / 详情页（含**原始数据快照表**：experiment_raw 类型/时间/分析版本）/ 批量删除 + 撤销（内存 undo 栈，最多 20 条）
-- **MCP 服务器**：`mcp_server.py`，14 个工具，读写契约（唯一写工具 `save_experiment`）+ 结构化错误码（缺参/类型错/语义不满足 → -32602，未知工具 → -32601，内部错误 → -32000）；实验读取工具（get_experiment/get_experiment_raw）递归剔除 sequence 明文（IP 保护兜底）
+- **MCP 服务器**：`mcp_server.py`，17 个工具，读写契约（写工具 `save_experiment` + `save_observation`）+ 结构化错误码（缺参/类型错/语义不满足 → -32602，未知工具 → -32601，内部错误 → -32000）；实验读取工具（get_experiment/get_experiment_raw）递归剔除 sequence 明文（IP 保护兜底）。`get_system_prompt` 返回 `system_prompt.py` 中的 AI 数据处理工作流指导（数据质量评估 / 计算走工具 / 实验 vs 观察归档边界 / 研究脉络挂载 / 序列脱敏），供外部智能体开始处理实验数据前调用
 
 ## 环境
 
@@ -38,7 +38,8 @@ protein_lab/
 ├── akta.py             AKTA 内核（Unicorn zip 原生解析 / 峰检测 / 峰图 / 峰表，v0.0.9）
 ├── services.py         统一实验写入入口（自动命名/校验/未来 audit·lineage 插桩点）
 ├── models.py           SQLite 模型：CRUD + JSON 往返 + schema 迁移框架 + experiment_raw
-├── mcp_server.py       MCP stdio 服务器（读写契约：唯一写工具 save_experiment）
+├── mcp_server.py       MCP stdio 服务器（读写契约：写工具 save_experiment + save_observation）
+├── system_prompt.py    AI 数据处理工作流指导（get_system_prompt 工具的返回内容）
 ├── paths.py            路径解析（PyInstaller 打包与 dev 双模式）
 ├── fonts.py            CJK 字体解析 + matplotlib 中文配置
 ├── protein_lab.spec    PyInstaller 打包配置

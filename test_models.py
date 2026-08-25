@@ -227,6 +227,7 @@ read_cases = [
     ("get_research_node", {"node_id": _rn_id}),
     ("get_research_context", {"goal_id": _rn_id}),
     ("compare_experiments", {"exp_ids": [e7["id"], e7["id"]]}),
+    ("get_system_prompt", {}),
 ]
 before = _db_dump()
 for tool, args in read_cases:

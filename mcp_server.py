@@ -20,6 +20,7 @@ import models
 import services
 import research
 import compare
+import paths
 from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert_concentration
 
 # ── MCP 读写契约（数据完整性规则 #6）──────────────────────
@@ -310,6 +311,15 @@ TOOLS = [
             "required": ["title"]
         }
     },
+    {
+        "name": "get_system_prompt",
+        "description": "获取 AI 数据处理工作流指导（system prompt）。智能体在开始处理实验数据前应调用此工具，获取数据质量评估、计算工具使用、实验归档、研究脉络挂载、序列脱敏等完整工作流指导。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
 ]
 
 
@@ -537,6 +547,12 @@ def handle_tools_call(id_, params):
                     raise ValueError(f"{tool_name}: {err}")
                 created.append(models.research_node_get(nid))
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(created, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "get_system_prompt":
+            # system_prompt.py 是打包资源（dev=源码目录，frozen=_MEIPASS），走 paths.resource_path
+            with open(paths.resource_path("system_prompt.py"), "r", encoding="utf-8") as f:
+                text = f.read()
+            return send_response(id_, {"content": [{"type": "text", "text": text}]})
 
         else:
             return send_error(id_, -32601, f"Unknown tool: {tool_name}")
