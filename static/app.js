@@ -1795,6 +1795,10 @@ let enzymeData = null;         // {meta, wells: {A1: {times, od}, ...}}
 const ENZYME_ANALYSIS_VERSION = "enzyme-1.0";  // raw 快照分析版本（与 BLI/AKTA 一致约定）
 let enzymeSelection = new Set();
 let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw}}
+// 参考角色 → 自动命名标签（●样品/○空白/⊖阴性/⊕阳性）。角色名是自动生成的、不算自定义名，
+// 批量改名可覆盖（enzymeShouldAutoRename 放行）；自定义名仍跳过不覆盖。
+const ENZYME_ROLE_LABELS = { "": "样品", blank: "空白", neg: "阴性", pos: "阳性" };
+const ENZYME_ROLE_NAMES = Object.values(ENZYME_ROLE_LABELS);
 let enzymeLastImage = null;    // 最近一次曲线图 base64（供下载）
 let enzymeLastPlotType = null; // kinetics | michaelis
 let enzymeTimePoints = [];     // 时间点列表（秒，升序，全孔共享网格）
@@ -2068,6 +2072,11 @@ function enzymeUpdateWells() {
     ids.sort((a, b) => (a.charCodeAt(0) - b.charCodeAt(0)) || (parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10)));
   }
   const renameIds = multi ? ids.filter(id => enzymeShouldAutoRename(id, name)) : ids;
+  // 已占用后缀号：全板中「不在本次重命名集合」的孔已持有 {name}_N（或裸 {name}）→ 序号让给它们，
+  // 避免第二批/多批同名命名从头编号导致重名孔（如已有 TIM_1..4，新批又从 TIM_1 起）
+  const usedNums = multi ? enzymeTakenSuffixes(renameIds, name) : new Set();
+  let nextNum = 1;
+  const takeNum = () => { while (usedNums.has(nextNum)) nextNum++; usedNums.add(nextNum); return nextNum++; };
   ids.forEach((id) => {
     if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
     if (name) {
@@ -2075,7 +2084,7 @@ function enzymeUpdateWells() {
         enzymeWellInfo[id].name = name;
       } else {
         const ri = renameIds.indexOf(id);
-        if (ri >= 0) enzymeWellInfo[id].name = `${name}_${ri + 1}`;
+        if (ri >= 0) enzymeWellInfo[id].name = `${name}_${takeNum()}`;
       }
     }
     enzymeWellInfo[id].group = group;  // 空=清除组（与 name 的「非空才写」不同）
@@ -2094,11 +2103,27 @@ function enzymeUpdateWells() {
   renderPlate();
 }
 
-// 批量自动命名是否改这个孔：空名、同名、或已是 {name}_N 模式 → 命名；名字不同 → 跳过不覆盖
+// 批量自动命名是否改这个孔：空名、同名、参考角色自动名（样品/空白/阴性/阳性）、或已是 {name}_N
+// 模式 → 命名；其他自定义名 → 跳过不覆盖
 function enzymeShouldAutoRename(id, name) {
   const cur = (enzymeWellInfo[id]?.name || "").trim();
-  if (!cur || cur === name) return true;
+  if (!cur || cur === name || ENZYME_ROLE_NAMES.includes(cur)) return true;
   return new RegExp("^" + _escRegex(name) + "_\\d+$").test(cur);
+}
+
+// 全板已被占用的 {name}_N 后缀号：除本次重命名集合外，孔名匹配 {name}_N 的占用 N、裸 {name} 占用 1。
+// 批量命名按最小空闲号续编，保证不与其他孔重名。
+function enzymeTakenSuffixes(renameIds, name) {
+  const re = new RegExp("^" + _escRegex(name) + "_(\\d+)$");
+  const used = new Set();
+  for (const [wid, w] of Object.entries(enzymeWellInfo)) {
+    if (renameIds.includes(wid)) continue;   // 本次会重命名，旧号释放
+    const cur = (w?.name || "").trim();
+    if (cur === name) { used.add(1); continue; }
+    const m = re.exec(cur);
+    if (m) used.add(parseInt(m[1], 10));
+  }
+  return used;
 }
 
 function _escRegex(s) {
@@ -2427,15 +2452,13 @@ document.addEventListener("click", function (e) {
 
 function enzymeSetRef(refType) {
   // 参考角色写进命名，不落空：●样品→"样品"、○空白→"空白"、⊖阴性→"阴性"、⊕阳性→"阳性"
-  const roleLabels = { "": "样品", blank: "空白", neg: "阴性", pos: "阳性" };
-  const label = roleLabels[refType || ""];
-  const roleNames = Object.values(roleLabels);
+  const label = ENZYME_ROLE_LABELS[refType || ""];
   for (const id of enzymeSelection) {
     if (!enzymeWellInfo[id]) enzymeWellInfo[id] = {};
     enzymeWellInfo[id].ref = refType;
     // 空命名或当前是角色名 → 跟随按钮；自定义命名不覆盖
     const cur = enzymeWellInfo[id].name || "";
-    if (!cur || roleNames.includes(cur)) enzymeWellInfo[id].name = label;
+    if (!cur || ENZYME_ROLE_NAMES.includes(cur)) enzymeWellInfo[id].name = label;
   }
   updateWellForm();
   renderPlate();
