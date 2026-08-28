@@ -3879,6 +3879,8 @@ function researchRender(force) {
     document.getElementById("researchChain").classList.add("hidden");
   }
   flowEl.scrollLeft = scLeft;   // 重画后恢复横向滚动位置
+  // 重绘会还原旧 scrollLeft，选中态可能又被裁切/被面板盖住——每次重绘后都补一次露出
+  if (researchState.selectedId != null) researchRevealSelected();
 }
 
 function renderResearchFlow(flowEl, trees, q, tag, prot) {
@@ -4018,6 +4020,36 @@ async function researchSelect(id) {
   detailEl.classList.remove("hidden");
   if (window.BigoUI) BigoUI.openDrawer(detailEl);
   else detailEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  // reveal 必须在面板打开之后：桌面态 .res-detail-side 是 fixed 悬浮层盖在导图右缘上方
+  researchRevealSelected();
+}
+
+// 选中节点完整露出：宽节点右缘贴 .res-flow-container（overflow-x:auto）裁切边、
+// 或被桌面态悬浮详情面板（fixed, right:24px, 高可达视口底部）盖住时，2px outline
+// + 1px offset 画在盒子外会切掉「选择框不完整」。把内容横向左移，直到节点（含外扩框）
+// 进入有效可视区（容器视口 ∩ 面板左缘）并留 6px 呼吸位；左缘溢出同理右移。
+function researchRevealSelected() {
+  const flow = document.getElementById("researchFlow");
+  const el = flow && flow.querySelector(".evidence-node.selected");
+  if (!el) return;
+  const apply = () => {
+    const r = el.getBoundingClientRect();
+    const c = flow.getBoundingClientRect();
+    const PAD = 6;  // > outline 外扩 3px
+    let bound = c.right;
+    const panel = document.getElementById("researchDetail");
+    if (panel && !panel.classList.contains("hidden")
+        && window.matchMedia("(min-width: 1024px)").matches) {
+      // 桌面态面板 fixed right:24 宽 400：左界确定性计算（不量 rect，避开重排/动画时机）
+      const pl = window.innerWidth - 24 - panel.offsetWidth;
+      if (pl > c.left + 40) bound = Math.min(bound, pl - PAD);
+    }
+    let dx = 0;
+    if (r.right > bound - PAD) dx = r.right - bound + PAD;
+    else if (r.left < c.left + PAD) dx = r.left - c.left - PAD;
+    if (dx) flow.scrollBy({ left: dx, behavior: "smooth" });
+  };
+  requestAnimationFrame(apply);
 }
 
 function renderResearchChain(chain) {

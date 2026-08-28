@@ -222,10 +222,10 @@ label input, label textarea, label select,
   width: 100%; border-collapse: collapse; background: transparent;
 }
 .datatable th, .calc-table th {
-  text-align: left; padding: 8px 14px; font-size: 11px; font-weight: 500;
-  color: var(--graphite); font-family: var(--font-mono);
-  border-bottom: 1px solid var(--rule); text-transform: uppercase; letter-spacing: 0.04em;
-  background: var(--paper);
+  text-align: left; padding: 8px 14px; font-size: 12px; font-weight: 500;
+  line-height: 1.5; white-space: nowrap; color: var(--graphite); font-family: var(--font-mono);
+  border-bottom: 1px solid var(--rule); letter-spacing: 0.02em;
+  background: var(--paper); vertical-align: middle;
 }
 .datatable td, .calc-table td {
   padding: 10px 14px; font-size: 14px; border-bottom: 1px solid var(--rule);
@@ -391,7 +391,7 @@ label textarea { resize: vertical; min-height: 80px; }
   border-radius: var(--radius-sm);
 }
 .bulk-count { font-size: 13px; font-weight: 600; font-family: "JetBrains Mono", monospace; }
-.sort-ind { display: inline-block; width: 12px; color: var(--cyan); font-size: 10px; }
+.sort-ind { display: inline-block; width: 12px; color: var(--cyan); font-size: 10px; vertical-align: middle; }
 
 .toast {
   position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
@@ -578,10 +578,12 @@ details.advanced > summary {
   border-top-style: dashed; border-top-color: var(--lf-line-free);
 }
 /* 末子悬垂线遮罩：叶子/折叠时子树竖线越过肘形继续下垂，用画布色盖掉 elbow 以下段。
-   右缘贴节点 border-box 左缘（padding box 在 3px 色条内侧，需 +3px 补偿），不吃自身边框/色条 */
+   右缘须同时避开：① 节点自身 3px 色条（padding box 补偿）② 选中态 outline（border-box
+   外扩 3px）——定位伪元素画在 outline 之上，贴太近会吃掉选择框左缘下半条（+7px：
+   遮罩带 -19..-7，盖住 -9 列竖线、不碰 -3..-1 outline 带） */
 .flow-tree > .flow-col:last-child:not(.has-children) > .evidence-node::after,
 .flow-tree > .flow-col.collapsed > .evidence-node::after {
-  content: ""; position: absolute; right: calc(100% + 3px); top: calc(50% + 1.5px); bottom: -2px;
+  content: ""; position: absolute; right: calc(100% + 7px); top: calc(50% + 1.5px); bottom: -2px;
   width: 12px; background: var(--lab-canvas); pointer-events: none;
 }
 .evidence-node {
