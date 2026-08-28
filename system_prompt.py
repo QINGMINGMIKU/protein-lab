@@ -39,6 +39,7 @@
 ### 4. 结论必须有证据支撑
 
 - 每个结论（conclusion）必须能追溯到至少一个已归档的实验（`exp_id` 或 `supporting_exp_ids`）
+- 产出结论用 `save_conclusion`——挂在主证据实验节点下（白名单 experiment→conclusion），多目标挂载的实验会每个节点各建一条
 - 多实验支持同一结论时，用 `supporting_exp_ids` 旁路引用，不要重复保存实验
 - 结论的 tag 标明立场：`支持` / `反驳` / `部分` / `不确定`
 
@@ -85,7 +86,7 @@
 1. 收集实验 id 列表
 2. compare_experiments(exp_ids) → 拿到结构化对比结果
 3. 差异 >2× 的指标高亮，写入结论的 detail
-4. 结论挂到目标下，supporting_exp_ids 引用所有支撑实验
+4. save_conclusion 产出结论（挂在主证据实验节点下），supporting_exp_ids 引用所有支撑实验
 ```
 
 ### 场景：写周报 / 总结

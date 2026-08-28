@@ -18,7 +18,7 @@
   - 酶活计算 — TECAN xlsx 解析 + 96 孔板 UI + 动力学拟合 + Michaelis-Menten + 阴性扣除
   - 从实验复制 — 历史实验卡片回填
 - **实验归档**：一键保存 / Excel 导出 / 详情页（含**原始数据快照表**：experiment_raw 类型/时间/分析版本）/ 批量删除 + 撤销（内存 undo 栈，最多 20 条）
-- **MCP 服务器**：`mcp_server.py`，17 个工具，读写契约（写工具 `save_experiment` + `save_observation`）+ 结构化错误码（缺参/类型错/语义不满足 → -32602，未知工具 → -32601，内部错误 → -32000）；实验读取工具（get_experiment/get_experiment_raw）递归剔除 sequence 明文（IP 保护兜底）。`get_system_prompt` 返回 `system_prompt.py` 中的 AI 数据处理工作流指导（数据质量评估 / 计算走工具 / 实验 vs 观察归档边界 / 研究脉络挂载 / 序列脱敏），供外部智能体开始处理实验数据前调用
+- **MCP 服务器**：`mcp_server.py`，19 个工具，读写契约（写工具 `save_experiment` + `save_observation` + `save_conclusion` + `attach_goal`）+ 结构化错误码（缺参/类型错/语义不满足 → -32602，未知工具 → -32601，内部错误 → -32000）；实验读取工具（get_experiment/get_experiment_raw）递归剔除 sequence 明文（IP 保护兜底）。`get_system_prompt` 返回 `system_prompt.py` 中的 AI 数据处理工作流指导（数据质量评估 / 计算走工具 / 实验 vs 观察归档边界 / 研究脉络挂载 / 序列脱敏），供外部智能体开始处理实验数据前调用
 
 ## 环境
 
@@ -38,7 +38,7 @@ protein_lab/
 ├── akta.py             AKTA 内核（Unicorn zip 原生解析 / 峰检测 / 峰图 / 峰表，v0.0.9）
 ├── services.py         统一实验写入入口（自动命名/校验/未来 audit·lineage 插桩点）
 ├── models.py           SQLite 模型：CRUD + JSON 往返 + schema 迁移框架 + experiment_raw
-├── mcp_server.py       MCP stdio 服务器（读写契约：写工具 save_experiment + save_observation）
+├── mcp_server.py       MCP stdio 服务器（读写契约：写工具 save_experiment + save_observation + save_conclusion + attach_goal）
 ├── system_prompt.py    AI 数据处理工作流指导（get_system_prompt 工具的返回内容）
 ├── paths.py            路径解析（PyInstaller 打包与 dev 双模式）
 ├── fonts.py            CJK 字体解析 + matplotlib 中文配置
@@ -64,7 +64,7 @@ protein_lab/
 - **AKTA 分析模块 `akta.py`（v0.0.9）**：**标准库原生解析 Unicorn zip，无 pycorn 依赖**——外层 zip 的 `Chrom.N_MM_True` 是**嵌套 zip**（非标准结构：EOCD 不在文件尾、带尾部填充），需 `raw.rindex(_ZIP_MAGIC_END)+22` 截断才能被 zipfile 读取；嵌套 zip 内 `CoordinateData.Volumes/Amplitudes` 是 .NET 序列化 float32 数组，**数据从偏移 47 起、每 4 字节一个 float32、跳过尾部 48 字节**（pycorn `unpacker` 逻辑，格式经 REF 真实样例 zip 验证）。通道元数据在 `Chrom.1.Xml` 的 `<Curves><Curve>`（Name/CurveDataType/AmplitudeUnit/CurvePoints→BinaryCurvePointsFileName），事件（Fraction/Injection/Run Log）在 `<EventCurves>`。峰检测 `detect_peaks`：SG 平滑（`_smooth` 纯 numpy 实现）→ 基线取区间 5% 分位数 → scipy `find_peaks`（height + prominence + distance 合并分裂峰）→ 边界走回基线、梯形面积、半高宽。Web API（v0.0.8 同款会话模式）：`/api/akta/analyze|plot|export|save`，save 时 results 带 `AKTA_ANALYSIS_VERSION` + raw 落库 `akta_traces`。回归测试 `test_akta.py`（REF 两个真实 zip）。
 - **统一写入入口（架构升级 2026-08）**：`services.create_experiment` 收敛手动/from-calculation/MCP 三条写入路径（自动命名 + 空类型校验 + `coerce_int_list` 静默过滤坏 id）。未来 audit/lineage 的插桩点。`models.EXP_TYPES` 是 exp_type 单一来源，模板下拉/MCP 描述/测试全走常量。
 - **数据存储地基（v0.0.7）**：schema 迁移框架——`models.SCHEMA_VERSION` + 有序 `MIGRATIONS`，`_migrate()` 逐条 `BEGIN`→迁移→`PRAGMA user_version=N`→`COMMIT` 原子（**不能 executescript，会隐式提交**）；v1=现有 3 表（老库 no-op）、v2=`experiment_raw`。`experiment_raw`：**只写一次从不 UPDATE**（`exp_save_raw` 重复调用=新行），删实验不删 raw（FK `ON DELETE SET NULL`，规则 #2/#5/#8）。`get_db(read_only=True)` 开 `PRAGMA query_only` 拒写（MCP 只读契约基础设施）。
-- **MCP 读写契约（v0.0.7）**：唯一写工具 `save_experiment`；读工具零写库由 `test_models.py` 逐工具断言强制（库内容逐字节不变），**无运行时拦截**——新增读工具必须在测试 `read_cases` 注册。
+- **MCP 读写契约（v0.0.7 起，v0.1.3+ 扩写面）**：写工具集 `save_experiment`（归档）/ `save_observation`（观察旁注）/ `save_conclusion`（结论，走 research.create_node）/ `attach_goal`（一实验多目标，走 services.attach_goal，幂等：已挂返 already_attached）；读工具零写库由 `test_models.py` 逐工具断言强制（库内容逐字节不变），**无运行时拦截**——新增读工具必须在测试 `read_cases` 注册。
 - **研究脉络模块（v0.1.0）**：`research.py` service 层——证据链 **目标→(拆解)子目标/实验→(得出)结论→(引出)新目标**。数据在 `research_nodes` 表（迁移 v3+v4：node_type/parent_id/title/detail/exp_id/tag/sort_order/supporting_exp_ids，`models.research_node_*` CRUD；parent FK 级联删、exp_id FK `ON DELETE SET NULL` 断链保留；`supporting_exp_ids` 是 JSON 文本列，读端 `_node_row` 反序列化）。**白名单边在 service 层**（`research.WHITELIST`：goal→{goal,experiment,observation}、experiment→{conclusion,observation}、conclusion→{goal,observation}、observation→{}——observation 是叶子旁注），表层**不做 CHECK** 留 `free_attach` 逃生舱打破；根必须是 goal、多根；`create_node` 失败返 `(None, err)`、`update_node` 失败返 `(False, err)`（注意两者返回形态不同）。`/research` 是**默认首页**（`/` 也指向它，顶层导航第一项）；前端两态：**根目标列表**（默认）→ 点根目标进**单根横向流程图**（左→右流式、同级纵向并联，`researchFlowLayout` DFS 访问序布局 + SVG 肘形连接线按父类型着色，app.js `RES_FLOW`/`RES_FLOW_EDGE` 常量）；API `/api/research/nodes` 增查改删 + 递归子树 + 链（根→节点 breadcrumb）。**MCP 新增 `list_research_trees` / `get_research_node` / `get_research_context`（读工具，注册 read_cases；`get_research_context`（v0.1.2+v0.1.3）= 研究目标上下文聚合：goal 本体 + 父目标链 + 子树实验 key results + 结论 stance + **支持实验全证据 `supporting_experiments`（多实验→一结论，`_exp_block` 与子树实验同块）+ `observations` 观察/关键细节聚合（parent 上下文）** + 开放目标，数据给全、判断留给 AI）**——吸收原 v0.1.1 的 experiment_links（实验块 exp_id 即血缘）。回归 `test_research.py`（白名单/逃生舱/级联删/JSON 往返/断链/排序/API/MCP 零写/上下文聚合/页面渲染/v0.1.3 observation+支持实验）。
 - **实验 `params`/`results` 可能是双重编码的 JSON 字符串**（历史数据遗留）——读这两个字段要 `while isinstance(val, str): json.loads` 防御性解包（见 `page_experiment_detail`、`_export_excel`）。
 - **undo 栈是内存态**（app.py `_undo_stack`，上限 20 条），重启即失。

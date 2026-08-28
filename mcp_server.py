@@ -26,12 +26,13 @@ from calculators import calc_ext_coeff, calc_conc, calc_dilution_series, convert
 # ── MCP 读写契约（数据完整性规则 #6）──────────────────────
 # 读工具（search/get/list/calculate_*）是纯函数：只查询 + 纯计算，零写库。
 # 写工具：save_experiment（实验归档，走 services.create_experiment 统一写入入口）
-#         + save_observation（研究脉络观察节点，走 research.create_node）。
+#         + save_observation / save_conclusion（研究脉络节点，走 research.create_node）
+#         + attach_goal（已存实验多目标挂载，走 services.attach_goal）。
 # 新工具必须归入二者之一；读工具若意外触库写入，由 test_models 的"读零写库"
 # 断言拦截（逐工具调用后对比库内容不变）。
 
-SERVER_VERSION = "1.1.0"
-WRITE_TOOLS = {"save_experiment", "save_observation"}
+SERVER_VERSION = "1.2.0"
+WRITE_TOOLS = {"save_experiment", "save_observation", "save_conclusion", "attach_goal"}
 
 
 def _sanitize(p: dict, include_fp: bool = False) -> dict:
@@ -94,6 +95,23 @@ def _inum(args, tool, key, default=None):
         return int(args[key])
     except (TypeError, ValueError):
         raise InvalidParams(f"{tool}: 参数 '{key}' 应为整数，收到 {args[key]!r}")
+
+
+def _resolve_parents(args, tool, parent_id, exp_id):
+    """save_observation / save_conclusion 共用父节点解析：parent_id 与 exp_id 二选一
+    必填；exp_id 解析到其全部 experiment 节点（一实验挂多目标 → 每目标各建一个子节点）。
+    返回父节点 id 列表。"""
+    if (parent_id is None) == (exp_id is None):
+        raise InvalidParams(f"{tool}: parent_id 与 exp_id 必须且只能给一个")
+    if parent_id is not None:
+        return [parent_id]
+    if not models.exp_get(exp_id):
+        raise InvalidParams(f"{tool}: 实验 {exp_id} 不存在")
+    parents = [n["id"] for n in models.research_nodes_all()
+               if n.get("node_type") == "experiment" and n.get("exp_id") == exp_id]
+    if not parents:
+        raise InvalidParams(f"{tool}: 实验 {exp_id} 尚未挂到研究脉络，请先归档到目标下")
+    return parents
 
 # ── MCP JSON-RPC dispatcher ────────────────────────────────
 
@@ -233,7 +251,7 @@ TOOLS = [
     },
     {
         "name": "list_research_trees",
-        "description": "列出研究脉络森林（v0.1.0）：全部根目标，每棵递归嵌套 children。节点类型 goal(目标)/experiment(实验，含 exp_id 关联或为计划占位)/conclusion(结论)；evidence chain：目标→实验→结论→新目标",
+        "description": "列出研究脉络森林（v0.1.0）：全部根目标，每棵递归嵌套 children。节点类型 goal(目标)/experiment(实验，含 exp_id 关联或为计划占位)/conclusion(结论)/observation(观察·关键细节，v0.1.3 叶子旁注)；evidence chain：目标→实验→结论→新目标",
         "inputSchema": {
             "type": "object",
             "properties": {},
@@ -253,7 +271,7 @@ TOOLS = [
     },
     {
         "name": "get_research_context",
-        "description": "研究目标上下文（v0.1.2）：goal 本体 + 父目标链 + 子树实验 key results（完整 params/results + 原始快照元数据 _raw，序列明文剔除）+ 结论 epistemic status（立场 + 来源实验是否归档）+ 开放目标（子树内无结论的目标）。使能 AI 回答：现在在研究什么 / 哪些结论缺实验支持 / 哪些实验互相矛盾 / 目标验证到什么程度",
+        "description": "研究目标上下文（v0.1.2+v0.1.3）：goal 本体 + 父目标链 + 子树实验 key results（完整 params/results + 原始快照元数据 _raw，序列明文剔除）+ 结论 epistemic status（立场 + 来源实验是否归档 + supporting_experiments 多实验全证据块）+ observations 观察/关键细节聚合（含 parent 上下文）+ 开放目标（子树内无结论的目标）。使能 AI 回答：现在在研究什么 / 哪些结论缺实验支持 / 哪些实验互相矛盾 / 目标验证到什么程度",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -309,6 +327,35 @@ TOOLS = [
                 "exp_id": {"type": "integer", "description": "实验 id，自动解析到该实验的研究节点（可能多个），与 parent_id 二选一必填"}
             },
             "required": ["title"]
+        }
+    },
+    {
+        "name": "save_conclusion",
+        "description": "在研究脉络中新增结论节点（conclusion）。白名单：结论只能挂在实验节点下（experiment→conclusion），直接挂目标需 free_attach 逃生舱。parent_id（研究节点 id）与 exp_id（实验 id，自动解析到其研究节点，多目标挂载时每个节点各建一条结论）二选一必填。tag 标立场（支持/反驳/部分/不确定，可逗号混普通标签）。supporting_exp_ids（v0.1.3）为额外支撑实验旁路引用（多实验→一结论），树父实验仍是主证据",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "结论标题（必填，一句话科学结论）"},
+                "detail": {"type": "string", "description": "结论详情（数据依据、边界条件等）"},
+                "tag": {"type": "string", "description": "立场 + 可选普通标签，如 '支持,PD1'"},
+                "parent_id": {"type": "integer", "description": "父研究节点 id（通常为 experiment 节点），与 exp_id 二选一必填"},
+                "exp_id": {"type": "integer", "description": "实验 id，自动解析到其研究节点（可能多个），与 parent_id 二选一必填"},
+                "supporting_exp_ids": {"type": "array", "items": {"type": "integer"}, "description": "额外支撑实验 id 列表（旁路引用，树父实验以外的支撑实验）"},
+                "free_attach": {"type": "boolean", "description": "逃生舱：打破白名单边，默认 false"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "attach_goal",
+        "description": "把已存实验挂到另一个研究目标下（一实验多目标，v0.1.1）：在指定 goal 下追加一个 experiment 节点。幂等——该实验已挂在目标下时返回既有节点（already_attached=true）。实验须先经 save_experiment 归档（goal_id/new_goal），本工具用于后补挂载",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "exp_id": {"type": "integer", "description": "实验 id"},
+                "goal_id": {"type": "integer", "description": "目标节点 id（必须是 goal 节点）"}
+            },
+            "required": ["exp_id", "goal_id"]
         }
     },
     {
@@ -525,19 +572,9 @@ def handle_tools_call(id_, params):
 
         elif tool_name == "save_observation":
             _need(args, tool_name, "title")
-            parent_id = _inum(args, tool_name, "parent_id", None)
-            exp_id = _inum(args, tool_name, "exp_id", None)
-            if (parent_id is None) == (exp_id is None):
-                raise InvalidParams(f"{tool_name}: parent_id 与 exp_id 必须且只能给一个")
-            if parent_id is not None:
-                parents = [parent_id]
-            else:
-                if not models.exp_get(exp_id):
-                    raise InvalidParams(f"{tool_name}: 实验 {exp_id} 不存在")
-                parents = [n["id"] for n in models.research_nodes_all()
-                           if n.get("node_type") == "experiment" and n.get("exp_id") == exp_id]
-                if not parents:
-                    raise InvalidParams(f"{tool_name}: 实验 {exp_id} 尚未挂到研究脉络，请先归档到目标下")
+            parents = _resolve_parents(args, tool_name,
+                                       _inum(args, tool_name, "parent_id", None),
+                                       _inum(args, tool_name, "exp_id", None))
             created = []
             for pid in parents:
                 nid, err = research.create_node(
@@ -547,6 +584,39 @@ def handle_tools_call(id_, params):
                     raise ValueError(f"{tool_name}: {err}")
                 created.append(models.research_node_get(nid))
             return send_response(id_, {"content": [{"type": "text", "text": json.dumps(created, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "save_conclusion":
+            _need(args, tool_name, "title")
+            parents = _resolve_parents(args, tool_name,
+                                       _inum(args, tool_name, "parent_id", None),
+                                       _inum(args, tool_name, "exp_id", None))
+            created = []
+            for pid in parents:
+                nid, err = research.create_node(
+                    node_type="conclusion", title=args["title"],
+                    detail=args.get("detail", ""), parent_id=pid, tag=args.get("tag", ""),
+                    free_attach=bool(args.get("free_attach", False)),
+                    supporting_exp_ids=args.get("supporting_exp_ids"))
+                if err:
+                    raise ValueError(f"{tool_name}: {err}")
+                created.append(models.research_node_get(nid))
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(created, ensure_ascii=False, indent=2)}]})
+
+        elif tool_name == "attach_goal":
+            _need(args, tool_name, "exp_id", "goal_id")
+            eid = _inum(args, tool_name, "exp_id")
+            gid = _inum(args, tool_name, "goal_id")
+            if not models.exp_get(eid):
+                raise InvalidParams(f"{tool_name}: 实验 {eid} 不存在")
+            goal = models.research_node_get(gid)
+            if not goal:
+                raise InvalidParams(f"{tool_name}: 目标节点 {gid} 不存在")
+            if goal.get("node_type") != "goal":
+                raise InvalidParams(f"{tool_name}: 节点 {gid} 不是目标节点（{goal.get('node_type')}），只能挂到目标下")
+            result = services.attach_goal(eid, gid)
+            if not result:
+                raise InvalidParams(f"{tool_name}: 关联失败（实验或目标节点状态异常）")
+            return send_response(id_, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]})
 
         elif tool_name == "get_system_prompt":
             # system_prompt.py 是打包资源（dev=源码目录，frozen=_MEIPASS），走 paths.resource_path

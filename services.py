@@ -219,10 +219,18 @@ def attach_goal(exp_id: int, goal_id: int) -> dict:
 
     返回 {"node_id": 新建 experiment 节点 id, "goal_id": goal_id, "experiment_id": exp_id}。
     失败返 None（前端统一按 falsy 处理）。
+
+    幂等守卫（v0.1.3+）：该实验已挂在该目标下时返回既有节点 + already_attached=True，
+    不再生成重复 experiment 节点（UI 双击 / MCP attach_goal 重发的兜底）。
     """
     exp = models.exp_get(exp_id)
     if not exp:
         return None
+    for n in models.research_nodes_all():
+        if (n.get("node_type") == "experiment" and n.get("exp_id") == exp_id
+                and n.get("parent_id") == goal_id):
+            return {"node_id": n["id"], "goal_id": goal_id,
+                    "experiment_id": exp_id, "already_attached": True}
     title = exp.get("title") or f"实验 #{exp_id}"
     try:
         enid = _attach_goal_node(exp_id, title, goal_id=goal_id, new_goal=None)
