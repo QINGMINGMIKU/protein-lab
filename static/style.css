@@ -528,10 +528,17 @@ details.advanced > summary {
 }
 .copy-type-tag.active { background: var(--cyan); border-color: var(--cyan); color: var(--on-accent); }
 
-.res-layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; align-items: start; }
+.res-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
 @media (max-width: 1023px) { .res-layout { grid-template-columns: 1fr; } }
+/* 详情面板 = 悬浮于导图之上（不占列宽，导图满幅），fixed 跟随视口滚动保持可见；<1024px 走抽屉覆盖 */
+@media (min-width: 1024px) {
+  .res-detail-side {
+    position: fixed; top: 72px; right: 24px; width: 400px;
+    max-width: calc(100vw - 48px); max-height: calc(100vh - 96px);
+    overflow: auto; z-index: 30; box-shadow: var(--shadow-medium);
+  }
+}
 .res-flow-container { min-width: 0; overflow-x: auto; }
-.res-detail-side { position: sticky; top: 72px; max-height: calc(100vh - 96px); overflow: auto; }
 .research-flow-back { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
 .research-flow-back-title { font-size: 16px; overflow-wrap: anywhere; }
 .research-chain { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; font-size: 13px; }
@@ -570,10 +577,11 @@ details.advanced > summary {
 .flow-tree > .flow-col.free-attach > .evidence-node::before {
   border-top-style: dashed; border-top-color: var(--lf-line-free);
 }
-/* 末子悬垂线遮罩：叶子/折叠时子树竖线越过肘形继续下垂，用画布色盖掉 elbow 以下段 */
+/* 末子悬垂线遮罩：叶子/折叠时子树竖线越过肘形继续下垂，用画布色盖掉 elbow 以下段。
+   右缘贴节点 border-box 左缘（padding box 在 3px 色条内侧，需 +3px 补偿），不吃自身边框/色条 */
 .flow-tree > .flow-col:last-child:not(.has-children) > .evidence-node::after,
 .flow-tree > .flow-col.collapsed > .evidence-node::after {
-  content: ""; position: absolute; right: 100%; top: calc(50% + 1.5px); bottom: -2px;
+  content: ""; position: absolute; right: calc(100% + 3px); top: calc(50% + 1.5px); bottom: -2px;
   width: 12px; background: var(--lab-canvas); pointer-events: none;
 }
 .evidence-node {
