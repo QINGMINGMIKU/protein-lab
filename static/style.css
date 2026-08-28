@@ -54,10 +54,10 @@
   --max: 1920px;
   --hit: 44px;
   --ctrl: 36px;
-  --lf-line-goal: rgba(20, 20, 20, 0.18);
-  --lf-line-experiment: rgba(20, 20, 20, 0.18);
-  --lf-line-conclusion: rgba(20, 20, 20, 0.18);
-  --lf-line-free: rgba(200, 121, 30, 0.55);
+  --lf-line-goal: rgba(78, 74, 68, 0.55);       /* 连接线石墨色（0.18 在纸面上几乎不可见） */
+  --lf-line-experiment: rgba(78, 74, 68, 0.55);
+  --lf-line-conclusion: rgba(78, 74, 68, 0.55);
+  --lf-line-free: #C8791E;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -570,21 +570,42 @@ details.advanced > summary {
 .flow-tree > .flow-col.free-attach > .evidence-node::before {
   border-top-style: dashed; border-top-color: var(--lf-line-free);
 }
+/* 末子悬垂线遮罩：叶子/折叠时子树竖线越过肘形继续下垂，用画布色盖掉 elbow 以下段 */
+.flow-tree > .flow-col:last-child:not(.has-children) > .evidence-node::after,
+.flow-tree > .flow-col.collapsed > .evidence-node::after {
+  content: ""; position: absolute; right: 100%; top: calc(50% + 1.5px); bottom: -2px;
+  width: 12px; background: var(--lab-canvas); pointer-events: none;
+}
 .evidence-node {
   display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
-  padding: 8px 10px; border: 1px solid var(--rule); cursor: pointer;
-  min-width: 0; background: var(--instrument); overflow-wrap: anywhere;
-  border-radius: var(--radius-sm);
+  padding: 8px 10px; border: 1px solid #D8D1C5; border-left-width: 3px; cursor: pointer;
+  min-width: 0; max-width: 340px; background: var(--instrument); overflow-wrap: anywhere;
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-soft);
 }
+/* 类型色条（左缘）：目标琥珀 / 实验蓝 / 结论绿 / 观察石墨 */
+.evidence-node--goal { border-left-color: var(--cyan); }
+.evidence-node--experiment { border-left-color: var(--info); }
+.evidence-node--conclusion { border-left-color: var(--success); }
+.evidence-node--observation { border-left-color: var(--graphite); }
 .evidence-node:hover { background: var(--paper); }
-.evidence-node.selected { background: var(--paper); border-color: var(--cyan); border-style: solid; }
+.evidence-node.selected { background: var(--accent-bg); outline: 2px solid var(--cyan); outline-offset: 1px; }
 .evidence-node.dim { opacity: 0.4; }
-.evidence-title { font-size: 12.5px; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+.evidence-title { font-size: 12.5px; font-weight: 500; min-width: 0; max-width: 260px; overflow-wrap: anywhere; }
 .evidence-type { font-family: "JetBrains Mono", monospace; font-size: 10px; color: var(--graphite); text-transform: uppercase; }
+/* 折叠按钮：无边框 + 棕色三角（展开朝下 / 折叠朝右，旋转过渡）；置于节点最左（树形惯例），避免换行掉第二行 */
 .lf-collapse {
-  min-width: 26px; min-height: 26px; line-height: 1; border: 1px solid var(--rule);
-  background: transparent; cursor: pointer; border-radius: var(--radius-sm);
+  order: -1; align-self: center;
+  min-width: 24px; min-height: 24px; border: 0; background: transparent; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; padding: 2px;
+  color: var(--cyan-deep); margin-right: -2px;
 }
+.lf-collapse:hover { background: var(--accent-bg); border-radius: var(--radius-sm); }
+.lf-tri {
+  width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  border-left: 7px solid currentColor;
+  transform: rotate(90deg); transition: transform var(--dur) var(--ease);
+}
+.lf-collapse:not(.open) .lf-tri { transform: rotate(0deg); }
 .res-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .res-detail-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
 .res-badge { font-family: "JetBrains Mono", monospace; font-size: 11px; padding: 2px 8px; border: 1px solid var(--rule); border-radius: 999px; }

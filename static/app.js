@@ -3907,9 +3907,9 @@ function renderEvidenceNode(node, q, tag, prot, filtering) {
     .map(tg => `<span class="lf-tag">${esc(tg)}</span>`).join("");
   const free = node.free_attach ? `<span class="lf-free">${t("research.free")}</span>` : "";
   const collapseBtn = kids.length
-    ? `<button class="lf-collapse" onclick="event.stopPropagation();researchToggle(${node.id})" title="${collapsed ? t("research.expand") : t("research.collapse")}">${collapsed ? "+" : "−"}</button>`
+    ? `<button class="lf-collapse${collapsed ? "" : " open"}" onclick="event.stopPropagation();researchToggle(${node.id})" title="${collapsed ? t("research.expand") : t("research.collapse")}"><span class="lf-tri" aria-hidden="true"></span></button>`
     : "";
-  return `<li class="flow-col${freeCls}${kids.length ? " has-children" : ""}">
+  return `<li class="flow-col${freeCls}${kids.length ? " has-children" : ""}${kids.length && collapsed ? " collapsed" : ""}">
     <div class="evidence-node evidence-node--${node.node_type}${dim}${sel}" onclick="researchSelect(${node.id})">
       <span class="evidence-title">${esc(node.title)}</span>
       <span class="evidence-type">${t("node." + node.node_type)}</span>
