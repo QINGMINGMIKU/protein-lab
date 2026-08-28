@@ -1965,6 +1965,61 @@ let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw}}
 // 批量改名可覆盖（enzymeShouldAutoRename 放行）；自定义名仍跳过不覆盖。
 // 中英兜底：英文界面（默认 en）下 "Sample"/"Blank" 等角色名也能被识别。
 const ENZYME_ROLE_NAMES = ["样品", "空白", "阴性", "阳性", "Sample", "Blank", "Negative", "Positive"];
+// 分组配色板：与 bli.py COLORS 一一对应（板上组色 = 出图图例色，认知闭环）。改配色动 bli.py，这边同步。
+const PLOT_COLORS = ["#9bbf8a", "#82afda", "#f79059", "#e7dbd3", "#c2bdde",
+                     "#8dcec8", "#add3e2", "#3480b8", "#ffbe7a", "#fa8878", "#c82423"];
+// 深底用白字、浅底用碳黑字（相对亮度阈值 0.6）
+function wellTextColor(hex) {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.6 ? "#fff" : "var(--carbon)";
+}
+// 组 → {color, members}：组名按码位升序分配色板（与服务端 aggregate_groups 的 sorted() 顺序一致，
+// 保证板色 = 图例色）；members 按板序（先行后列）排列，用于复孔序号回退显示。
+const wellPlateSort = (a, b) => (a.charCodeAt(0) - b.charCodeAt(0)) || (parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10));
+function enzymeGroupMap() {
+  const map = {};
+  for (const [id, info] of Object.entries(enzymeWellInfo)) {
+    const g = (info.group || "").trim();
+    if (!g || info.ref) continue;   // 角色孔不参与分组配色
+    (map[g] = map[g] || []).push(id);
+  }
+  const labels = Object.keys(map).sort();
+  const out = {};
+  labels.forEach((g, i) => {
+    out[g] = { color: PLOT_COLORS[i % PLOT_COLORS.length], members: map[g].sort(wellPlateSort) };
+  });
+  return out;
+}
+// 孔内短标签：角色符号 > 组内复孔号（名字 _N 后缀，否则板序） > 名字前 4 字符 > 样品点
+function enzymeWellLabel(id, info, groups) {
+  if (info.ref) return { blank: "○", neg: "⊖", pos: "⊕" }[info.ref] || "○";
+  const g = (info.group || "").trim();
+  const name = info.name || "";
+  const suf = /_(\d+)$/.exec(name);
+  if (g && groups[g]) {
+    if (suf) return suf[1];
+    const idx = groups[g].members.indexOf(id);
+    return idx >= 0 ? String(idx + 1) : "·";
+  }
+  return name ? name.slice(0, 4) : "●";
+}
+// 悬停提示：孔号+名字 / 组 / 角色 / 浓度 / 拟合（ΔOD、R²）
+function enzymeWellTip(id, info) {
+  const lines = [id + (info.name ? " · " + info.name : "")];
+  const g = (info.group || "").trim();
+  if (g) lines.push(`${t("workbench.well_group")}: ${g}`);
+  if (info.ref) lines.push(`${t("workbench.ref")}: ${{ blank: t("workbench.blank"), neg: t("workbench.neg"), pos: t("workbench.pos") }[info.ref] || info.ref}`);
+  else if (ENZYME_ROLE_NAMES.includes((info.name || "").trim()) || info.name) lines.push(`${t("workbench.ref")}: ${t("workbench.sample_well")}`);
+  const conc = info.conc_ng_ml != null ? `${info.conc_ng_ml} ng/mL`
+    : info.conc_uM != null ? `${info.conc_uM} μM` : null;
+  if (conc) lines.push(`${t("workbench.concentration")}: ${conc}`);
+  const f = info.fit;
+  if (f && (f.slope != null || f.slope_corrected != null)) {
+    const sl = f.slope_corrected != null ? f.slope_corrected : f.slope;
+    lines.push(`ΔOD/min: ${(+sl).toExponential(1)} | R²: ${f.r2 != null ? (+f.r2).toFixed(3) : "-"}`);
+  }
+  return lines.join("\n");
+}
 let enzymeLastImage = null;    // 最近一次曲线图 base64（供下载）
 let enzymeLastPlotType = null; // kinetics | michaelis
 let enzymeTimePoints = [];     // 时间点列表（秒，升序，全孔共享网格）
@@ -2011,19 +2066,26 @@ async function uploadEnzymeFile() {
 
 function renderPlate() {
   document.querySelectorAll(".plate-well").forEach(el => {
-    el.classList.remove("has-data", "selected");
+    el.classList.remove("has-data", "selected", "ref-blank", "ref-neg", "ref-pos");
     el.textContent = "";
+    el.removeAttribute("title");
+    el.removeAttribute("style");
   });
   if (!enzymeData) return;
+  const groups = enzymeGroupMap();
   for (const [id, wd] of Object.entries(enzymeData.wells)) {
     const el = document.getElementById("well-" + id);
     if (!el) continue;
-    el.classList.add("has-data");
     const info = enzymeWellInfo[id] || {};
-    el.classList.remove("ref-blank", "ref-neg", "ref-pos");
+    el.classList.add("has-data");
     if (info.ref) el.classList.add("ref-" + info.ref);
-    const symbol = info.ref === "blank" ? "○" : info.ref === "neg" ? "⊖" : info.ref === "pos" ? "⊕" : "●";
-    el.textContent = info.name ? info.name.slice(0, 4) : symbol;
+    else {
+      const g = (info.group || "").trim();
+      const color = g && groups[g] ? groups[g].color : null;
+      if (color) { el.style.background = color; el.style.color = wellTextColor(color); }
+    }
+    el.textContent = enzymeWellLabel(id, info, groups);
+    el.title = enzymeWellTip(id, info);
   }
   updatePlateSelection();
 }
@@ -2186,12 +2248,48 @@ function refreshWellGroupOptions() {
   d.innerHTML = groups.map(g => `<option value="${g.replace(/"/g, "&quot;")}"></option>`).join("");
 }
 
+// 未选孔时的右栏全板摘要：命名/分组/角色/拟合一屏看全，省去逐孔点选
+function renderPlateSummary(el) {
+  if (!enzymeData) { el.textContent = t("workbench.pick_well"); return; }
+  const wells = Object.entries(enzymeData.wells);
+  const named = wells.filter(([id]) => (enzymeWellInfo[id]?.name || "").trim()).length;
+  const groups = enzymeGroupMap();
+  const roleCount = { blank: 0, neg: 0, pos: 0 };
+  let fitted = 0, lowR2 = 0;
+  for (const [id] of wells) {
+    const info = enzymeWellInfo[id] || {};
+    if (info.ref && roleCount[info.ref] != null) roleCount[info.ref]++;
+    const f = info.fit;
+    if (f && (f.slope != null || f.slope_corrected != null)) {
+      fitted++;
+      if (f.r2 != null && +f.r2 < 0.95) lowR2++;
+    }
+  }
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  let html = `<div class="ps-line">${t("workbench.sum_named", { n: named, total: wells.length })}</div>`;
+  const gNames = Object.keys(groups).sort();
+  if (gNames.length) {
+    html += `<div class="ps-line">${t("workbench.sum_groups", { n: gNames.length })}</div><div class="ps-groups">` +
+      gNames.map(g => `<span class="ps-chip"><i class="ps-dot" style="background:${groups[g].color}"></i>${esc(g)} ×${groups[g].members.length}</span>`).join("") +
+      `</div>`;
+  }
+  if (roleCount.blank || roleCount.neg || roleCount.pos) {
+    html += `<div class="ps-line">${t("workbench.sum_roles", { b: roleCount.blank, g: roleCount.neg, p: roleCount.pos })}</div>`;
+  }
+  if (fitted) {
+    html += `<div class="ps-line">${t("workbench.sum_fitted", { n: fitted, low: lowR2 })}` +
+      (lowR2 ? `<span class="ps-warn"> · ${t("workbench.sum_lowr2_hint", { low: lowR2 })}</span>` : "") + `</div>`;
+  }
+  el.innerHTML = html;
+}
+
 function updateWellForm() {
   const detail = document.getElementById("wellDetail");
   const form = document.getElementById("wellForm");
   const fit = document.getElementById("wellFit");
   if (enzymeSelection.size === 0) {
-    detail.textContent = t("workbench.pick_well"); detail.classList.remove("hidden");
+    detail.classList.remove("hidden");
+    renderPlateSummary(detail);
     form.classList.add("hidden"); fit.classList.add("hidden");
     return;
   }
@@ -2402,7 +2500,7 @@ async function enzymePlot(type) {
   const alignEnd = document.getElementById("enzymeAlignEnd")?.checked || false;
   const showBlank = document.getElementById("enzymeShowBlank")?.checked || false;
   const subBlank = document.getElementById("enzymeSubBlank")?.checked || false;
-  const errorBar = document.getElementById("enzymeErrorBar")?.value || "sd";
+  const errorBar = document.getElementById("enzymeErrorBar")?.value || "none";
   const groupEnabled = document.getElementById("enzymeGroup")?.checked ?? true;  // 按组分平均开关
   const payload = { type, align_start: alignStart, align_end: alignEnd, show_blank: showBlank, sub_blank: subBlank, error_bar: errorBar, wells: {} };
   for (const id of ids) {
@@ -3747,6 +3845,7 @@ function researchRender(force) {
   const prot = document.getElementById("researchProteinFilter").value || "";
   if (force) { researchLoad().catch(() => {}); return; }
   const flowEl = document.getElementById("researchFlow");
+  const scLeft = flowEl.scrollLeft;   // 横向流程图滚动位置：重画 innerHTML 前保存
   const backEl = document.getElementById("researchFlowBack");
   const emptyEl = document.getElementById("researchEmpty");
   if (!researchState.trees.length) {
@@ -3779,13 +3878,14 @@ function researchRender(force) {
     document.getElementById("researchDetail").classList.add("hidden");
     document.getElementById("researchChain").classList.add("hidden");
   }
+  flowEl.scrollLeft = scLeft;   // 重画后恢复横向滚动位置
 }
 
 function renderResearchFlow(flowEl, trees, q, tag, prot) {
   const filtering = !!(q || tag || prot);
   const html = trees.map(tnode => renderEvidenceNode(tnode, q, tag, prot, filtering)).join("");
   flowEl.innerHTML = html
-    ? `<ul class="evidence-chain">${html}</ul>`
+    ? `<ul class="flow-tree">${html}</ul>`
     : `<div class="empty-hint">${t("research.empty_filter")}</div>`;
   flowEl.style.width = "";
   flowEl.style.height = "";
@@ -3798,7 +3898,7 @@ function renderEvidenceNode(node, q, tag, prot, filtering) {
   const kids = node.children || [];
   const collapsed = researchState.collapsed.has(node.id);
   const childHtml = kids.length && !collapsed
-    ? `<ul class="evidence-chain">${kids.map(c => renderEvidenceNode(c, q, tag, prot, filtering)).join("")}</ul>`
+    ? `<ul class="flow-tree">${kids.map(c => renderEvidenceNode(c, q, tag, prot, filtering)).join("")}</ul>`
     : "";
   const freeCls = node.free_attach ? " free-attach" : "";
   const stance = node.node_type === "conclusion" ? lineflowStanceChip(node.tag) : "";
@@ -3809,7 +3909,7 @@ function renderEvidenceNode(node, q, tag, prot, filtering) {
   const collapseBtn = kids.length
     ? `<button class="lf-collapse" onclick="event.stopPropagation();researchToggle(${node.id})" title="${collapsed ? t("research.expand") : t("research.collapse")}">${collapsed ? "+" : "−"}</button>`
     : "";
-  return `<li class="${freeCls}">
+  return `<li class="flow-col${freeCls}${kids.length ? " has-children" : ""}">
     <div class="evidence-node evidence-node--${node.node_type}${dim}${sel}" onclick="researchSelect(${node.id})">
       <span class="evidence-title">${esc(node.title)}</span>
       <span class="evidence-type">${t("node." + node.node_type)}</span>
@@ -3880,7 +3980,7 @@ function researchOpenRoot(id) {
   document.getElementById("researchDetail").classList.add("hidden");
   document.getElementById("researchChain").classList.add("hidden");
   researchRender();
-  document.getElementById("researchFlow").scrollIntoView({ behavior: "smooth", block: "start" });
+  document.getElementById("researchFlow").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function researchBackToList() {

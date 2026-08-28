@@ -1229,7 +1229,7 @@ def api_enzyme_plot():
             wells_data, _avg_first, _avg_last = align_wells(wells_data, align_start, align_end)
 
             # 分组聚合：同组孔逐时间点取平均曲线（aggregate_groups 纯函数），未设组/单孔组照常逐孔画
-            error_bar = body.get("error_bar", "sd")  # sd | sem | none
+            error_bar = body.get("error_bar", "none")  # sd | sem | none（默认无误差棒，对齐 system prompt 黄金法则 6）
             drawable = {wid: wd for wid, wd in wells_data.items()
                         if wd.get("times") and wd.get("od")
                         and not (wd.get("ref", "") in ("blank", "neg") and not body.get("show_blank", False))}

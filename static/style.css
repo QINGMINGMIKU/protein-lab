@@ -442,9 +442,9 @@ details.advanced > summary {
 .empty-hint { color: var(--graphite); text-align: center; padding: 40px 16px; }
 
 .plate-grid {
-  display: grid; grid-template-columns: 28px repeat(12, minmax(44px, 1fr));
+  display: grid; grid-template-columns: 28px repeat(12, minmax(30px, 1fr));
   gap: 2px; user-select: none;
-  width: max(100%, 578px);
+  width: max(100%, 404px);
 }
 .plate-corner { height: 22px; }
 .plate-col-hdr, .plate-row-hdr {
@@ -455,16 +455,31 @@ details.advanced > summary {
 .plate-well {
   aspect-ratio: 1; border: 1px solid var(--rule); background: var(--instrument);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  font-size: 9px; color: var(--graphite); min-width: 44px; min-height: 44px;
+  font-size: 10px; color: var(--graphite); min-width: 30px; min-height: 30px;
   border-radius: 4px;
 }
 .plate-well:hover { border-color: var(--cyan); }
-.plate-well.has-data { background: var(--paper); color: var(--carbon); font-weight: 600; }
-.plate-well.selected { background: var(--cyan); color: var(--on-accent); border-style: solid; border-color: var(--cyan-deep); }
-.plate-well.selected.has-data { background: var(--cyan-deep); }
-.plate-well.ref-blank { background: var(--instrument); }
+.plate-well.has-data { background: var(--accent-bg); color: var(--carbon); font-weight: 600; }
+/* 选中态 = 琥珀描边环（不填底色），组色/角色底色与选中态可叠加共存 */
+.plate-well.selected {
+  border-color: var(--cyan-deep);
+  box-shadow: 0 0 0 2px var(--cyan-deep);
+  position: relative; z-index: 1;
+}
+.plate-well.ref-blank { background: var(--instrument); border-style: dashed; }
 .plate-well.ref-neg { background: var(--paper); border-color: var(--carbon); }
-.plate-well.ref-pos { background: var(--cyan); color: var(--on-accent); }
+.plate-well.ref-pos { background: var(--info); color: #fff; }
+/* 触屏保留 44px 最小命中区（桌面优先信息密度） */
+@media (pointer: coarse) {
+  .plate-grid { grid-template-columns: 28px repeat(12, minmax(44px, 1fr)); width: max(100%, 578px); }
+  .plate-well { min-width: 44px; min-height: 44px; }
+}
+/* 右栏全板摘要（未选孔空态） */
+.ps-line { font-size: 12px; color: var(--graphite); padding: 2px 0; }
+.ps-groups { display: flex; flex-wrap: wrap; gap: 4px 8px; padding: 2px 0 4px; }
+.ps-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--carbon); }
+.ps-dot { width: 10px; height: 10px; border-radius: 3px; border: 1px solid var(--rule); flex: none; }
+.ps-warn { color: var(--warning); }
 .enzyme-ref-btn { padding: 6px 10px; min-height: var(--ctrl); font-size: 12px; border: 1px solid var(--rule); background: var(--instrument); cursor: pointer; }
 .enzyme-ref-btn.active { border-color: var(--cyan); background: var(--cyan); color: var(--on-accent); }
 
@@ -515,7 +530,7 @@ details.advanced > summary {
 
 .res-layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; align-items: start; }
 @media (max-width: 1023px) { .res-layout { grid-template-columns: 1fr; } }
-.res-flow-container { min-width: 0; }
+.res-flow-container { min-width: 0; overflow-x: auto; }
 .res-detail-side { position: sticky; top: 72px; max-height: calc(100vh - 96px); overflow: auto; }
 .research-flow-back { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
 .research-flow-back-title { font-size: 16px; overflow-wrap: anywhere; }
@@ -530,26 +545,44 @@ details.advanced > summary {
 .res-root-title { font-size: 18px; margin-top: 8px; overflow-wrap: anywhere; }
 .res-root-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 
-.evidence-chain { list-style: none; margin: 0; padding: 0; }
-.evidence-chain > li { position: relative; padding: 0 0 8px 20px; min-width: 0; }
-.evidence-chain > li::before {
-  content: ""; position: absolute; left: 7px; top: 0; bottom: 0;
-  border-left: 1px solid var(--rule);
+/* ── 横向证据链流程图（单根视图）：深度作列，左→右展开 ── */
+.flow-tree { display: flex; flex-direction: column; width: max-content; list-style: none; margin: 0; padding: 0; }
+.flow-col  { display: flex; flex-direction: row; align-items: flex-start; position: relative; }
+/* 子树（下一列）：border-left 竖线位置 = 节点右边缘 + 14px（margin-left），与父 ::after 水平段接续 */
+.flow-col > .flow-tree {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-left: 10px; padding-left: 10px;
+  border-left: 1.5px solid var(--lf-line-goal);
 }
-.evidence-chain > li.free-attach::before { border-left-style: dashed; }
+.flow-col.free-attach > .flow-tree {
+  border-left-style: dashed; border-left-color: var(--lf-line-free);
+}
+/* 连接线：父→竖线 / 竖线→子 两段水平线 = 肘形连接 */
+.evidence-node { position: relative; }
+.flow-col.has-children > .evidence-node::after {
+  content: ""; position: absolute; left: 100%; top: 50%;
+  width: 10px; border-top: 1.5px solid var(--lf-line-goal);
+}
+.flow-tree > .flow-col > .evidence-node::before {
+  content: ""; position: absolute; right: 100%; top: 50%;
+  width: 10px; border-top: 1.5px solid var(--lf-line-goal);
+}
+.flow-tree > .flow-col.free-attach > .evidence-node::before {
+  border-top-style: dashed; border-top-color: var(--lf-line-free);
+}
 .evidence-node {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
-  padding: 12px 16px; border: 1px solid var(--rule); cursor: pointer;
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
+  padding: 8px 10px; border: 1px solid var(--rule); cursor: pointer;
   min-width: 0; background: var(--instrument); overflow-wrap: anywhere;
   border-radius: var(--radius-sm);
 }
 .evidence-node:hover { background: var(--paper); }
 .evidence-node.selected { background: var(--paper); border-color: var(--cyan); border-style: solid; }
 .evidence-node.dim { opacity: 0.4; }
-.evidence-title { font-size: 14px; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
-.evidence-type { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--graphite); text-transform: uppercase; }
+.evidence-title { font-size: 12.5px; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+.evidence-type { font-family: "JetBrains Mono", monospace; font-size: 10px; color: var(--graphite); text-transform: uppercase; }
 .lf-collapse {
-  min-width: var(--hit); min-height: var(--hit); border: 1px solid var(--rule);
+  min-width: 26px; min-height: 26px; line-height: 1; border: 1px solid var(--rule);
   background: transparent; cursor: pointer; border-radius: var(--radius-sm);
 }
 .res-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }

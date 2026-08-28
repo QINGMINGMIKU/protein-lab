@@ -163,8 +163,8 @@
     <span id="bliMeta" style="font-size:13px;color:var(--graphite);margin-left:8px"></span>
   </div>
 
-  <!-- 解析后：样本列表 + 参数面板 -->
-  <div id="bliAnalyzed" class="hidden" style="margin-top:12px">
+  <!-- 分析区：上传前即展示（参数面板可先行配置） -->
+  <div id="bliAnalyzed" style="margin-top:12px">
     <div class="workbench-split">
       <div class="calc-card" style="padding:12px;min-width:0">
         <h3 style="margin-bottom:8px" data-i18n="workbench.samples">Samples</h3>
@@ -190,7 +190,7 @@
           </table>
         </div>
       </div>
-      <details class="advanced">
+      <details class="advanced" open>
         <summary data-i18n="common.advanced">Advanced</summary>
         <div class="calc-card" style="padding:12px;min-width:0;border:0">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -262,7 +262,7 @@
     <span id="aktaMeta" style="font-size:13px;color:var(--graphite);margin-left:8px"></span>
   </div>
 
-  <div id="aktaAnalyzed" class="hidden" style="margin-top:12px">
+  <div id="aktaAnalyzed" style="margin-top:12px">
     <div class="workbench-split">
       <div class="calc-card" style="padding:12px;min-width:0">
         <h3 style="margin:0 0 8px" data-i18n="workbench.files_ch">Files / channels</h3>
@@ -271,7 +271,7 @@
           <span id="aktaEventsInfo"></span>
         </div>
       </div>
-      <details class="advanced">
+      <details class="advanced" open>
         <summary data-i18n="common.advanced">Advanced</summary>
         <div class="calc-card" style="padding:12px;min-width:0;border:0">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -468,7 +468,7 @@
     </div>
   </div>
 
-  <details class="advanced" style="margin-top:12px">
+  <details class="advanced" style="margin-top:12px" open>
     <summary data-i18n="common.advanced">Advanced</summary>
     <div class="hidden" id="enzymeTimePanel">
     <div class="calc-card" style="padding:12px;border:0">
@@ -499,7 +499,7 @@
       <input type="checkbox" id="enzymeSubBlank" checked onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.sub_neg">Subtract negative</span>
     </label>
     <label style="font-size:12px;display:flex;align-items:center;gap:4px;flex-direction:row">
-      <input type="checkbox" id="enzymeAlignStart" onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.align_start">Align start</span>
+      <input type="checkbox" id="enzymeAlignStart" checked onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.align_start">Align start</span>
     </label>
     <label style="font-size:12px;display:flex;align-items:center;gap:4px;flex-direction:row">
       <input type="checkbox" id="enzymeAlignEnd" onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.align_end">Align end</span>
@@ -508,9 +508,9 @@
       <input type="checkbox" id="enzymeGroup" checked onchange="enzymePlot('kinetics')"> <span data-i18n="workbench.group_avg">Average by group</span>
     </label>
     <select id="enzymeErrorBar" onchange="enzymePlot('kinetics')" style="font-size:13px;padding:8px 6px;border:1px dashed var(--rule);min-height:44px">
-      <option value="sd" selected data-i18n-option="workbench.err_sd">Error bar SD</option>
+      <option value="sd" data-i18n-option="workbench.err_sd">Error bar SD</option>
       <option value="sem" data-i18n-option="workbench.err_sem">Error bar SEM</option>
-      <option value="none" data-i18n-option="workbench.err_none">No error bars</option>
+      <option value="none" selected data-i18n-option="workbench.err_none">No error bars</option>
     </select>
     <button class="btn btn-outline" onclick="enzymePlot('kinetics')" data-i18n="workbench.kinetics">Kinetics plot</button>
     <button class="btn btn-outline" onclick="enzymePlot('michaelis')" data-i18n="workbench.mm">MM plot</button>
