@@ -1403,7 +1403,7 @@ async function selectCopyExp(eid) {
       detailHtml = `<b>${t("copy.proteins_n", { n: proteins.length })}</b><br>` +
         proteins.map(p => `· ${esc(p.name)}: ${t("workbench.dil_summary", { c: p.stock_uM, s: p.start_uM, f: p.factor, n: p.steps })}`).join("<br>");
     } else if (calcType === "enzyme") {
-      const withData = Object.entries(wells).filter(([_, w]) => w.fit || w.times);
+      const withData = Object.entries(wells).filter(([_, w]) => w.fit || w.od_range);
       detailHtml = `<b>${t("copy.wells_n", { n: Object.keys(wells).length })}</b> (${withData.length})<br>` +
         `${params.meta?.sample || ""} | ${params.meta?.wavelength || "?"} nm`;
     } else if (calcType === "weblogo") {
@@ -1435,11 +1435,18 @@ function safeJson(s) {
   try { return JSON.parse(s); } catch (_) { return {}; }
 }
 
-// 取实验**最新**一条原始快照 id（_raw_ids 按 id 升序 = 创建序，最后一条=最近一次分析）。
+// 取实验**最新**一条原始快照 id（_raws 按 id 升序 = 创建序，最后一条=最近一次分析）。
 // 多次重挂/重分析后应载入最新状态（旧快照保留可复现，但计算入口看当前）。
-function latestRawId(exp) {
-  const raws = (exp && exp._raw_ids) || [];
-  return raws[raws.length - 1];
+// dataType 给定时优先取该类型的最新一条——重挂可能往同一实验追加别的类型的 raw
+// （如酶活实验被 BLI 分析重挂），直接取整体最后一条会拿到类型不符的 payload。
+function latestRawId(exp, dataType) {
+  const raws = (exp && exp._raws) || [];
+  if (raws.length) {
+    const pool = dataType ? raws.filter(r => (r.data_type || "") === dataType) : raws;
+    return (pool.length ? pool : raws).slice(-1)[0].id;
+  }
+  const ids = (exp && exp._raw_ids) || [];   // 兼容无 _raws 的旧响应
+  return ids[ids.length - 1];
 }
 
 async function applyCopyAndSwitch() {
@@ -1448,41 +1455,82 @@ async function applyCopyAndSwitch() {
   const calcType = params.calc_type || "";
 
   if (calcType === "enzyme") {
-    // 复制到酶活 Tab — 重建 enzymeData + enzymeWellInfo
-    const wells = params.wells || params.well_info || {};
-    const emeta = params.meta || {};
+    // 复制到酶活 Tab — 曲线优先从**原始快照**重建（逐点数据只在 experiment_raw，契约规则 A），
+    // 手动参数从快照 payload.params 回填（规则 B）。
+    const pWells = params.wells || params.well_info || {};
+    let emeta = params.meta || {};
+    let srcWells = null, rParams = null, lo = null, hi = null, nPoints = 0;
+    let rawFailed = false;
+    const rid = latestRawId(copyCache, "enzyme_traces");
+    if (rid) {
+      try {
+        const raw = await API.get(`/api/experiments/${copyCache.id}/raw/${rid}`);
+        const data = await API.post("/api/enzyme/restore", { payload: raw.payload });
+        if (Object.keys(data.wells || {}).length) {
+          srcWells = data.wells;
+          emeta = data.meta || emeta;
+          rParams = data.params || {};
+          lo = data.time_lo; hi = data.time_hi; nPoints = data.n_points;
+          if (data.version_warning) toast(data.version_warning);
+        }
+      } catch (err) { rawFailed = true; toast(err, true); }
+    }
+    if (!srcWells) {
+      // 兜底①：老库的 params.wells 可能仍内嵌逐点（未跑 tools/strip_params_pointdata.py）。
+      // 那是**被当时时间窗截断后**的曲线，不是全量——必须说清楚，别让人以为拿到的是原始数据。
+      srcWells = {};
+      for (const [id, w] of Object.entries(pWells)) {
+        if (w.times && w.od) srcWells[id] = { times: w.times, od: w.od };
+      }
+      if (Object.keys(srcWells).length) {
+        toast(t("toast.enzyme_from_params"));
+      } else if (!rawFailed) {
+        // 兜底②：真的没有原始快照（或快照内无曲线）。**显式报错**，不静默给一张空图。
+        toast(t("toast.enzyme_no_raw"), true);
+      }
+      // rawFailed 时上面的 err toast 已说明原因，不再叠一条
+    }
+
     enzymeData = { meta: emeta, wells: {} };
     enzymeWellInfo = {};
     enzymeSelection.clear();
-    for (const [id, w] of Object.entries(wells)) {
+    for (const [id, w] of Object.entries(pWells)) {
       enzymeWellInfo[id] = {
         name: w.name,
         ref: w.ref,
         group: w.group || "",
         protein_id: w.protein_id,
+        mw: w.mw ?? null,
         conc_ng_ml: w.conc_ng_ml,
         conc_uM: w.conc_uM,
         fit: w.fit,
       };
-      if (w.times && w.od) {
-        enzymeData.wells[id] = { times: w.times, od: w.od };
-      }
     }
-    // 时间范围筛选：复制数据重建（与上传路径一致，面板默认全选）
+    for (const [id, w] of Object.entries(srcWells)) {
+      enzymeData.wells[id] = { times: w.times, od: w.od };
+      if (!enzymeWellInfo[id]) enzymeWellInfo[id] = { name: w.name, ref: w.ref };
+    }
+    // 时间范围筛选：重建时间面板 + 回填存档的时间窗（秒值对 → 服务端已换算成网格下标）
     enzymeTimePoints = [...new Set(emeta.temps || Object.values(enzymeData.wells)[0]?.times || [])].sort((a, b) => a - b);
-    enzymeTimeLo = 0;
-    enzymeTimeHi = enzymeTimePoints.length - 1;
+    const nT = enzymeTimePoints.length;
+    enzymeTimeLo = nT && lo != null ? Math.max(0, Math.min(nT - 1, lo)) : 0;
+    enzymeTimeHi = nT && hi != null ? Math.max(0, Math.min(nT - 1, hi)) : nT - 1;
     enzymeLastImage = null;
     enzymeLastPlotType = null;
+    enzymeSourceFile = "";
     renderEnzymeTimePanel();
+    if (rParams) enzymeBackfillParams(rParams);   // 六个开关 + source_file
+    else if (params.source_file) enzymeSourceFile = params.source_file;
     document.getElementById("enzymeMeta").textContent =
-      `${emeta.sample || ""} | ${emeta.wavelength || "?"} nm | ${Object.keys(wells).length} wells (${t("copy.copied")})`;
+      `${emeta.sample || ""} | ${emeta.wavelength || "?"} nm | ${t("copy.wells_n", { n: Object.keys(enzymeWellInfo).length })}` +
+      (nPoints ? ` | ${t("copy.points_n", { n: nPoints })}` : "") +
+      ` (${rParams ? t("copy.from_snapshot") : t("copy.copied")})`;
     renderPlate();
     if (Object.values(enzymeWellInfo).some(i => i.fit)) {
-      renderEnzymeTable(Object.keys(wells));
+      renderEnzymeTable(Object.keys(enzymeWellInfo));
     }
     document.querySelector(".tab-btn[data-tab='enzyme']").click();
-    toast(t("toast.loaded_wells", { n: Object.keys(wells).length }));
+    toast(t("toast.loaded_wells", { n: Object.keys(enzymeData.wells).length }));
     return;
   }
 
@@ -1512,7 +1560,7 @@ async function applyCopyAndSwitch() {
 
   if (isBliExp(copyCache)) {
     // 复制到 BLI 分析 Tab — 从实验原始快照重建会话（曲线数据在 experiment_raw，规则 #8 可复现）
-    const rid = latestRawId(copyCache);
+    const rid = latestRawId(copyCache, "bli_curves");
     if (!rid) { toast(t("toast.no_raw_snapshot"), true); return; }
     try {
       const raw = await API.get(`/api/experiments/${copyCache.id}/raw/${rid}`);
@@ -1545,7 +1593,7 @@ async function applyCopyAndSwitch() {
 
   if (isAktaExp(copyCache)) {
     // 复制到 AKTA Tab — 从实验原始快照重建会话（曲线数据在 experiment_raw）
-    const rid = latestRawId(copyCache);
+    const rid = latestRawId(copyCache, "akta_traces");
     if (!rid) { toast(t("toast.no_raw_snapshot"), true); return; }
     try {
       const raw = await API.get(`/api/experiments/${copyCache.id}/raw/${rid}`);
@@ -1958,9 +2006,12 @@ function checkPrefill() {
 // ═════════════════════════════════════════════════════
 
 let enzymeData = null;         // {meta, wells: {A1: {times, od}, ...}}
-const ENZYME_ANALYSIS_VERSION = "enzyme-1.0";  // raw 快照分析版本（与 BLI/AKTA 一致约定）
+// raw 快照分析版本（与 BLI/AKTA 一致约定）。v1="enzyme-1.0"：payload 无 params 槽、params.wells 内嵌 times/od；
+// v2="enzyme-2.0"：payload 带 calc_type/params/source_file，逐点数据只在 raw（契约规则 A）。
+const ENZYME_ANALYSIS_VERSION = "enzyme-2.0";
 let enzymeSelection = new Set();
-let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw}}
+let enzymeWellInfo = {};       // {A1: {name, conc_ng_ml, conc_uM, mw, group, ref, protein_id, fit}}
+let enzymeSourceFile = "";     // 上传的源文件名（落 raw payload.source_file 供溯源/对照识别；手工新建留空）
 // 角色自动名识别（批量改名/参考按钮覆盖判定）：角色名是自动生成的、不算自定义名，
 // 批量改名可覆盖（enzymeShouldAutoRename 放行）；自定义名仍跳过不覆盖。
 // 中英兜底：英文界面（默认 en）下 "Sample"/"Blank" 等角色名也能被识别。
@@ -2042,6 +2093,7 @@ async function uploadEnzymeFile() {
       toast(backendError(data, r.status), true); return;
     }
     enzymeData = data;
+    enzymeSourceFile = file.name;   // 源文件名落 raw payload.source_file（溯源 / 对照识别）
     enzymeSelection.clear();
     enzymeWellInfo = {};
     // 时间范围筛选：全孔共享 meta.temps 网格，缺省全区间
@@ -2549,6 +2601,46 @@ async function downloadEnzymePlot() {
   downloadDataUrl(enzymeLastImage, `${auto}_${name}.png`);
 }
 
+// 手动处理参数快照（对称 bliParams / aktaParams）：**只收手动项，不含逐点数据**。
+// 契约规则 A：times/od 只落 experiment_raw，params 不内嵌；规则 B：这份快照原样嵌进
+// raw payload.params，是「从实验复制」回填 UI 的唯一读取源（raw 只写一次 → 天然不可变）。
+function enzymeParams() {
+  return {
+    calc_type: "enzyme",
+    meta: enzymeData?.meta || {},
+    source_file: enzymeSourceFile || "",
+    // 时间窗口：秒值对（保持现存语义，便于人读；复制时服务端换算成网格下标）
+    time_axis: enzymeTimePoints.length
+      ? [enzymeTimePoints[enzymeTimeLo], enzymeTimePoints[enzymeTimeHi]] : null,
+    sub_blank: document.getElementById("enzymeSubBlank")?.checked ?? true,
+    show_blank: document.getElementById("enzymeShowBlank")?.checked ?? false,
+    align_start: document.getElementById("enzymeAlignStart")?.checked ?? true,
+    align_end: document.getElementById("enzymeAlignEnd")?.checked ?? false,
+    error_bar: document.getElementById("enzymeErrorBar")?.value || "none",
+    group: document.getElementById("enzymeGroup")?.checked ?? true,
+  };
+}
+
+// 回填存档时的分析参数到 UI 控件（对称 bliBackfillParams / aktaBackfillParams）。
+// 默认 true 的开关用 `!== false`——缺字段时保持 UI 默认 true，不被静默改写为 false；
+// 默认 false 的用 `!!`。error_bar 仅在存档里确实有该字段时才写回（保留下拉框默认 none）。
+// 缺字段的开关静默跳过：v1 历史快照从未采集过开关值，无从考证，只能走当前 UI 默认。
+function enzymeBackfillParams(p) {
+  if (!p) return;
+  // 默认 true 的开关：缺字段 → 保持 true（`undefined !== false`），仅显式 false 才关。
+  const setDef = (id, v) => { const el = document.getElementById(id); if (el) el.checked = v !== false; };
+  // 默认 false 的开关：缺字段 → false，真值才开。
+  const setOpt = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+  setDef("enzymeSubBlank", p.sub_blank);
+  setDef("enzymeAlignStart", p.align_start);
+  setDef("enzymeGroup", p.group);
+  setOpt("enzymeShowBlank", p.show_blank);
+  setOpt("enzymeAlignEnd", p.align_end);
+  const eb = document.getElementById("enzymeErrorBar");
+  if (eb && p.error_bar) eb.value = p.error_bar;
+  if (typeof p.source_file === "string" && p.source_file) enzymeSourceFile = p.source_file;
+}
+
 async function enzymeSaveExp() {
   if (!enzymeData) { toast(t("toast.upload_first"), true); return; }
   const mount = await promptExpMount("酶活测定");
@@ -2566,18 +2658,21 @@ async function enzymeSaveExp() {
   for (const [id, wd] of Object.entries(enzymeData.wells)) {
     const info = enzymeWellInfo[id] || {};
     if (info.protein_id) proteinIds.add(info.protein_id);
-    const { times, od } = enzymeFilteredData(wd);  // 存档只保留激活的时间点
+    // 契约规则 A：params.wells 只留元数据 + 拟合 + 极小派生摘要（od_range，详情页要显示）。
+    // times/od 只落 raw——此前存的是 enzymeFilteredData 的截断数据，复制→再存档会逐代丢点。
     wells[id] = {
       name: info.name,
       ref: info.ref,
       group: info.group || "",
       protein_id: info.protein_id,
+      mw: info.mw ?? null,          // 此前丢失 → 复制后 ng/mL ↔ μM 无法互算
       conc_ng_ml: info.conc_ng_ml,
       conc_uM: info.conc_uM,
       fit: info.fit || null,
-      times,
-      od,
-      od_range: od.length ? [od[0].toFixed(4), od[od.length - 1].toFixed(4)] : null,
+      od_range: (() => {
+        const { od } = enzymeFilteredData(wd);
+        return od.length ? [od[0].toFixed(4), od[od.length - 1].toFixed(4)] : null;
+      })(),
     };
     rawWells[id] = {
       name: info.name,
@@ -2586,6 +2681,7 @@ async function enzymeSaveExp() {
       od: wd.od,         // 全量
     };
   }
+  const enzParams = enzymeParams();
 
   let goal = {};
   if (!mount.exp_id) {
@@ -2599,22 +2695,19 @@ async function enzymeSaveExp() {
       protein_ids: Array.from(proteinIds),
       date: todayLocal(),
       calc_type: "enzyme",
-      calc_params: {
-        meta: enzymeData.meta,
-        wells,
-        well_count: Object.keys(enzymeData.wells).length,
-        time_axis: enzymeTimePoints.length
-          ? [enzymeTimePoints[enzymeTimeLo], enzymeTimePoints[enzymeTimeHi]] : null,
-      },
+      calc_params: { ...enzParams, wells, well_count: Object.keys(enzymeData.wells).length },
       calc_result: {},
+      // raw payload 统一契约形状：analysis_version / calc_type / params（冻结副本，回填源）/ source_file / 模块数据。
+      // params 与 calc_params 的手动部分同源——raw 只写一次，故快照里的手动参数天然不可变。
       raw_snapshots: [{
         data_type: "enzyme_traces",
         payload: {
           analysis_version: ENZYME_ANALYSIS_VERSION,
+          calc_type: "enzyme",
+          params: enzParams,
+          source_file: enzymeSourceFile || "",
           meta: enzymeData.meta,
           wells: rawWells,
-          time_axis: enzymeTimePoints.length
-            ? [enzymeTimePoints[enzymeTimeLo], enzymeTimePoints[enzymeTimeHi]] : null,
         },
       }],
       ...mount,
@@ -3141,7 +3234,10 @@ async function undoRestore() {
   try {
     const r = await API.post("/api/undo", {});
     if (r.ok) {
-      toast(t("toast.undone", { n: r.restored }));
+      // 批量撤销（batch-delete / delete-all 压的是一条 bulk 条目）：返回条数而非标题
+      let msg = r.bulk ? t("toast.undone_n", { n: r.restored }) : t("toast.undone", { n: r.restored });
+      if (r.failed) msg += ` · ${t("toast.undo_partial", { n: r.failed })}`;
+      toast(msg, !!r.failed);
       loadProteins().catch(() => {});
       loadExperiments().catch(() => {});
       loadProteinSelects();

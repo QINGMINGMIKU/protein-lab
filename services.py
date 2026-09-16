@@ -166,7 +166,8 @@ def resave_experiment(exp_id: int, params: dict, results: dict,
     for dt, payload in (raw_snapshots or []):
         models.exp_save_raw(exp_id, dt, payload)
     out = models.exp_get(exp_id)
-    out["_raw_ids"] = [r["id"] for r in models.exp_raw_list(exp_id)]
+    out["_raws"] = models.exp_raw_list(exp_id)
+    out["_raw_ids"] = [r["id"] for r in out["_raws"]]
     return out
 
 

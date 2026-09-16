@@ -476,20 +476,28 @@ assert services.attach_goal(99999, _gid) is None, "实验不存在应返 None"
 assert services.attach_goal(_exp_e1["id"], 99999) is None, "goal 不存在应返 None"
 print("20. 从实验自然产生研究脉络（goal_id / new_goal / 未关联 / 失败回滚 / attach_goal）OK")
 
-# ── 21. v0.1.1.1 酶活存档加 raw 快照：原时间序列不可变落库（保证数据可恢复） ──
+# ── 21. 酶活存档契约 v2：原始数据只落 raw、手动参数落 params（保证数据可恢复） ──
+# 契约（见 CLAUDE.md「存档契约」）：payload = {analysis_version, calc_type, params, source_file, <模块数据>}；
+# 规则 A：params.wells **不含** times/od（逐点数据只在 raw）；规则 B：payload.params 是手动参数冻结副本。
 _raw21 = {
-    "analysis_version": "enzyme-1.0",
+    "analysis_version": "enzyme-2.0",
+    "calc_type": "enzyme",
+    "params": {"calc_type": "enzyme", "time_axis": [5, 15], "sub_blank": True,
+               "show_blank": False, "error_bar": "none"},
+    "source_file": "20260817_120000.xlsx",
     "meta": {"sample": "S1"},
     "wells": {
         "A1": {"name": "A1", "ref": "", "times": [0, 5, 10, 15, 20], "od": [0.1, 0.2, 0.3, 0.4, 0.5]},
         "A2": {"name": "A2", "ref": "neg", "times": [0, 5, 10, 15, 20], "od": [0.05, 0.05, 0.05, 0.05, 0.05]},
     },
-    "time_axis": [5, 15],
 }
-# 存档时过滤的 wells（只保留 5-15 区间）
+# 存档的 params.wells（v2：只有元数据 + 拟合 + 极小摘要 od_range，无逐点数据）
 _wells_f = {
-    "A1": {"name": "A1", "ref": "", "times": [5, 10, 15], "od": [0.2, 0.3, 0.4]},
-    "A2": {"name": "A2", "ref": "neg", "times": [5, 10, 15], "od": [0.05, 0.05, 0.05]},
+    "A1": {"name": "A1", "ref": "", "group": "", "protein_id": None, "mw": 27000,
+           "conc_ng_ml": 100.0, "conc_uM": 3.7, "fit": {"slope": 0.02, "r2": 0.99},
+           "od_range": ["0.2000", "0.4000"]},
+    "A2": {"name": "A2", "ref": "neg", "group": "", "protein_id": None, "mw": None,
+           "conc_ng_ml": None, "conc_uM": None, "fit": None, "od_range": ["0.0500", "0.0500"]},
 }
 _exp21 = services.create_experiment(
     title="", exp_type="酶活测定", date="2026-08-17",
@@ -500,13 +508,20 @@ _exp21 = services.create_experiment(
 # 21a. raw 落库：1 条，data_type=enzyme_traces
 _raws = models.exp_raw_list(_exp21["id"])
 assert len(_raws) == 1 and _raws[0]["data_type"] == "enzyme_traces", f"raw 应落 1 条: {_raws}"
-# 21b. raw payload 保留**全量**时间序列（5 个点，含范围外的 0/20）
+# 21b. raw payload 保留**全量**时间序列（5 个点，含范围外的 0/20）+ 契约槽齐全
 _raw_payload = models.exp_raw_get(_raws[0]["id"])["payload"]
 assert _raw_payload["wells"]["A1"]["times"] == [0, 5, 10, 15, 20], f"raw 应存全量: {_raw_payload['wells']['A1']['times']}"
-assert _raw_payload["analysis_version"] == "enzyme-1.0", "raw 应带 analysis_version"
-# 21c. 存档 params.wells 只含过滤后的点（3 个）
+assert _raw_payload["analysis_version"] == "enzyme-2.0", "raw 应带 analysis_version"
+for _k in ("calc_type", "params", "source_file"):
+    assert _k in _raw_payload, f"raw payload 应带契约槽 {_k}: {sorted(_raw_payload)}"
+assert _raw_payload["calc_type"] == "enzyme", "payload.calc_type 应规范为 enzyme"
+assert _raw_payload["params"]["time_axis"] == [5, 15], "payload.params 应是手动参数冻结副本"
+# 21c. 契约规则 A：存档 params.wells **不含**逐点数据，但保留 od_range 与 mw
 _e21b = models.exp_get(_exp21["id"])
-assert _e21b["params"]["wells"]["A1"]["times"] == [5, 10, 15], f"存档应只含过滤点: {_e21b['params']['wells']['A1']['times']}"
+_w21 = _e21b["params"]["wells"]["A1"]
+assert "times" not in _w21 and "od" not in _w21, f"params.wells 不应内嵌逐点数据: {sorted(_w21)}"
+assert _w21["od_range"] == ["0.2000", "0.4000"], "params.wells 应保留 od_range 摘要"
+assert _w21["mw"] == 27000, "params.wells 应保留 mw（复制后 ng/mL ↔ μM 可互算）"
 # 21d. 不可变：raw 永不更新（只插不更）
 _old_payload = _raw_payload
 models.exp_save_raw(_exp21["id"], "enzyme_traces", {"analysis_version": "v2", "wells": {}, "time_axis": None})
@@ -526,7 +541,7 @@ try:
 except (TypeError, ValueError):
     pass
 assert {e["id"] for e in models.exp_list()} == _before, "raw 失败应回滚实验"
-print("21. 酶活存档加 raw 快照（全量落库 / 不可变 / 原子性）OK")
+print("21. 酶活存档契约 v2（raw 全量 / params 无逐点 / 不可变 / 原子性）OK")
 
 # ── 22. 详情页兜底渲染：自由格式中文键可读 + kv 表 + 研究脉络挂载点 ──
 # 背景：MCP save_experiment 归档的自由格式实验（中文键、无 calc_type）走兜底分支；
@@ -671,6 +686,106 @@ _e24c = services.create_experiment(
 _h24c = client.get(f"/experiments/{_e24c['id']}").get_data(as_text=True)
 assert f'href="/calculator?load_exp={_e24c["id"]}"' in _h24c, "浓度实验应显示载入按钮"
 print("24. 详情页载入计算工具入口（按钮显隐 / raw 表移除）OK")
+
+# ── 25. 备份分桶轮转回归：例行桶只轮转自己的文件，安全网/手工备份一个不删 ──
+# 背景：旧实现按 `.db` **后缀**清理备份目录。`protein_lab_manual_*` 排序在 `protein_lab_2*`
+# 之上（'m' > '2'），10 个名额被 2 份手工 + 8 份例行占满，把 `pre-enzyme-backfill_*` 挤到
+# 第 11 位 → **下次启动即被删除**，回填的安全网静默消失。现改为严格正则匹配例行文件名，
+# 各桶由各自的生产者轮转：例行 10（本函数）/ pre-migration_ 5（models）/ pre-* 各归其主。
+import app as _app_mod
+_bk_sub = os.path.join(TMP, "bucket_test")
+os.makedirs(_bk_sub, exist_ok=True)
+_saved_db_path = models.DB_PATH
+models.DB_PATH = os.path.join(_bk_sub, "protein_lab.db")
+models.init_db()
+_bk_dir = os.path.join(_bk_sub, "backups")
+os.makedirs(_bk_dir, exist_ok=True)
+for _f in os.listdir(_bk_dir):          # 清掉 init_db 自己产出的迁移前备份，基线干净
+    os.remove(os.path.join(_bk_dir, _f))
+_bk_routine = [f"protein_lab_202601{d:02d}_{h:06d}.db" for d, h in
+               zip(range(1, 13), [0, 10000, 20000, 30000, 40000, 50000,
+                                  100000, 110000, 120000, 130000, 140000, 150000])]
+_bk_keep = ["protein_lab_manual_20260809_220811.db",     # 手工复制的，无代码生成它
+            "protein_lab_manual_20260817_111645.db",
+            "pre-migration_20260901_120000.db",          # models 的安全网
+            "pre-enzyme-backfill_20260916_135559.db"]    # tools 回填的安全网
+for _f in _bk_routine + _bk_keep:
+    with open(os.path.join(_bk_dir, _f), "wb") as _fh:
+        _fh.write(b"x" * 16)
+_app_mod.backup_database()               # 12 份例行 + 本次新增 = 13 → 轮转到 10
+_bk_left = os.listdir(_bk_dir)
+_bk_routine_left = [f for f in _bk_left if _app_mod.ROUTINE_BACKUP_RE.match(f)]
+assert len(_bk_routine_left) == _app_mod.ROUTINE_BACKUP_KEEP, \
+    f"例行桶应留 {_app_mod.ROUTINE_BACKUP_KEEP} 份，实际 {len(_bk_routine_left)}: {sorted(_bk_routine_left)}"
+for _f in _bk_keep:
+    assert _f in _bk_left, f"安全网/手工备份被例行轮转误删: {_f}（P0 回归失败）"
+assert not [f for f in _bk_left if f not in _bk_keep and f not in _bk_routine_left], \
+    f"备份目录出现预期外的文件: {_bk_left}"
+# 25b. 轮转掉的是**最旧**的例行备份，不是随机的
+assert "protein_lab_20260101_000000.db" not in _bk_left, "应删除最旧的例行备份"
+assert "protein_lab_20260112_150000.db" in _bk_left, "较新的例行备份应保留"
+# 25c. 新写入的例行备份是**有效** SQLite 库（在线备份 API 的产物，不是空壳/半截文件）
+_bk_newest = sorted(_bk_routine_left)[-1]
+_bc = sqlite3.connect(os.path.join(_bk_dir, _bk_newest))
+assert _bc.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "在线备份应通过完整性检查"
+assert _bc.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0] > 0, \
+    "在线备份应含表结构"
+assert _bc.execute("PRAGMA user_version").fetchone()[0] == models.SCHEMA_VERSION, "备份应为当前 schema 版本"
+_bc.close()
+models.DB_PATH = _saved_db_path
+print("25. 备份分桶轮转（例行 10 / 手工与 pre-* 安全网不动 / 在线备份可读）OK")
+
+# ── 26. 批量删除的撤销不再静默丢失 ──
+# 背景：旧实现逐条 _push_undo，而 undo 栈上限 20——delete-all 25 条实验时**前 5 条被静默挤掉**，
+# 撤销只回来 15 条且毫无提示（静默数据丢失）。现改为压**一条** bulk 条目，条数与栈深无关。
+_uc26 = client
+_made26 = []
+for _i in range(25):
+    _made26.append(services.create_experiment(
+        title=f"批量{_i:02d}", exp_type="其他", params={"i": _i}, results={},
+        raw_snapshots=[("bli_curves", {"analysis_version": "v1", "curves": []})],
+    )["id"])
+_cnt26 = len(models.exp_list(limit=9999))
+_depth26 = _uc26.get("/api/undo/status").get_json()["count"]
+_r26 = _uc26.post("/api/experiments/delete-all", json={})
+assert _r26.status_code == 200 and _r26.get_json()["deleted"] == _cnt26, _r26.get_json()
+assert models.exp_list(limit=9999) == [], "delete-all 应清空"
+assert _uc26.get("/api/undo/status").get_json()["count"] == _depth26 + 1, \
+    f"delete-all 应只压一条 bulk 条目（旧实现会压 {min(_cnt26, 20)} 条）"
+_u26 = _uc26.post("/api/undo", json={})
+assert _u26.status_code == 200, _u26.get_json()
+_j26 = _u26.get_json()
+assert _j26.get("bulk") is True, f"应走 bulk 分支: {_j26}"
+assert _j26["restored"] == _cnt26, f"应全量恢复 {_cnt26} 条，实际 {_j26['restored']}"
+_after26 = models.exp_list(limit=9999)
+assert len(_after26) == _cnt26, f"恢复后条数不符: {len(_after26)} != {_cnt26}"
+_by_title26 = {e["title"]: e for e in _after26}
+for _i in range(25):
+    assert f"批量{_i:02d}" in _by_title26, f"批量{_i:02d} 未被恢复（静默丢失）"
+    _rr26 = models.exp_raw_list(_by_title26[f"批量{_i:02d}"]["id"])
+    assert len(_rr26) == 1 and _rr26[0]["data_type"] == "bli_curves", \
+        f"批量{_i:02d} 的 raw 快照未重挂: {_rr26}"
+    assert models.exp_raw_get(_rr26[0]["id"])["payload"]["analysis_version"] == "v1", \
+        f"批量{_i:02d} raw payload 被改动"
+# 26b. batch-delete 同样只压一条，且 restored 是条数（供前端按 bulk 文案渲染）
+_ids26 = [e["id"] for e in models.exp_list(limit=9999)][:3]
+_depth26b = _uc26.get("/api/undo/status").get_json()["count"]
+assert _uc26.post("/api/experiments/batch-delete", json={"ids": _ids26}).get_json()["deleted"] == 3
+assert _uc26.get("/api/undo/status").get_json()["count"] == _depth26b + 1, \
+    "batch-delete 应只压一条 bulk 条目"
+_ub26 = _uc26.post("/api/undo", json={}).get_json()
+assert _ub26.get("bulk") is True and _ub26["restored"] == 3, _ub26
+assert len(models.exp_list(limit=9999)) == _cnt26, "batch-delete 撤销后应回到原条数"
+# 26c. 单条删除仍走单条路径（不受 bulk 影响），且删不存在的实验返回 404
+#      ——此前 e is None 时照样调 exp_delete，"删成功"是假象
+_single26 = models.exp_list(limit=1)[0]["id"]
+_depth26c = _uc26.get("/api/undo/status").get_json()["count"]
+assert _uc26.delete(f"/api/experiments/{_single26}").status_code == 200
+assert _uc26.get("/api/undo/status").get_json()["count"] == _depth26c + 1, "单条删除应压一条"
+_u26c = _uc26.post("/api/undo", json={}).get_json()
+assert _u26c.get("restored") and not _u26c.get("bulk"), f"单条恢复不该走 bulk: {_u26c}"
+assert _uc26.delete("/api/experiments/99999").status_code == 404, "删不存在的实验应 404"
+print("26. 批量删除撤销（bulk 单条目 / 全量恢复 / raw 重挂 / 单条不受影响 / 404）OK")
 
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)

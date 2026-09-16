@@ -8,6 +8,8 @@ description: 维护和扩展 protein_lab 的 BLI 分析模块（bli.py + /api/bl
 protein_lab 的 BLI 工具（v0.0.6 内核 + v0.0.8 UI）从「上传 ForteBio CSV → 传感器图 + KD 表」跑通到「存档 + 从实验复制恢复 + 参数回填 + 下载」。走与 AKTA 同款的数据契约与多入口模式。改这个模块前先读本指南 + [bli.py](../../../bli.py) 实际代码。
 
 > 姊妹模块 [akta-development](../akta-development/SKILL.md)（AKTA 峰图）走同一套契约与模式，两端点/会话/判别字段/复制恢复/回填/下载镜像对称。改一侧要评估另一侧。
+>
+> **酶活模块自 2026-09-16 起对齐同一套三段式契约**（`enzyme_traces` + `/api/enzyme/restore` + `enzymeBackfillParams`，见根 `CLAUDE.md`「实验存储三段式契约」）——三端对称：raw payload 带 `analysis_version`/`calc_type`/`params`/`source_file`，`params` 不内嵌逐点数据，复制按 `latestRawId(exp, data_type)` 取最新快照回放。
 
 ## 架构地图
 

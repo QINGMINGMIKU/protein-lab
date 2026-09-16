@@ -4,6 +4,7 @@ Flask 主应用
 """
 import sys
 import os
+import re
 import json
 import hashlib
 import tempfile
@@ -468,8 +469,12 @@ def api_exp_get(eid):
     if not e:
         return jsonify({"error": "实验不存在"}), 404
     e = identity.annotate(e)
-    # 附原始数据快照 id（供「从实验复制」等按需拉取 payload，避免大字段常驻详情响应）
-    e["_raw_ids"] = [r["id"] for r in models.exp_raw_list(e["id"])]
+    # 附原始数据快照（供「从实验复制」等按需拉取 payload，避免大字段常驻详情响应）：
+    # _raws 带 data_type（前端按类型取最新一条——重挂可能往同一实验追加别的类型）；
+    # _raw_ids 保留纯 id 列表（既有调用方/测试兼容）。
+    _raws = models.exp_raw_list(e["id"])
+    e["_raws"] = _raws
+    e["_raw_ids"] = [r["id"] for r in _raws]
     e["key_results"] = compare.key_results(e)
     return jsonify(e)
 
@@ -661,8 +666,9 @@ def _exp_undo_payload(e: dict) -> dict:
 @app.route("/api/experiments/<int:eid>", methods=["DELETE"])
 def api_exp_delete(eid):
     e = models.exp_get(eid)
-    if e:
-        _push_undo("experiment", _exp_undo_payload(e))
+    if not e:
+        return jsonify({"error": "实验不存在"}), 404
+    _push_undo("experiment", _exp_undo_payload(e))
     models.exp_delete(eid)
     return jsonify({"ok": True})
 
@@ -670,21 +676,26 @@ def api_exp_delete(eid):
 @app.route("/api/experiments/batch-delete", methods=["POST"])
 def api_exp_batch_delete():
     ids = request.get_json().get("ids", [])
-    deleted = 0
+    payloads, deleted = [], 0
     for eid in ids:
         e = models.exp_get(int(eid))
         if e:
-            _push_undo("experiment", _exp_undo_payload(e))
-            models.exp_delete(int(eid))
+            payloads.append(_exp_undo_payload(e))
             deleted += 1
+    if payloads:
+        # 压**一条** bulk 条目，而不是逐条压栈：栈上限 20，逐条压会让早期实验被静默挤掉，
+        # 撤销时恢复不全（静默数据丢失）。bulk 条目与条数无关，永远一条。
+        _push_undo("experiments_bulk", {"items": payloads})
+    for p in payloads:
+        models.exp_delete(p["id"])
     return jsonify({"ok": True, "deleted": deleted})
 
 
 @app.route("/api/experiments/delete-all", methods=["POST"])
 def api_exp_delete_all():
     exps = models.exp_list(limit=9999)
-    for e in exps:
-        _push_undo("experiment", _exp_undo_payload(e))
+    if exps:
+        _push_undo("experiments_bulk", {"items": [_exp_undo_payload(e) for e in exps]})
     models.exp_delete_all()
     return jsonify({"ok": True, "deleted": len(exps)})
 
@@ -735,6 +746,36 @@ def api_undo_restore():
         if raw_ids:
             models.exp_raw_relink(raw_ids, new_eid)
         return jsonify({"ok": True, "restored": data["title"]})
+    elif item["type"] == "experiments_bulk":
+        # 批量删除（batch-delete / delete-all）压的是**一条** bulk 条目，恢复一次全回来
+        _undo_stack.pop()
+        items = data.get("items") or []
+        restored, failed = 0, []
+        for d in items:
+            try:
+                new_eid = models.exp_create(
+                    title=d["title"], exp_type=d["exp_type"],
+                    protein_ids=d.get("protein_ids", []),
+                    date=d.get("date", ""),
+                    params=d.get("params", {}),
+                    results=d.get("results", {}),
+                    notes=d.get("notes", ""),
+                )
+                raw_ids = d.get("_raw_ids") or []
+                if raw_ids:
+                    models.exp_raw_relink(raw_ids, new_eid)
+                restored += 1
+            except Exception as ex:
+                # toast 只报条数（不把原始异常抛给前端），但必须留在控制台可查——
+                # 否则「全部恢复失败」时用户只看到 0 条，无从判断原因
+                print(f"   撤销恢复失败（实验「{d.get('title')}」）：{ex!r}")
+                failed.append(d)
+        if failed:
+            # 部分失败：只把**失败的那些**压回栈顶，重试补建不会重复建已恢复的实验
+            _push_undo("experiments_bulk", {"items": failed})
+            return jsonify({"ok": True, "restored": restored, "bulk": True,
+                            "failed": len(failed)})
+        return jsonify({"ok": True, "restored": restored, "bulk": True})
     return jsonify({"error": "未知类型"}), 400
 
 
@@ -785,6 +826,37 @@ def _enzyme_wide_columns(wells, prefix="") -> tuple[list, list]:
         headers += [f"{full} 时间 (min)", f"{full} OD"]
         col_data.append((times, ods))
     return headers, col_data
+
+
+def _enzyme_raw_wells(e) -> dict:
+    """取该实验**最新**原始快照里的全量孔位曲线（含 times/od），供归档导出宽格式。
+
+    存档契约（见 CLAUDE.md「存档契约」）：逐点数据只在 experiment_raw，
+    `experiments.params.wells` 只留元数据 + fit + od_range。归档导出要作图数据，
+    必须读 raw。raw 只插不更 → 取最后一条即当前状态；`backfilled` 之前的旧快照
+    形状可能无 wells 或仍是截断数据，此时回退 `params.wells`（历史实验保持现状）。
+    读不到返回 {}（调用方回退）。"""
+    try:
+        raws = models.exp_raw_list(e.get("id")) or []
+    except Exception:
+        return {}
+    for r in reversed(raws):
+        if (r.get("data_type") or "") != "enzyme_traces":
+            continue
+        try:
+            row = models.exp_raw_get(r["id"]) or {}
+            payload = row.get("payload") or {}
+        except Exception:
+            continue
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (ValueError, TypeError):
+                continue
+        w = payload.get("wells") if isinstance(payload, dict) else None
+        if isinstance(w, dict) and w:
+            return w
+    return {}
 
 
 def _write_wide_ws(ws, headers, col_data):
@@ -944,8 +1016,12 @@ def _export_excel(exps, download_name="实验记录.xlsx"):
                         emeta.get("sample", ""), emeta.get("wavelength", ""),
                     ])
                 _write_block(ENZ_HEADERS, rows)
-                # 汇总 Sheet 的原始数据收进宽格式（每孔时间+OD 两列），多实验用标题前缀区分
-                h2, cd2 = _enzyme_wide_columns(wells, prefix=f"{e['title']} ")
+                # 汇总 Sheet 的原始数据收进宽格式（每孔时间+OD 两列），多实验用标题前缀区分。
+                # 逐点数据只在 experiment_raw（契约规则 A）→ 优先读 raw 全量。
+                # raw 缺失时回退 params.wells：params 已按契约去逐点后这里只会得到**空列**，
+                # 不会给出"被截断却看似完整"的错数据——失败方向是显式的，不是静默的。
+                h2, cd2 = _enzyme_wide_columns(
+                    _enzyme_raw_wells(e) or wells, prefix=f"{e['title']} ")
                 if h2:
                     enzyme_wide_groups.append((h2, cd2))
             else:
@@ -1383,6 +1459,62 @@ def api_enzyme_export():
     return send_file(buf,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name="enzyme_well_time_od.xlsx")
+
+
+@app.route("/api/enzyme/restore", methods=["POST"])
+def api_enzyme_restore():
+    """从实验原始快照重建酶活分析态（供「从实验复制」把历史实验载回酶活 tab）。
+
+    与 BLI/AKTA 的 restore 对称，但酶活**没有服务端会话**（曲线直接落在前端状态里），
+    因此本端点只做两件容易出错、值得单测的事：
+    1. **历史 payload 形状兼容**——v1 payload（"enzyme-1.0"，无 params 槽）用 time_axis
+       合成最小 params，让旧实验也能回填时间窗；
+    2. **时间窗口秒值对 → 网格下标**——最近邻 + clamp 的边界逻辑收在服务端。
+
+    body: {"payload": <experiment_raw.payload>}
+    返回: {meta, wells, params, time_lo, time_hi, n_points, version_warning?}
+    版本不一致不阻断（旧快照仍可回放），只在 version_warning 里提示。
+    """
+    body = request.get_json() or {}
+    payload = body.get("payload") or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "payload 应为对象"}), 400
+    wells = payload.get("wells") or {}
+    if not wells:
+        return jsonify({"error": "快照缺少孔位数据"}), 400
+
+    from calculators import (ENZYME_ANALYSIS_VERSION, enzyme_time_grid,
+                             time_axis_to_indices)
+
+    meta = payload.get("meta") or {}
+    params = payload.get("params")
+    if not isinstance(params, dict) or not params:
+        # v1 旧快照：无 params 槽，用 payload.time_axis 合成最小手动参数
+        params = {}
+        if payload.get("time_axis"):
+            params["time_axis"] = payload["time_axis"]
+    params.setdefault("calc_type", "enzyme")
+    params.setdefault("meta", meta)
+    if payload.get("source_file"):
+        params.setdefault("source_file", payload["source_file"])
+
+    grid = enzyme_time_grid(meta, wells)
+    lo, hi = time_axis_to_indices(grid, params.get("time_axis"))
+
+    out = {
+        "meta": meta,
+        "wells": wells,
+        "params": params,
+        "time_lo": lo,
+        "time_hi": hi,
+        "n_points": len(grid),
+    }
+    ver = payload.get("analysis_version")
+    if ver != ENZYME_ANALYSIS_VERSION:
+        out["version_warning"] = (
+            f"快照分析版本 {ver or '未知'} 与当前 {ENZYME_ANALYSIS_VERSION} 不一致，"
+            "曲线与参数已按原样载入，重新出图/拟合将使用当前版本算法")
+    return jsonify(_json_safe(out))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2241,39 +2373,55 @@ def open_browser(port):
     webbrowser.open(f"http://127.0.0.1:{port}")
 
 
+# 例行备份文件名：protein_lab_YYYYMMDD_HHMMSS.db。**严格正则**是刻意的——
+# 它天然排除 protein_lab_manual_*（用户手工复制）与一切 pre-* 安全网，
+# 使例行轮转只能删到自己生成的文件。
+ROUTINE_BACKUP_RE = re.compile(r"^protein_lab_\d{8}_\d{6}\.db$")
+ROUTINE_BACKUP_KEEP = 10
+
+
 def backup_database():
-    """启动时自动备份数据库，保留最近 10 份"""
+    """启动时自动备份数据库（例行桶，保留最近 10 份）。
+
+    **只轮转自己生成的例行备份**：`backups/` 里还住着别的东西——`pre-migration_*`
+    （迁移前回滚点）、`pre-enzyme-backfill_*` 等一次性安全网、以及用户手工复制的
+    `protein_lab_manual_*`。早先这里按 `.db` **后缀**清库，会把安全网按文件名序挤出
+    名额删掉（实测：回填前回滚点排第 11 位，下次启动即被删——恰好是最需要它的时刻）。
+    改用**严格正则**只匹配自己的例行备份；各桶由各自的生产者轮转，本函数一概不碰他人。
+    """
+    import shutil
+
     db_path = models.DB_PATH
     if not os.path.exists(db_path):
         return
     backup_dir = os.path.join(os.path.dirname(db_path), "backups")
     os.makedirs(backup_dir, exist_ok=True)
 
-    # WAL 模式下裸 copy 主文件会漏掉未 checkpoint 的 WAL 内容——先强制 checkpoint 再复制。
-    # 尽力而为：checkpoint 失败不阻断启动（备份失败也会继续启动）。
-    try:
-        conn = models.get_db()
-        try:
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        finally:
-            conn.close()
-    except Exception:
-        pass
-
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(backup_dir, f"protein_lab_{stamp}.db")
-    import shutil
-    shutil.copy2(db_path, backup_path)
+    try:
+        models.backup_db_to(backup_path)      # 在线备份：事务一致，WAL/并发读都不影响
+    except Exception as ex:
+        # 在线备份失败不该阻断启动，但要留下痕迹并退回文件复制
+        print(f"   在线备份失败（{ex}），回退文件复制——该备份可能不含最新写入")
+        try:
+            shutil.copy2(db_path, backup_path)
+        except OSError as ex2:
+            print(f"   备份失败：{ex2}")
+            return
 
-    # 清理旧备份，只保留最近 10 份
-    existing = sorted(
-        [f for f in os.listdir(backup_dir) if f.endswith(".db")],
+    # 只清例行桶，保留最近 10 份
+    routine = sorted(
+        [f for f in os.listdir(backup_dir) if ROUTINE_BACKUP_RE.match(f)],
         reverse=True,
     )
-    for old in existing[10:]:
-        os.remove(os.path.join(backup_dir, old))
+    for old in routine[ROUTINE_BACKUP_KEEP:]:
+        try:
+            os.remove(os.path.join(backup_dir, old))
+        except OSError:
+            pass
 
-    print(f"   数据库已备份 -> backups/ ({min(len(existing), 10)} 份)")
+    print(f"   数据库已备份 -> backups/ ({min(len(routine), ROUTINE_BACKUP_KEEP)} 份例行)")
 
 
 if __name__ == "__main__":

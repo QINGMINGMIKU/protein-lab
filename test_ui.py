@@ -51,6 +51,7 @@ assert set(EN) == set(ZH), f"en/zh-CN key mismatch: {sorted(set(EN)^set(ZH))[:10
 assert EN["nav.research"] == "Research Trace"
 assert ZH["nav.research"] == "研究脉络"
 js = (STATIC / "i18n.js").read_text(encoding="utf-8")
+appjs_src = (STATIC / "app.js").read_text(encoding="utf-8")
 assert "window.BigoI18n" in js or "global.BigoI18n" in js
 assert "function" in js and "setLocale" in js and 'localStorage' in js
 for key in ("t(", "apply(", "setLocale(", "locale"):
@@ -62,7 +63,21 @@ for path in TEMPLATES.glob("*.html"):
     used.update(k for k in re.findall(r'data-i18n(?:-placeholder|-title|-aria|-option)?="([^"]+)"', text) if "{{" not in k)
 missing = sorted(k for k in used if k not in EN)
 assert not missing, f"templates reference unknown i18n keys: {missing[:12]}"
-print(f"3. i18n keys complete ({len(EN)} keys, {len(used)} used in templates) OK")
+# i18n.js 是**手工同步**的第二份字典（CLAUDE.md 明示）。json 里加了键却忘了同步 js，
+# UI 会直接显示裸 key 而不报错——这里逐键逐值比对文本，把这个漂移钉死。
+js_drift = []
+for _loc, _d in (("en", EN), ("zh-CN", ZH)):
+    for _k, _v in _d.items():
+        if f'{json.dumps(_k, ensure_ascii=False)}: {json.dumps(_v, ensure_ascii=False)}' not in js:
+            js_drift.append(f"{_loc}:{_k}")
+assert not js_drift, \
+    f"i18n.js 与 i18n.json 不同步（{len(js_drift)} 项）: {js_drift[:10]}"
+# app.js 里 t("...") 的**整键字面量**必须都在字典里；拼接键（t("exp_type." + x)）不以 , ) 收尾，天然排除
+_appjs_keys = set(re.findall(r'\bt\(\s*"([a-z][a-zA-Z0-9_.]*)"\s*[,)]', appjs_src))
+_unknown = sorted(k for k in _appjs_keys if k not in EN)
+assert not _unknown, f"app.js 引用了字典里没有的 i18n key: {_unknown[:12]}"
+print(f"3. i18n keys complete ({len(EN)} keys, {len(used)} used in templates, "
+      f"{len(_appjs_keys)} literal in app.js, js/json in sync) OK")
 
 # ── 4. Experiment type display mapping ────────────────
 for stored in models.EXP_TYPES:
@@ -174,6 +189,27 @@ detail_src = (TEMPLATES / "experiment_detail.html").read_text(encoding="utf-8")
 assert "detail.wells_unit" in detail_src
 assert " 孔" not in detail_src
 assert "setEvidence" in appjs and "workbench.status_processing" in appjs
+# 酶活存档契约 v2 前端面（原始数据只落 raw / 手动参数落 params / 复制从快照回放）
+assert "function enzymeParams(" in appjs, "enzymeParams 缺失（手动参数单点构造）"
+assert "function enzymeBackfillParams(" in appjs, "enzymeBackfillParams 缺失（复制回填开关）"
+assert '"enzyme-2.0"' in appjs, "ENZYME_ANALYSIS_VERSION 未升到 2.0"
+assert "/api/enzyme/restore" in appjs, "复制分支应走 /api/enzyme/restore"
+assert 'latestRawId(copyCache, "enzyme_traces")' in appjs, "酶活复制应按类型取最新快照"
+enzyme_params_src = appjs.split("function enzymeParams(")[1].split("\nfunction ")[0]
+for banned in ("times:", "od:"):
+    assert banned not in enzyme_params_src, \
+        f"enzymeParams 不得写 {banned[:-1]}（逐点数据只在 experiment_raw）"
+# 默认 true 的开关用 `!== false`——缺字段时不把 UI 从默认改写
+assert "v !== false" in appjs.split("function enzymeBackfillParams(")[1].split("\nfunction ")[0], \
+    "enzymeBackfillParams 应对默认 true 字段用 !== false"
+# 复制兜底必须**显式**：params.wells 去逐点后（契约规则 A），无 raw 时静默产出空曲线会让人
+# 以为「这实验本来就没数据」。两条路径都要有提示，且 raw 出错时不重复叠 toast。
+_copy_src = appjs.split('latestRawId(copyCache, "enzyme_traces")')[1].split("enzymeData = {")[0]
+assert "toast(t(\"toast.enzyme_no_raw\"), true)" in _copy_src, \
+    "无原始快照时必须显式报错（不得静默给空曲线）"
+assert 'toast(t("toast.enzyme_from_params"))' in _copy_src, \
+    "回退 params 逐点时须提示曲线可能已被时间窗截断"
+assert "rawFailed" in _copy_src, "raw 取数失败时应标记，避免错误 toast 之后再叠一条"
 # 自由格式 kv 渲染必须被 table-scroll 保护，嵌套表不能撑破「实验参数/结果」卡片
 kv_macro = detail_src.split("{% macro kv_table")[1].split("{% endmacro")[0]
 assert 'class="table-scroll"' in kv_macro, "kv_table must be wrapped in a scroll container"

@@ -26,6 +26,16 @@
 - 单位互转必须提供分子量（`convert_concentration` 跨摩尔/质量时需 `mw`）
 - 计算结果放 `results` 字段，原始参数放 `params` 字段（A280 原始值不要放 results）
 
+**原始数据 vs 手动参数——分两处放，不要混**（契约见 CLAUDE.md「实验存储三段式契约」）：
+
+- **逐点原始数据**（BLI 曲线 `curves` / AKTA 通道 `runs` / 酶活孔时间序列 `wells[*].times+od`）只落
+  `experiment_raw` 快照（`save_experiment` 的 `raw_snapshots`），**不要塞进 `params`**。
+- `params` 只放**手动处理参数**：浓度、MW、分组、时间窗、作图开关、源文件名。
+- raw 快照的 payload 请带 `params` 槽（当时的手动参数副本）+ `calc_type` + `source_file` —— 这是
+  用户点「从实验复制」时回填 UI 的唯一读取源。缺了它，复制只能重建数据、无法复现参数。
+- **`times` 单位一律用秒**（`fit_kinetics` 按秒拟合再 ×60 出 ΔOD/min；绘图 /60 出分钟轴）。
+  写分钟会得到偏 60× 的斜率和错误的时间轴——历史上有实验踩过这个坑。
+
 ### 3. 实验归档 = 证据链节点，不是数据垃圾场
 
 `save_experiment` 保存的是**一次完整实验**（有明确目的、参数、结果），不是：

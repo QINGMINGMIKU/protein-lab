@@ -145,19 +145,39 @@ MIGRATIONS = [
 ]
 
 
+def backup_db_to(dst_path: str) -> None:
+    """把当前库**事务一致**地快照到 dst_path（SQLite 在线备份 API）。
+
+    为什么不用 `shutil.copy2`：库是 WAL 模式，裸复制主文件会漏掉尚未 checkpoint 的
+    WAL 内容；而 `PRAGMA wal_checkpoint(TRUNCATE)` 在有并发读时会返回 busy——于是
+    「备份看起来成功、实际不含最新数据」静默发生。在线备份 API 由 SQLite 自己保证
+    一致性，WAL 状态与并发读都不影响结果，是备份这个库的正确原语。
+    """
+    import sqlite3
+    dst = sqlite3.connect(dst_path)
+    try:
+        src = get_db()
+        try:
+            src.backup(dst)
+        finally:
+            src.close()
+    finally:
+        dst.close()
+
+
 def _backup_before_migration():
     """迁移前就地把库备份到 backups/（pre-migration 标记），保留最近 5 份。
 
     为什么需要：迁移在 import models 时触发（app.py 顶部 import），而 app.py 的启动例行
     备份在 main 块才执行——备份到手的已是迁移后库。这里在**首个未应用迁移**之前快照一份，
     为未来可能的破坏性迁移（如 DROP COLUMN 带数据）留迁移前回滚点。仅清理 pre-migration_
-    前缀，不动 app.py 的 protein_lab_ 例行备份。
+    前缀，不动 app.py 的 protein_lab_ 例行备份——**各桶由各自的生产者轮转**，谁也删不到谁。
     """
     backup_dir = os.path.join(os.path.dirname(DB_PATH), "backups")
     os.makedirs(backup_dir, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dst = os.path.join(backup_dir, f"pre-migration_{stamp}.db")
-    shutil.copy2(DB_PATH, dst)
+    backup_db_to(dst)          # 在线备份：事务一致，不受 WAL/并发读影响
     existing = sorted(
         [f for f in os.listdir(backup_dir)
          if f.startswith("pre-migration_") and f.endswith(".db")],

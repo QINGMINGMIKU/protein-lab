@@ -15,7 +15,7 @@
 | **蛋白库存** | 蛋白库 + FASTA 批量导入 + 搜索 / 标签筛选 / 批量改标签；MW、消光系数自动计算（ProtParam，与 Expasy 一致）；表头排序 |
 | **自动化分析** | TECAN Spark xlsx 一键解析 → 96 孔板 → 动力学拟合（ΔOD/min、R²）→ Michaelis-Menten → 阴性扣除 → 作图 Excel（每孔独立时间/OD 列对宽格式，Origin/Prism 直接可用） |
 | **实验记录** | 一键归档 + 自动命名（`{日期}_{类型}_{序号}`）+ 详情页 + Excel 导出 + 撤销；从历史实验一键复制回填到工具 |
-| **AI 集成** | MCP 服务器 10 个工具：读蛋白库 / 算浓度 / 稀释规划 / 单位换算 / 读研究脉络 / 存实验，Claude 等 AI 可直接操作你的数据 |
+| **AI 集成** | MCP 服务器 19 个工具：读蛋白库 / 算浓度 / 稀释规划 / 单位换算 / 读写研究脉络 / 读实验与原始快照 / 存实验与结论，Claude 等 AI 可直接操作你的数据 |
 
 ## 功能
 
@@ -27,15 +27,15 @@
   - **BLI 分析**（v0.0.8）— 上传 ForteBio CSV：传感器图（SG 平滑 + 拟合虚线 + 每样本出图）+ **5 方法 KD 拟合** + 保存为实验（**原始曲线落 experiment_raw 快照** + results 带分析版本）
   - **AKTA 峰图**（v0.0.9）— 上传 AKTA Unicorn zip **原生解析**（无 pycorn 依赖）：通道列表 + Fraction 事件 → **峰检测/标注** + 峰表 Excel 导出 → 保存为实验（**原始曲线落快照**）
   - Weblogo — 勾选蛋白生成序列标识图；**长序列自动分块换行**（每块 50 位，编号连续）；可选**位点区间**和**多聚体裁剪**；**结果服务端缓存 + 切页自动恢复**
-  - 酶活计算 — TECAN Spark xlsx 解析 + 96 孔板 UI + 动力学拟合（ΔOD/min、R²）+ Michaelis-Menten + **阴性扣除**（信号级归零 + 速率级校正）+ **时间点筛选** + 一键导出作图 Excel
-  - 从实验复制 — 卡片式浏览历史实验，按类型过滤/搜索，一键加载到对应工具
+  - 酶活计算 — TECAN Spark xlsx 解析 + 96 孔板 UI + 动力学拟合（ΔOD/min、R²）+ Michaelis-Menten + **阴性扣除**（信号级归零 + 速率级校正）+ **时间点筛选** + 一键导出作图 Excel；存档时**原始曲线落 `experiment_raw` 快照**（全量、不受时间窗截断），手动参数（时间窗 / 六个作图开关 / 每孔 MW / 源文件名）落 `params`
+  - 从实验复制 — 卡片式浏览历史实验，按类型过滤/搜索，一键加载到对应工具；**酶活/BLI/AKTA 从原始快照重建数据 + 回填存档时的手动参数**（曲线全量还原、开关与时间窗按存档值复现）
 - **BLI 模块**（v0.0.5）— ForteBio CSV 解析 + 传感器图（Savitzky-Golay 平滑 + 拟合虚线）+ **五方法 KD 拟合内核**（standard / split / joint / steady / mixed，含死曲线过滤与 NS 扣除）
 - **BLI 原始数据拟合**（v0.0.8）— 上传 ForteBio CSV 一键分析：传感器图 / 5 方法 KD / **保存为实验（原始曲线落 experiment_raw 快照 + results 带分析版本）**
 - **AKTA 峰图整理**（v0.0.9）— 上传 AKTA Unicorn zip 原生解析（**无 pycorn 依赖，标准库实现**）：通道列表（UV/Cond/压力…）+ Fraction 事件 → **峰检测/标注/峰表导出 Excel** → 保存为实验（原始曲线落快照）
 - **实验自动命名** — `{日期}_{实验类型}_{序号}`，同一天同类型自动递增；导出文件也遵循命名
-- **实验归档** — 一键保存 / Excel 导出 / 详情页 / 批量删除 + 撤销；启动自动备份数据库（保留最近 10 份）
-- **MCP 服务器** — 8 个工具，供 Claude 等 AI 通过 MCP 协议调用
-- **测试** — `test_models.py`（14 节：JSON 往返 / 迁移框架 / 原始数据不可变 / MCP 读写契约）+ `test_bli.py`（BLI 解析/绘图/KD 拟合 + 酶活绘图 + **BLI 分析 API**）+ `test_akta.py`（**AKTA 原生解析/峰检测/峰图 + API**，用真实样例 zip）；CI 每次构建前自动运行
+- **实验归档** — 一键保存 / Excel 导出 / 详情页 / 批量删除 + 撤销（批量删除压单条撤销项，一次撤销全量恢复）；启动自动备份数据库（例行桶保留最近 10 份）
+- **MCP 服务器** — 19 个工具，供 Claude 等 AI 通过 MCP 协议调用
+- **测试** — `test_models.py`（24 节：JSON 往返 / 迁移框架 / 原始数据不可变 / MCP 读写契约 / 酶活存档契约）+ `test_bli.py`（BLI 解析/绘图/KD 拟合 + 酶活绘图 + **BLI 分析 API**）+ `test_akta.py`（**AKTA 原生解析/峰检测/峰图 + API**，用真实样例 zip）+ `test_enzyme.py`（酶活存档契约 + `/api/enzyme/restore` + 归档导出读 raw）+ `test_ui.py` / `test_research.py` / `test_identity.py`；CI 每次构建前自动运行
 
 ## 数据完整性（v0.0.7）
 
@@ -45,7 +45,8 @@
 |---|---|
 | **版本化 schema 迁移** | `PRAGMA user_version` + 有序迁移列表，应用启动即自动升级；老库非破坏升级，数据原样不动 |
 | **原始数据不可变** | `experiment_raw` 表**只写一次、从不覆盖**（新分析=新快照行）；删除实验不删原始数据（FK `ON DELETE SET NULL`） |
-| **迁移前自动备份** | 每次 schema 升级前快照 `pre-migration_*.db`（保留 5 份）；启动例行备份保留 10 份 |
+| **三段式存储契约** | 原始数据（`experiment_raw`，仪器产出）/ 手动参数（`experiments.params`，人填人选）/ 派生结果（`experiments.results`）三层分开——逐点数据不写进 params，raw payload 内嵌当时的手动参数副本，故「从实验复制」能**数据全量还原 + 参数按存档值复现** |
+| **迁移前自动备份** | 每次 schema 升级前快照 `pre-migration_*.db`（保留 5 份）；启动例行备份保留 10 份。备份走 **SQLite 在线备份 API**（事务一致，服务运行中也不丢最新写入），且**按前缀分桶、各桶独立轮转**——例行轮转只删自己生成的文件，手工备份与 `pre-*` 安全网永不被误删 |
 | **MCP 读写契约** | 唯一写工具 `save_experiment`，读工具零写库——由测试逐工具断言强制，不是口头约定 |
 | **架构分层** | `models`（数据+序列化）→ `services`（统一写入入口）→ `calculators`（纯函数，可单测）→ `app`（编排渲染）；速率校正等计算**后端单写**，消灭前后端双写漂移 |
 
@@ -55,7 +56,7 @@
 
 - Windows 双击 `启动.bat`，macOS 双击 `启动.command`，浏览器自动打开 <http://127.0.0.1:5000>。
 - 首次运行自动创建 `.venv` 并安装依赖。关闭窗口即停止服务。
-- 启动时自动备份数据库到 `backups/`（保留最近 10 份）。
+- 启动时自动备份数据库到 `backups/`（例行桶保留最近 10 份）。
 
 ### 方式二：打包版（v0.0.5，无需 Python）
 
@@ -124,6 +125,7 @@ protein_lab/
 ├── paths.py            路径解析（PyInstaller 打包与 dev 双模式）
 ├── fonts.py            CJK 字体解析 + matplotlib 中文配置
 ├── protein_lab.spec    PyInstaller 打包配置
+├── tools/              仅开发用的一次性迁移脚本（不入包、不入 CI），如 backfill_enzyme_raw.py
 ├── requirements.txt    运行时依赖
 ├── requirements-build.txt  打包依赖（pyinstaller）
 ├── 启动.bat            一键启动（Windows）
@@ -133,7 +135,7 @@ protein_lab/
 ├── fonts/              Noto Sans SC（OFL，打包进二进制）
 ├── fixtures/           AKTA 测试样例 zip（git 跟踪，CI 用）
 ├── .github/workflows/  CI 双平台构建 + 测试步
-├── backups/            数据库自动备份（例行 10 份 + 迁移前 pre-migration 5 份）
+├── backups/            数据库自动备份（例行 10 份 + 迁移前 pre-migration 5 份；分桶轮转，互不干扰）
 └── protein_lab.db     自动生成，首次运行创建
 ```
 
@@ -152,3 +154,5 @@ protein_lab/
 | **v0.0.9** | **AKTA 峰图整理**：`akta.py` 标准库原生解析 Unicorn zip（无 pycorn 依赖）/ 峰检测标注 / 峰表 Excel 导出 / 保存为实验（raw→experiment_raw `akta_traces`，results 带 `AKTA_ANALYSIS_VERSION`）；**BLI 分析增强**（曲线勾选入样 / 单样本拟合 / 默认截去结合起点前基线 / 相界对齐 REF 脚本）；**AKTA 复制恢复 + 参数回填 + Sheet3 多样品作图导出 + 峰图 PNG 下载** |
 | **v0.0.10**（当前） | **酶活孔分组 + 作图 Excel 宽格式**：同组孔逐时间点均值曲线 + 误差棒（SD/SEM，图例带 `(n=N)`）；「组」输入框带 datalist 可选已有组 + 多选批量应用；批量命名同名孔自动加 `_1/_2/_3`；作图 Excel 每孔独立时间/OD 两列（BLI/AKTA/酶活统一宽格式）；**评审修复**（undo peek 成功才 pop / renderBliKd 落 DOM / exp_update 列表序列化 / BLI 空窗口守卫） |
 | **v0.1.0**（researcher 分支，未发布） | **研究脉络**：证据链 **目标 → 实验 → 结论 → 新目标**；`research_nodes` 表（迁移 v3）+ `research.py` service 层白名单 + 自由挂载逃生舱；实验块引用/计划占位；`/research` 默认首页 + 树/链视图 + 实验引用卡 + 搜索/标签/蛋白筛选；MCP `list_research_trees` / `get_research_node`；`test_research.py` |
+| **酶活原始数据契约补齐**（2026-09-16，不占版本号） | 修复「从实验复制」对酶活**有损**（只读到按时间窗截断的曲线，原始快照从不读 → 复制再存档逐代丢点，实测源 90 点只存 16 点）：**固化三段式存储契约**（BLI/AKTA/酶活三端对称）/ 手动参数（六个作图开关 + 每孔 MW + 源文件名）首次落库 / `params.wells` 移除逐点数据 / 新增 `/api/enzyme/restore`（旧快照兼容 + 时间窗换算）/ 归档导出改读原始快照 / `test_enzyme.py` + CI |
+| **数据安全与撤销修复**（2026-09-16，不占版本号） | ① **备份按前缀分桶 + 在线备份 API**——旧实现按 `.db` 后缀轮转，会把 `pre-*` 安全网与手工备份挤掉（下次启动即删）；改用 SQLite 在线备份（事务一致，服务运行中也不丢最新写入），例行轮转只匹配自己的文件名。② **批量删除的撤销不再静默丢失**——旧实现逐条压栈，`delete-all` 超过 20 条时早期实验被静默挤掉；改为压**一条** bulk 条目，一次撤销全量恢复（含原始快照重挂）。③ 历史 `params.wells` 去逐点（`tools/strip_params_pointdata.py`，**fail-closed**：无原始副本即整条跳过），复制兜底改**显式提示**不再静默出空图。④ 更正 CLAUDE.md 关于 #47 的错误结论（存档 fit 本身是对的） |

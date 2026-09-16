@@ -191,6 +191,11 @@ import openpyxl
 
 ROW_ORDER = "ABCDEFGH"
 
+# 酶活分析版本（随存档契约 v2 引入）：写入 raw payload["analysis_version"]，
+# 供 /api/enzyme/restore 比对并在复制回放时提示版本差异。
+# v1（"enzyme-1.0"，仅前端常量）payload 无 params 槽；v2 起 payload 带 params + calc_type。
+ENZYME_ANALYSIS_VERSION = "enzyme-2.0"
+
 
 def parse_tecan_xlsx(filepath: str) -> dict:
     """解析 TECAN Spark xlsx，返回 {meta: {...}, wells: {A1: {times:[], od:[]}, ...}}"""
@@ -235,6 +240,49 @@ def parse_tecan_xlsx(filepath: str) -> dict:
                     wells[key]["od"].append(float(vv))
     wb.close()
     return {"meta": meta, "wells": {k: v for k, v in sorted(wells.items())}}
+
+
+def enzyme_time_grid(meta: dict, wells: dict) -> list:
+    """酶活时间网格（秒，升序去重）：优先 meta.temps，缺省回退首个孔的 times。
+
+    与前端 enzymeTimePoints 的重建口径一致（app.js uploadEnzymeFile），
+    保证时间窗口下标在前后端指同一个点。
+    """
+    temps = (meta or {}).get("temps") or []
+    if not temps:
+        for w in (wells or {}).values():
+            if isinstance(w, dict) and w.get("times"):
+                temps = w["times"]
+                break
+    out = []
+    for v in temps:
+        try:
+            out.append(float(v))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(out))
+
+
+def time_axis_to_indices(grid: list, time_axis) -> tuple:
+    """时间窗口（秒值对）→ 时间网格下标对，供复制回放恢复时间轴选区。
+
+    值不在网格上时取**最近邻**（并列取较小下标），越界由最近邻天然 clamp 在 [0, n-1]；
+    time_axis 缺省/畸形/网格为空时回退整区间。返回 (lo, hi)，恒满足 0 <= lo <= hi <= n-1。
+    """
+    n = len(grid or [])
+    if n == 0:
+        return 0, 0
+    lo_i, hi_i = 0, n - 1
+    if isinstance(time_axis, (list, tuple)) and len(time_axis) >= 2:
+        try:
+            lo_val, hi_val = float(time_axis[0]), float(time_axis[1])
+        except (TypeError, ValueError):
+            return lo_i, hi_i
+        lo_i = min(range(n), key=lambda i: abs(grid[i] - lo_val))
+        hi_i = min(range(n), key=lambda i: abs(grid[i] - hi_val))
+        if lo_i > hi_i:
+            lo_i, hi_i = hi_i, lo_i
+    return lo_i, hi_i
 
 
 def fit_kinetics(times: list, od: list) -> dict:

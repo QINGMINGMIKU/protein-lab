@@ -15,8 +15,8 @@
   - BLI 分析（v0.0.8）— 上传 ForteBio CSV：传感器图（SG 平滑/拟合虚线/每样本出图）+ 5 方法 KD 拟合 + 保存为实验（原始曲线落 experiment_raw 快照）
   - AKTA 峰图（v0.0.9）— 上传 AKTA Unicorn zip 原生解析（无 pycorn 依赖）：通道列表 + Fraction 事件 → 峰检测/标注/峰表 Excel 导出 → 保存为实验（原始曲线落快照）
   - Weblogo — 勾选蛋白生成序列 logo；长序列自动分块换行（每块 50 位，编号连续）；可选位点区间（start/end，1-based 闭区间）与多聚体裁剪（multimer=N 裁剪为单亚基）；结果按请求参数服务端缓存 + 并发去重，切页回来看别的数据再回来自动恢复（不丢生成结果）
-  - 酶活计算 — TECAN xlsx 解析 + 96 孔板 UI + 动力学拟合 + Michaelis-Menten + 阴性扣除
-  - 从实验复制 — 历史实验卡片回填
+  - 酶活计算 — TECAN xlsx 解析 + 96 孔板 UI + 动力学拟合 + Michaelis-Menten + 阴性扣除；存档时**原始曲线只落 `experiment_raw`**、手动参数（时间窗/六个作图开关/每孔 mw/源文件名）落 `params`
+  - 从实验复制 — 历史实验卡片回填；酶活/BLI/AKTA 从**原始快照**重建数据 + 回填存档参数（`/api/*/restore`，见「架构要点」三段式契约）
 - **实验归档**：一键保存 / Excel 导出 / 详情页（含**原始数据快照表**：experiment_raw 类型/时间/分析版本）/ 批量删除 + 撤销（内存 undo 栈，最多 20 条）
 - **MCP 服务器**：`mcp_server.py`，19 个工具，读写契约（写工具 `save_experiment` + `save_observation` + `save_conclusion` + `attach_goal`）+ 结构化错误码（缺参/类型错/语义不满足 → -32602，未知工具 → -32601，内部错误 → -32000）；实验读取工具（get_experiment/get_experiment_raw）递归剔除 sequence 明文（IP 保护兜底）。`get_system_prompt` 返回 `system_prompt.py` 中的 AI 数据处理工作流指导（数据质量评估 / 计算走工具 / 实验 vs 观察归档边界 / 研究脉络挂载 / 序列脱敏），供外部智能体开始处理实验数据前调用
 
@@ -26,7 +26,7 @@
 - **依赖隐患**：`app.py`/`calculators.py` 直接 `import numpy`，weblogo 与酶活绘图还会惰性 `import pandas`/`matplotlib`/`logomaker`——这些都不在 `requirements.txt` 里，靠 logomaker 传递安装。全新建环境只装 requirements.txt 能跑，但别以为它们被显式声明。
 - **必须用 venv python**：`.venv/Scripts/python.exe`（Windows）/ `.venv/bin/python`（macOS）。系统 python 缺依赖（biopython、logomaker），跑测试/脚本都要用 venv。
 - 前端：Jinja2 + 原生 JS + 手写 CSS，无构建步骤。
-- 启动：双击 `启动.bat` / `启动.command`，或 `.venv/Scripts/python app.py`。启动时自动备份数据库到 `backups/`（保留 10 份）。
+- 启动：双击 `启动.bat` / `启动.command`，或 `.venv/Scripts/python app.py`。启动时自动备份数据库到 `backups/`（例行桶保留 10 份，`pre-*` 安全网与手工备份不受轮转影响）。
 
 ## 目录结构
 
@@ -50,6 +50,7 @@ protein_lab/
 ├── templates/          Jinja2 页面模板
 ├── static/             JS + CSS
 ├── fonts/              Noto Sans SC（OFL，打包进二进制）
+├── tools/              仅开发用的一次性脚本（不入包 / 不入 CI），如 backfill_enzyme_raw.py、strip_params_pointdata.py
 ├── .github/workflows/  CI 双平台构建 + 测试步
 ├── backups/            数据库自动备份
 └── protein_lab.db     自动生成，首次运行创建
@@ -64,10 +65,35 @@ protein_lab/
 - **AKTA 分析模块 `akta.py`（v0.0.9）**：**标准库原生解析 Unicorn zip，无 pycorn 依赖**——外层 zip 的 `Chrom.N_MM_True` 是**嵌套 zip**（非标准结构：EOCD 不在文件尾、带尾部填充），需 `raw.rindex(_ZIP_MAGIC_END)+22` 截断才能被 zipfile 读取；嵌套 zip 内 `CoordinateData.Volumes/Amplitudes` 是 .NET 序列化 float32 数组，**数据从偏移 47 起、每 4 字节一个 float32、跳过尾部 48 字节**（pycorn `unpacker` 逻辑，格式经 REF 真实样例 zip 验证）。通道元数据在 `Chrom.1.Xml` 的 `<Curves><Curve>`（Name/CurveDataType/AmplitudeUnit/CurvePoints→BinaryCurvePointsFileName），事件（Fraction/Injection/Run Log）在 `<EventCurves>`。峰检测 `detect_peaks`：SG 平滑（`_smooth` 纯 numpy 实现）→ 基线取区间 5% 分位数 → scipy `find_peaks`（height + prominence + distance 合并分裂峰）→ 边界走回基线、梯形面积、半高宽。Web API（v0.0.8 同款会话模式）：`/api/akta/analyze|plot|export|save`，save 时 results 带 `AKTA_ANALYSIS_VERSION` + raw 落库 `akta_traces`。回归测试 `test_akta.py`（REF 两个真实 zip）。
 - **统一写入入口（架构升级 2026-08）**：`services.create_experiment` 收敛手动/from-calculation/MCP 三条写入路径（自动命名 + 空类型校验 + `coerce_int_list` 静默过滤坏 id）。未来 audit/lineage 的插桩点。`models.EXP_TYPES` 是 exp_type 单一来源，模板下拉/MCP 描述/测试全走常量。
 - **数据存储地基（v0.0.7）**：schema 迁移框架——`models.SCHEMA_VERSION` + 有序 `MIGRATIONS`，`_migrate()` 逐条 `BEGIN`→迁移→`PRAGMA user_version=N`→`COMMIT` 原子（**不能 executescript，会隐式提交**）；v1=现有 3 表（老库 no-op）、v2=`experiment_raw`。`experiment_raw`：**只写一次从不 UPDATE**（`exp_save_raw` 重复调用=新行），删实验不删 raw（FK `ON DELETE SET NULL`，规则 #2/#5/#8）。`get_db(read_only=True)` 开 `PRAGMA query_only` 拒写（MCP 只读契约基础设施）。
+- **实验存储三段式契约（2026-09-16 固化，三模块统一）**：实验数据分三层落库，**不要混**：
+
+  | 层 | 表 | 存什么 | 可变性 |
+  |---|---|---|---|
+  | 原始数据 | `experiment_raw.payload` | 仪器直接产出（BLI 曲线 / AKTA 通道 / 酶活孔时间序列）+ 存档时的手动参数快照 | **只插不更**（`exp_save_raw` 重复调用=新行；删实验不删 raw，FK `ON DELETE SET NULL`） |
+  | 手动处理参数 | `experiments.params` | 人填 + 人选的：浓度 / MW / 分组 / 时间窗 / 作图开关 / 源文件名 | 可变（`resave_experiment` 重挂覆盖） |
+  | 派生结果 | `experiments.results` | 拟合 / 峰表 / KD 表等分析产物摘要 | 可变 |
+
+  **`payload` 统一形状**（新增分析型模块必须照此）：
+  ```
+  {analysis_version, calc_type, params, source_file, <模块自有原始数据键>}
+  ```
+  `params` = 写库时手动参数的**冻结副本**，是「从实验复制」回填 UI 的**唯一读取源**（raw 只写一次 → 快照里的手动参数天然不可变）。`source_file` = 源文件名（溯源 / 对照识别）。
+
+  **三条规则**：
+  - **A. 逐点数据只在 raw**——`params` 不内嵌 `times/od`（酶活 v2 起；`od_range` 这类极小派生摘要可留，详情页要显示）。违反后果：复制路径读到的是**按时间窗截断后**的 params → 复制再存档**逐代丢点**（酶活实测 exp #41 源 90 点只存 16 点、#33 源 180 点只存 94 点）。
+  - **B. `payload.params` 是回填源**——raw payload 必须嵌 `params` 槽；历史 v1 快照无此槽时，`/api/*/restore` 用 payload 里残存的参数合成最小集（酶活用 `time_axis`）。
+  - **C. raw 只插不更**——重新分析 = 追加新行；`latestRawId(exp, data_type)` / `_enzyme_raw_wells()` 取**最后一条**（= 当前状态），历史行保留可复现。
+
+  **复制回放三端对称**：BLI `bli_curves` / AKTA `akta_traces` / 酶活 `enzyme_traces` —— 前端 `latestRawId(exp, data_type)` **按类型**取最新快照（重挂可能往同一实验追加别的类型的 raw）→ `GET /api/experiments/<eid>/raw/<rid>` → `POST /api/<模块>/restore` → 重建曲线 + `*BackfillParams()` 回填开关。**浓度 / 稀释 / Weblogo 不适用**（「输入即数据」：params 本身就是全部输入，无独立原始数据）。归档导出要作图数据时同样读 raw（`_enzyme_raw_wells(e)`，取不到回退 `params.wells`）。
+
+  **版本契约**：`analysis_version` 是溯源标签**不是闸门**——restore 遇版本不符**不阻断**，返回 `version_warning` 并原样回放（旧快照仍可用）。`ENZYME_ANALYSIS_VERSION`（`calculators.py`）在 `static/app.js` 有同名镜像常量，改动两边同步（同 `convertConc` 约定）。
+
+  **单位铁律**：`wells[*].times` **规范单位是秒**（`fit_kinetics` 内 `k×60` → ΔOD/min；绘图 `/60` → 分钟轴；导出 `/60` 写 "时间 (min)" 列）。历史 exp #47 是 MCP 手写、`times` 误用**分钟**（`meta.time_unit="min"`），属已知脏数据。**经实测更正（2026-09-16）**：当年 MCP 是**用秒算对了 fit** 的，只把 `times` 存成了分钟——所以**存档 `fit` 本身正确**（用 raw 秒值重拟合，4 孔比值全为 **1.000**、R² 逐位相同），错的只是「从 `params.wells` 重新拟合/出图」这条路径（60× 的值 + 0.49 min 的轴）。此前本文档称「其 fit 偏 60×」是**错的**。该路径已由 `tools/strip_params_pointdata.py` 消掉（`params.wells` 不再有逐点），重拟合/出图现在只可能读 raw（秒）。
+  **历史 raw 的契约豁免**：raw#1(akta)/#2(bli)/#3/#4(enzyme) 早于槽位要求，缺 `calc_type`/`source_file`——**raw 只插不更（规则 C），不回填**；读端必须容忍缺失（现状已容忍：`/api/enzyme/restore` 等处用 `get`/`setdefault`）。即「三模块统一」只对新写入的快照成立。
 - **MCP 读写契约（v0.0.7 起，v0.1.3+ 扩写面）**：写工具集 `save_experiment`（归档）/ `save_observation`（观察旁注）/ `save_conclusion`（结论，走 research.create_node）/ `attach_goal`（一实验多目标，走 services.attach_goal，幂等：已挂返 already_attached）；读工具零写库由 `test_models.py` 逐工具断言强制（库内容逐字节不变），**无运行时拦截**——新增读工具必须在测试 `read_cases` 注册。
 - **研究脉络模块（v0.1.0）**：`research.py` service 层——证据链 **目标→(拆解)子目标/实验→(得出)结论→(引出)新目标**。数据在 `research_nodes` 表（迁移 v3+v4：node_type/parent_id/title/detail/exp_id/tag/sort_order/supporting_exp_ids，`models.research_node_*` CRUD；parent FK 级联删、exp_id FK `ON DELETE SET NULL` 断链保留；`supporting_exp_ids` 是 JSON 文本列，读端 `_node_row` 反序列化）。**白名单边在 service 层**（`research.WHITELIST`：goal→{goal,experiment,observation}、experiment→{conclusion,observation}、conclusion→{goal,observation}、observation→{}——observation 是叶子旁注），表层**不做 CHECK** 留 `free_attach` 逃生舱打破；根必须是 goal、多根；`create_node` 失败返 `(None, err)`、`update_node` 失败返 `(False, err)`（注意两者返回形态不同）。`/research` 是**默认首页**（`/` 也指向它，顶层导航第一项）；前端两态：**根目标列表**（默认）→ 点根目标进**单根横向流程图**（左→右流式、同级纵向并联，`researchFlowLayout` DFS 访问序布局 + SVG 肘形连接线按父类型着色，app.js `RES_FLOW`/`RES_FLOW_EDGE` 常量）；API `/api/research/nodes` 增查改删 + 递归子树 + 链（根→节点 breadcrumb）。**MCP 新增 `list_research_trees` / `get_research_node` / `get_research_context`（读工具，注册 read_cases；`get_research_context`（v0.1.2+v0.1.3）= 研究目标上下文聚合：goal 本体 + 父目标链 + 子树实验 key results + 结论 stance + **支持实验全证据 `supporting_experiments`（多实验→一结论，`_exp_block` 与子树实验同块）+ `observations` 观察/关键细节聚合（parent 上下文）** + 开放目标，数据给全、判断留给 AI）**——吸收原 v0.1.1 的 experiment_links（实验块 exp_id 即血缘）。回归 `test_research.py`（白名单/逃生舱/级联删/JSON 往返/断链/排序/API/MCP 零写/上下文聚合/页面渲染/v0.1.3 observation+支持实验）。
 - **实验 `params`/`results` 可能是双重编码的 JSON 字符串**（历史数据遗留）——读这两个字段要 `while isinstance(val, str): json.loads` 防御性解包（见 `page_experiment_detail`、`_export_excel`）。
-- **undo 栈是内存态**（app.py `_undo_stack`，上限 20 条），重启即失。
+- **undo 栈是内存态**（app.py `_undo_stack`，上限 20 条），**重启即失**——这是已知限制（不做持久化回收站/软删除：那要 schema v5 + 列表与详情页 UI，与 Workbench「不增加管理成本」定位不符）。**批量删除压一条 `experiments_bulk` 条目**（item 内 `items` 列表），故 `delete-all` 删 9999 条也只占 1 个栈位：此前逐条 `_push_undo` 会因 20 上限**静默挤掉早期条目**，撤销只能回来后 20 条且毫无提示。`/api/undo` 的 `experiments_bulk` 分支逐条重建 + `exp_raw_relink` 重挂旧快照，部分失败时只把**失败的那些**压回栈顶（重试不重复建已恢复的）。单条删除仍走单条路径（前端只对批量/全删给撤销入口）。
 - **字体解析（v0.0.4）**：weblogo 与酶活绘图走 `fonts.py` 候选链——打包 Noto Sans SC（`resource_path("fonts/NotoSansSC-Regular.otf")`）→ 旧 dev 回退 `../fonts/simhei.ttf` → Windows 系统字体 → macOS 系统字体，返回第一个存在者。已不依赖上级工作区。
 - **测试文件**：`test_bli.py` 是仓库第一个测试（assert 脚本，`.venv/Scripts/python.exe test_bli.py` 直接跑）——bli.py 解析/绘图/KD 回归 + 酶活绘图端点 + 隔离临时库。新增测试照此模式。
 - **路径与打包（v0.0.4）**：`paths.py` 统一路径解析——`app_base_dir()` 决定 DB/backups 位置（frozen→EXE 同目录，dev→源码目录），`resource_path()` 读 templates/static/fonts（frozen→`_MEIPASS`）。`models.DB_PATH` 与 Flask `template_folder`/`static_folder` 都走它。中文字体改走 `fonts.py`（打包 Noto Sans SC，OFL 协议，仓库 `fonts/` 内），不再依赖上级工作区。
@@ -79,8 +105,9 @@ protein_lab/
 ## 数据安全（最高优先级）
 
 - **严禁在生产数据库上测试**：任何涉及删改数据的测试必须用独立临时库或先备份。
-- `app.py` 启动时自动将 `protein_lab.db` 复制到 `backups/`，保留最近 10 份。**库已切 WAL**（`models.init_db()` 设一次，持久化在库文件头）：备份前先 `wal_checkpoint(TRUNCATE)` 再 copy，保证不丢未落盘内容；并发安全由 `models.get_db(timeout=30)` 兜底（waitress 4 线程 + MCP 进程互等而非 5s 撞锁）。
-- **迁移前自动备份**：`_migrate()` 在首个未应用迁移前快照 `pre-migration_*.db`（保留 5 份）——app.py 启动备份晚于 import 时迁移，备份到手已是迁移后库，迁移前快照为破坏性迁移留回滚点。
+- `app.py` 启动时自动将 `protein_lab.db` 备份到 `backups/`，例行桶保留最近 10 份。**备份走 SQLite 在线备份 API**（`models.backup_db_to`）——事务一致，WAL 状态与并发读都不影响；此前「`wal_checkpoint(TRUNCATE)` + `copy2`」的做法在服务运行时遇并发读会 checkpoint busy，**备份静默不含最新写入**。库为 WAL 模式（`models.init_db()` 设一次，持久化在库文件头）；并发安全由 `models.get_db(timeout=30)` 兜底（waitress 4 线程 + MCP 进程互等而非 5s 撞锁）。
+- **备份按前缀分桶，各桶由各自的生产者轮转**（2026-09-16 修）：例行桶靠**严格正则** `^protein_lab_\d{8}_\d{6}\.db$` 匹配（`app.py` 的 `ROUTINE_BACKUP_RE`），只删自己生成的文件——`protein_lab_manual_*`（手工复制）与一切 `pre-*` 安全网**永不**被例行轮转碰到。此前按 `.db` 后缀清理，而 `protein_lab_manual_*` 排序在 `protein_lab_2*` 之上（'m' > '2'），占满名额后把 `pre-enzyme-backfill_*` 挤到第 11 位**下次启动即删**。新增备份类型时**必须**在正则上隔离，别共用后缀。
+- **迁移前自动备份**：`_migrate()` 在首个未应用迁移前快照 `pre-migration_*.db`（保留 5 份，同样走在线备份 API）——app.py 启动备份晚于 import 时迁移，备份到手已是迁移后库，迁移前快照为破坏性迁移留回滚点。
 - 恢复方法：关闭服务 → 从 `backups/` 选一份复制回上级目录改名为 `protein_lab.db` → **删掉同目录残留的 `protein_lab.db-wal` / `protein_lab.db-shm`**（异常退出可能遗留，会让 SQLite 把旧 WAL 重放到刚恢复的库上）→ 重启。
 
 ## 测试规范
@@ -94,7 +121,7 @@ protein_lab/
   5. `from app import app`
 - 若必须用正式库，测试前先手动备份 `protein_lab.db`。
 - 跑测试一律用 `.venv/Scripts/python.exe`（系统 python 缺依赖）。
-- **回归套件**：`test_models.py`（14 节：JSON 往返 / exp_type 单一来源 / 迁移幂等 / raw 只插不更 / read_only 拒写 / MCP 读零写库 / 迁移前备份）+ `test_bli.py`（BLI 解析/绘图/KD + 酶活绘图 + **BLI 分析 API**）+ `test_akta.py`（**AKTA 原生解析/峰检测/峰图 + API**，fixtures/ 真实样例 zip）。CI 构建前自动跑（`MPLBACKEND=Agg`）。
+- **回归套件**：`test_models.py`（26 节：JSON 往返 / exp_type 单一来源 / 迁移幂等 / raw 只插不更 / read_only 拒写 / MCP 读零写库 / 迁移前备份 / 研究脉络 / **§21 酶活存档契约 v2** / **§25 备份分桶轮转** / **§26 批量删除撤销**）+ `test_bli.py`（BLI 解析/绘图/KD + 酶活绘图 + **BLI 分析 API**）+ `test_akta.py`（**AKTA 原生解析/峰检测/峰图 + API**，fixtures/ 真实样例 zip）+ `test_enzyme.py`（**酶活存档契约 + `/api/enzyme/restore` + 归档导出读 raw + `tools/strip_params_pointdata` 的 fail-closed 防线**）+ `test_research.py` + `test_ui.py`（含**合约源码级断言**：enzymeParams 不得写 times/od、复制兜底须显式提示、**i18n.js 与 i18n.json 逐键同步**、app.js 的 `t()` 字面量键必须存在）+ `test_identity.py`。CI 构建前自动跑（`MPLBACKEND=Agg`，见 `.github/workflows/build.yml` 的 Run tests 步——**新增测试文件必须加进该行**）。
 
 ## 发布纪律
 
@@ -133,6 +160,7 @@ protein_lab/
 - v0.1.2 ✓ 已完成 (2026-08-18) — MCP 研究上下文 **`get_research_context(goal_id)`**（2026-08-17 评价拍板，取代原 get_variant_context 优先级）：goal 本体 + 父目标链 + 子树实验（归档 metadata/key results，完整 params/results + raw 快照元数据）+ 结论（epistemic status + 来源实验是否归档）+ 开放目标（子树内无结论的目标）；注册两处 read_cases + 序列脱敏（整包 `_strip_sequences`）。使能 AI 回答「现在在研究什么 / 哪些结论缺实验支持 / 哪些实验互相矛盾 / 目标验证到什么程度」。`get_variant_context` 变体化顺延。
 - v0.1.3 ✓ 已完成 (2026-08-21) — **证据结构升级（数据/服务/MCP 层，零 UI）**：研究脉络补上真实科研两处结构——**observation 观察/关键细节节点**（叶子旁注，任何节点下可挂研究过程事实/参数，分类 tag：操作要点/文献事实/负结果/参数，不进必选链）+ **结论多实验支持 `supporting_exp_ids`**（多实验→一结论旁路引用：树父实验仍主证据，其余走一等引用；方向恒定实验→结论，结构上不可能成环——比真 DAG 便宜且无环）。迁移 v4（`research_nodes` 加 `supporting_exp_ids` JSON 列，ADD COLUMN 非破坏）。`get_research_context` 聚合扩展：conclusions 带 `supporting_experiments`（`_exp_block` 全证据：params/results/raw 快照）+ 新增 `observations` 聚合 + stats.observations；API 端点透传 supporting_exp_ids。前端零 UI 不动（observation 渲染走泛化兜底，UI 在 v0.1.4）。**明确不做**：通用边表/任意方向边/DAG 图编辑。
 - v0.1.4 — 研究脉络 UI：observation 创建/编辑/渲染 + 结论编辑多选支持实验（**在朋友 UI PR 落地后做**，避免做一套被重写）
+- ✓ 已完成 (2026-09-16) — **酶活原始数据契约补齐（三段式契约固化，不占版本号）**：修复「从实验复制」对酶活**有损**（复制只读 `params.wells` 里被时间窗截断的曲线，raw 从不读 → 复制再存档逐代丢点，实测 #41 源 90 点只存 16 点）。改动：① 固化**三段式契约**（原始数据 raw / 手动参数 params / 派生 results + `payload` 统一形状 + A/B/C 三规则，见「架构要点」，BLI/AKTA 已合规、本次补齐酶活并写死）；② `enzymeParams()` 单点构造手动参数——**六个作图开关 + `mw` + `source_file` 首次落库**（此前全丢），`params.wells` 移除 `times/od` 保留 `od_range`；③ 新增 `/api/enzyme/restore`（v1 旧快照兼容合成 params + 秒值对→网格下标换算，版本不符只警告不阻断）；④ 复制分支改读 raw 全量 + `enzymeBackfillParams()` 回填开关；⑤ `latestRawId(exp, data_type)` 按类型取快照（`_raws` 带 data_type，修「混类型重挂取错快照」）；⑥ 归档导出作图数据改读 raw（`_enzyme_raw_wells`，缺 raw 回退 params 不降级）；⑦ `test_enzyme.py` 新增 + `test_models.py` §21 改写 + `test_ui.py` 合约断言 + CI。**已知脏数据**：历史 #47 由 MCP 手写，`times` 单位误为分钟（应秒），其 fit 偏 60×、出图 x 轴偏 60×；历史 5 条酶活实验的六个开关从未采集，回填后只能走 UI 默认值。
 - v0.1.5 — Comparison：WT vs variant 多实验横切对比 + 判断辅助（Workbench 差异化核心）+ `used_sample_from` 采样来源标注
 - v0.2.0 — AI 解读层（基于研究上下文判断 candidate 优先级 + **候选结论生成→人类确认**；定位 Research Context 的 AI 消费，**不叫 AI 科学家**）
 - **明确不做（defer，2026-08-17 拍板，2026-08-21 窄修订）**：通用 DAG / Evidence Graph——「一实验支持多目标」由多节点引用同一 exp_id 覆盖、「一结论来自多实验」由 v0.1.3 `supporting_exp_ids` 旁路引用覆盖（方向恒定、结构上无环，不付 DAG 的图编辑/环路/排序代价）；仍不做：任意两点任意方向的通用边表。对外命名统一为 **Research Context / Research Trace**，不是 Autonomous Scientist。
