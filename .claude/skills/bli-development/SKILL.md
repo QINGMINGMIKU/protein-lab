@@ -5,7 +5,7 @@ description: 维护和扩展 protein_lab 的 BLI 分析模块（bli.py + /api/bl
 
 # BLI 分析模块开发指南
 
-protein_lab 的 BLI 工具（v0.0.6 内核 + v0.0.8 UI）从「上传 ForteBio CSV → 传感器图 + KD 表」跑通到「存档 + 从实验复制恢复 + 参数回填 + 下载」。走与 AKTA 同款的数据契约与多入口模式。改这个模块前先读本指南 + [bli.py](../../../bli.py) 实际代码。
+protein_lab 的 BLI 工具（v0.0.6 内核 + v0.0.8 UI）从「上传 ForteBio CSV → 传感器图 + KD 表」跑通到「存档 + 载入计算工具恢复 + 参数回填 + 下载」。走与 AKTA 同款的数据契约与多入口模式。改这个模块前先读本指南 + [bli.py](../../../bli.py) 实际代码。
 
 > 姊妹模块 [akta-development](../akta-development/SKILL.md)（AKTA 峰图）走同一套契约与模式，两端点/会话/判别字段/复制恢复/回填/下载镜像对称。改一侧要评估另一侧。
 >
@@ -39,7 +39,7 @@ test_bli.py  合成 fixture + 隔离临时库回归
 
 ## 数据契约（改动前必须对齐的横切字段）
 
-1. **`calc_type:"bli_fit"` 必须写入 params**——它是详情页渲染、从实验复制、导出的统一判别字段。**BLI 的坑比 AKTA 深**：浓度梯度实验也共享 `exp_type="BLI"`（但 calc_type="dilution"），判别顺序必须「先算 calc_type，dilution 显式排除」再落旧格式兜底（详见陷阱 #1）。
+1. **`calc_type:"bli_fit"` 必须写入 params**——它是详情页渲染、载入计算工具、导出的统一判别字段。**BLI 的坑比 AKTA 深**：浓度梯度实验也共享 `exp_type="BLI"`（但 calc_type="dilution"），判别顺序必须「先算 calc_type，dilution 显式排除」再落旧格式兜底（详见陷阱 #1）。
 2. **results 恒带 `BLI_ANALYSIS_VERSION`**（规则 #3）+ `params` + `samples`（逐 sample 的 5 方法拟合结果 dict，失败为 `{"error": ...}`）。params 额外记 `active_curves`（进入数据的曲线 label，None=全选）与 `trim_start`（是否截去结合起点前基线）——供复制回填复现当时的曲线选择/截断。
 3. **raw → `experiment_raw` `data_type=bli_curves`，只写一次**（规则 #2/#5）。payload 形状：
    ```python

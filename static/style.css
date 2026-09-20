@@ -57,7 +57,6 @@
   --lf-line-goal: rgba(78, 74, 68, 0.55);       /* 连接线石墨色（0.18 在纸面上几乎不可见） */
   --lf-line-experiment: rgba(78, 74, 68, 0.55);
   --lf-line-conclusion: rgba(78, 74, 68, 0.55);
-  --lf-line-free: #C8791E;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -505,29 +504,6 @@ details.advanced > summary {
   cursor: ew-resize; z-index: 2;
 }
 
-.copy-card {
-  display: flex; align-items: flex-start; gap: 12px;
-  padding: 12px 14px; border: 1px solid var(--rule);
-  cursor: pointer; background: var(--instrument); margin-bottom: 6px; min-width: 0;
-  border-radius: var(--radius-sm);
-}
-.copy-card:hover, .copy-card.active { background: var(--paper); border-color: var(--cyan); }
-.copy-type-badge {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 64px; height: 36px; font-size: 11px; flex-shrink: 0;
-  font-family: "JetBrains Mono", monospace; border: 1px solid var(--rule);
-  border-radius: var(--radius-sm);
-}
-.copy-card-body { flex: 1; min-width: 0; }
-.copy-card-title { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
-.copy-card-sub { font-size: 12px; color: var(--graphite); margin-top: 2px; }
-.copy-type-tag {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 6px 8px; min-height: var(--hit); font-size: 11px; font-weight: 600;
-  cursor: pointer; border: 1px solid var(--rule); font-family: "JetBrains Mono", monospace;
-}
-.copy-type-tag.active { background: var(--cyan); border-color: var(--cyan); color: var(--on-accent); }
-
 .res-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
 @media (max-width: 1023px) { .res-layout { grid-template-columns: 1fr; } }
 /* 详情面板 = 悬浮于导图之上（不占列宽，导图满幅），fixed 跟随视口滚动保持可见；<1024px 走抽屉覆盖 */
@@ -561,9 +537,6 @@ details.advanced > summary {
   margin-left: 10px; padding-left: 10px;
   border-left: 1.5px solid var(--lf-line-goal);
 }
-.flow-col.free-attach > .flow-tree {
-  border-left-style: dashed; border-left-color: var(--lf-line-free);
-}
 /* 连接线：父→竖线 / 竖线→子 两段水平线 = 肘形连接 */
 .evidence-node { position: relative; }
 .flow-col.has-children > .evidence-node::after {
@@ -573,9 +546,6 @@ details.advanced > summary {
 .flow-tree > .flow-col > .evidence-node::before {
   content: ""; position: absolute; right: 100%; top: 50%;
   width: 10px; border-top: 1.5px solid var(--lf-line-goal);
-}
-.flow-tree > .flow-col.free-attach > .evidence-node::before {
-  border-top-style: dashed; border-top-color: var(--lf-line-free);
 }
 /* 末子悬垂线遮罩：叶子/折叠时子树竖线越过肘形继续下垂，用画布色盖掉 elbow 以下段。
    右缘须同时避开：① 节点自身 3px 色条（padding box 补偿）② 选中态 outline（border-box
@@ -619,7 +589,6 @@ details.advanced > summary {
 .res-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .res-detail-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
 .res-badge { font-family: "JetBrains Mono", monospace; font-size: 11px; padding: 2px 8px; border: 1px solid var(--rule); border-radius: 999px; }
-.res-free { font-family: "JetBrains Mono", monospace; font-size: 11px; }
 .res-tag-chip { font-family: "JetBrains Mono", monospace; font-size: 11px; padding: 2px 8px; border: 1px solid var(--rule); border-radius: 999px; }
 .res-tag-chip.support { background: var(--success-bg); border-color: var(--success); color: var(--success); }
 .res-tag-chip.rebut { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
@@ -660,7 +629,7 @@ details.advanced > summary {
 a, .nav-links a, .lang-switch button, .btn-icon, .btn, .tab-btn,
 .datatable tr, .calc-table tr, .search-item, .plate-well, .lf-collapse,
 .chip, .tag-chip, .res-tag-chip, .badge, .stance-chip,
-.copy-card, .res-root-card, .record-card, .evidence-node,
+.res-root-card, .record-card, .evidence-node,
 .enzyme-ref-btn, .cell-input, .checkbox-label,
 label input, label select, label textarea,
 .toolbar input, .toolbar select, .tag-input,

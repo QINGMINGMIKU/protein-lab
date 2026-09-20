@@ -35,7 +35,7 @@ def get_db(read_only: bool = False) -> sqlite3.Connection:
 # user_version=N→COMMIT 原子。老库（user_version=0）从 v1 起跑：v1 全是 CREATE IF NOT
 # EXISTS + 旧列清理，对已有表是 no-op——这是"非破坏性升级"的保证（数据原样不动）。
 
-SCHEMA_VERSION = 4  # 当前 schema 版本（与 MIGRATIONS 末项一致）
+SCHEMA_VERSION = 5  # 当前 schema 版本（与 MIGRATIONS 末项一致）
 
 
 def _migrate_v1_post(conn):
@@ -52,6 +52,25 @@ def _migrate_v1_post(conn):
     if ver >= (3, 35, 0):
         conn.execute("ALTER TABLE experiments DROP COLUMN protein_id")
     # else: SQLite < 3.35 不支持 DROP COLUMN，protein_id 残留（无引用、无害），跳过
+
+
+def _migrate_v5_post(conn):
+    """v5：删 research_nodes.free_attach（挂载自由化后该逃生舱失去意义）。
+
+    「自由挂载」是白名单的配套逃生舱——白名单取消（research.py，2026-09-18）后它没有任何
+    语义，留着只会让读端以为存在「合法/非法边」的区分。删列是纯减法的非破坏迁移：
+    research_nodes 的树结构列（node_type/parent_id/title/detail/exp_id/tag/sort_order/
+    supporting_exp_ids）一列不动，**已建的脉络形状完全不变**。
+
+    SQLite < 3.35 同 v1：不支持 DROP COLUMN 就跳过（代码已无引用，残留列无害）。
+    """
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(research_nodes)").fetchall()]
+    if "free_attach" not in cols:
+        return
+    ver = tuple(int(x) for x in sqlite3.sqlite_version.split("."))
+    if ver >= (3, 35, 0):
+        conn.execute("ALTER TABLE research_nodes DROP COLUMN free_attach")
+    # else: SQLite < 3.35 不支持 DROP COLUMN，free_attach 残留（无引用、无害），跳过
 
 
 MIGRATIONS = [
@@ -112,20 +131,20 @@ MIGRATIONS = [
     },
     {
         "version": 3,
-        # research_nodes：研究脉络树（v0.1.0）。三节点类型 goal/experiment/conclusion。
-        # parent_id 自引用 FK，删父级联删子树；exp_id 指向实验，删实验 FK SET NULL
-        # 保留节点作断链占位。白名单边校验在 service 层（research.py），表层只存
-        # free_attach 逃生舱标记——不做 CHECK 约束，留逃生舱可打破任意边（IP 本地产物）。
+        # research_nodes：研究脉络树（v0.1.0）。四节点类型 goal/experiment/conclusion/
+        # observation。parent_id 自引用 FK，删父级联删子树；exp_id 指向实验，删实验 FK
+        # SET NULL 保留节点作断链占位。挂载类型约束在 service 层（research.py），表层不做
+        # CHECK——2026-09-18 起该约束已整体取消（只留单亲树 + 根须 goal + 防环）。
         "sql": [
             """CREATE TABLE IF NOT EXISTS research_nodes (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                node_type   TEXT NOT NULL,           -- goal | experiment | conclusion
+                node_type   TEXT NOT NULL,           -- goal | experiment | conclusion | observation
                 parent_id   INTEGER REFERENCES research_nodes(id) ON DELETE CASCADE,
                 title       TEXT NOT NULL,
                 detail      TEXT DEFAULT '',
                 exp_id      INTEGER REFERENCES experiments(id) ON DELETE SET NULL,
                 tag         TEXT DEFAULT '',
-                free_attach INTEGER DEFAULT 0,       -- 逃生舱：自由挂载，打破白名单
+                free_attach INTEGER DEFAULT 0,       -- 逃生舱：自由挂载，打破白名单（v5 已删）
                 sort_order  INTEGER DEFAULT 0,
                 created_at  TEXT DEFAULT (datetime('now','localtime'))
             )""",
@@ -136,11 +155,18 @@ MIGRATIONS = [
         "version": 4,
         # v0.1.3 证据结构升级：research_nodes 加 supporting_exp_ids（JSON 文本，
         # 仅 conclusion 节点有意义——「多实验 → 一结论」旁路引用；observation 节点
-        # 类型不需要迁移，node_type 本就是文本列，白名单在 service 层 research.py）。
+        # 类型不需要迁移，node_type 本就是文本列，挂载约束在 service 层 research.py）。
         # ADD COLUMN 非破坏：老行取 DEFAULT '[]'。
         "sql": [
             "ALTER TABLE research_nodes ADD COLUMN supporting_exp_ids TEXT DEFAULT '[]'",
         ],
+    },
+    {
+        "version": 5,
+        # 2026-09-18 挂载自由化：白名单整体取消 → free_attach 逃生舱失去意义，删列。
+        # 不碰任何结构列，已建的脉络形状原样保留（见 _migrate_v5_post）。
+        "sql": [],
+        "post": _migrate_v5_post,
     },
 ]
 
@@ -640,6 +666,35 @@ def _version_from_payload(payload: str):
         return None
 
 
+def exp_raw_type_map(exp_ids, data_types) -> dict:
+    """批量取「实验 id → 已落库的 raw 类型集合」，供列表一次性判 loadable。
+
+    一条 SELECT DISTINCT 代替逐条 exp_raw_list（N+1）。只取两列、不碰 payload。
+    白名单（哪些 data_type 算「分析型」）由调用方传入——models 不内嵌业务策略。
+    分块是廉价保险：旧 SQLite 的宿主变量上限低至 999，而 id 数 × 类型数会叠乘。
+    """
+    ids = [int(i) for i in (exp_ids or ())]
+    types = list(data_types or ())
+    if not ids or not types:
+        return {}
+    out: dict = {}
+    conn = get_db()
+    try:
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            ph_id = ",".join("?" * len(chunk))
+            ph_ty = ",".join("?" * len(types))
+            rows = conn.execute(
+                f"SELECT DISTINCT experiment_id, data_type FROM experiment_raw "
+                f"WHERE experiment_id IN ({ph_id}) AND data_type IN ({ph_ty})",
+                (*chunk, *types)).fetchall()
+            for r in rows:
+                out.setdefault(r["experiment_id"], set()).add(r["data_type"])
+    finally:
+        conn.close()
+    return out
+
+
 def exp_raw_get(raw_id: int) -> dict | None:
     """单条原始数据（含 payload，_json_unwrap 解包为 dict）"""
     conn = get_db()
@@ -675,14 +730,14 @@ def exp_raw_relink(raw_ids: list[int], new_exp_id: int) -> None:
 
 # ── research_nodes：研究脉络树（v0.1.0）───────────────────
 # 节点类型 goal(目标)/experiment(实验引用或计划占位)/conclusion(结论)/observation(观察·关键细节)。
-# 白名单边校验在 research.py service 层（留 free_attach 逃生舱），这里只管存取——
-# SQL 全在 models.py，业务规则不进表（不建 CHECK，逃生舱可打破任意边）。
+# 挂载类型约束在 research.py service 层（2026-09-18 起已整体取消，只留单亲树 + 根须 goal +
+# 防环），这里只管存取——SQL 全在 models.py，业务规则不进表（不建 CHECK）。
 # supporting_exp_ids（v0.1.3）：JSON 文本，仅 conclusion 节点有意义——多实验→一结论
 # 的旁路引用（树父实验仍是主证据）。读端 _node_row 统一反序列化为 int 列表。
 
 RESEARCH_NODE_TYPES = ("goal", "experiment", "conclusion", "observation")
 RESEARCH_SAFE_COLUMNS = frozenset({"node_type", "title", "detail", "parent_id",
-                                   "exp_id", "tag", "free_attach", "sort_order",
+                                   "exp_id", "tag", "sort_order",
                                    "supporting_exp_ids"})
 
 
@@ -699,18 +754,17 @@ def _node_row(row: sqlite3.Row) -> dict:
 
 def research_node_create(node_type: str, title: str, detail: str = "",
                          parent_id: int = None, exp_id: int = None,
-                         tag: str = "", free_attach: bool = False,
+                         tag: str = "",
                          sort_order: int = 0,
                          supporting_exp_ids: list = None) -> int:
-    """新建研究节点，返回 id。结构校验（白名单/根须目标）由 service 层负责。"""
+    """新建研究节点，返回 id。结构校验（根须目标/防环）由 service 层负责。"""
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO research_nodes
-            (node_type, title, detail, parent_id, exp_id, tag, free_attach,
+            (node_type, title, detail, parent_id, exp_id, tag,
              sort_order, supporting_exp_ids)
-        VALUES (?,?,?,?,?,?,?,?,?)
-    """, (node_type, title, detail, parent_id, exp_id, tag,
-          1 if free_attach else 0, sort_order,
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (node_type, title, detail, parent_id, exp_id, tag, sort_order,
           json.dumps(supporting_exp_ids or [], ensure_ascii=False)))
     conn.commit()
     nid = cur.lastrowid
@@ -731,8 +785,7 @@ def research_node_update(node_id: int, **kwargs) -> bool:
     updates = {}
     for k, v in kwargs.items():
         if k in RESEARCH_SAFE_COLUMNS:
-            # 三元右结合陷阱：必须显式括号，否则非 free_attach 列真值也会被存成 1
-            val = (1 if v else 0) if k == "free_attach" else v
+            val = v
             # supporting_exp_ids 是 JSON 文本列：service 层给 list，这里序列化
             if k == "supporting_exp_ids":
                 val = json.dumps(v or [], ensure_ascii=False)

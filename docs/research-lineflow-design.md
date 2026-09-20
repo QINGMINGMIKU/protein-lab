@@ -84,7 +84,7 @@ ROOT: TIM 优化            [⛓ 自由] [edit]   ← 顶部分离工具条
 - ✅ 节点类型 icon（goal 🎯 / experiment 🧪 / conclusion ✓/✗/△/○）
 - ✅ 标题（链接到详情）
 - ✅ tag chips（同名 tag 用同一浅色底）
-- ✅ free_attach ⛓ 标记（仅在 experiment/conclusion 是 free_attach 时小标）
+- ❌ free_attach ⛓ 标记 —— **2026-09-18 取消**（挂载类型不设约束，不再有「非法边」可标）
 - ✅ breadcrumb 链视图（详情面板里，与 lineflow 共存）
 - ✅ 选中态：背景色块（统一 `--accent` 半透明，不抢语义色）
 - ✅ **结论 stance chip 强色**——专门画"立场色 chip"在结论节点的标题旁边（不是整卡片左缘），只标立场词（支持/反驳/部分/不确定），其他 tag 走浅底色 chip
@@ -217,7 +217,7 @@ function applyStanceToTag(tag, stanceValue) {
 - goal→goal: 绿 0.3
 - goal→experiment: 绿 0.3（与 goal 节点同色，因为是父 goal 的延伸）
 - experiment→conclusion: 蓝 0.3
-- free_attach 边：虚线 `border-left-style: dashed`
+- ~~free_attach 边：虚线~~ —— **2026-09-18 取消**（无自由挂载边，一律按父类型实线着色）
 
 ### 4. 折叠（默认全展开）
 
@@ -297,7 +297,7 @@ ROOT → 🧪 BLI 实验 → ✓ 结论            ← breadcrumb
 
 **不破坏**：
 - 后端 `/api/research/nodes` 返 `research.build_trees()`（森林 + 嵌套 children）—— 旧/新通用
-- 模型层 `research_nodes` 表 + `WHITELIST` + `free_attach` —— 不动
+- 模型层 `research_nodes` 表 + 结构校验 —— 不动（`WHITELIST` 与 `free_attach` 已于 2026-09-18 删除，见 CLAUDE.md 版本路线）
 - MCP `list_research_trees` / `get_research_node` —— 不动
 - 选中态 / 详情面板 API —— 不动
 

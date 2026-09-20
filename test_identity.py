@@ -160,4 +160,53 @@ text = json.loads(mcp_body["result"]["content"][0]["text"])
 assert text["ok"] is True
 print("12. MCP compare_experiments read-only OK")
 
+# ── 13. is_loadable：可载入判定的唯一源（详情页 CTA 与档案列表共用）──
+# 逐字还原原 experiment_detail.html 内联判定的语义；下面每条边界都是刻意保守，
+# 放宽任何一条都会让「载入计算工具」出现在载不动的实验上。
+_IL = identity.is_loadable
+
+# 13a. 分析型 raw 白名单 → True（BLI/AKTA/酶活三端）
+assert _IL({"params": {}}, ["bli_curves"]) is True
+assert _IL({"params": {}}, ["akta_traces"]) is True
+assert _IL({"params": {}}, ["enzyme_traces"]) is True
+# 白名单外（data_type 是开放集，库里就有 test_trace 这类非分析快照）→ False
+assert _IL({"params": {}}, ["test_trace"]) is False
+assert _IL({"params": {}}, ["bli_curves", "test_trace"]) is True
+
+# 13b. 酶活靠 wells；空容器不算
+assert _IL({"params": {"calc_type": "enzyme", "wells": {"A1": {"name": "WT"}}}}) is True
+assert _IL({"params": {"calc_type": "enzyme", "wells": {}}}) is False
+# 13c. 浓度/稀释靠 proteins；空列表不算
+assert _IL({"params": {"calc_type": "concentration", "proteins": [{"name": "WT"}]}}) is True
+assert _IL({"params": {"calc_type": "concentration", "proteins": []}}) is False
+assert _IL({"params": {"calc_type": "dilution", "proteins": [{"name": "WT"}]}}) is True
+# 三端各自认自己的槽位，不串台
+assert _IL({"params": {"calc_type": "concentration", "wells": {"A1": {}}}}) is False
+assert _IL({"params": {"calc_type": "enzyme", "proteins": [{"name": "WT"}]}}) is False
+
+# 13d. 纯记录 / weblogo → False（原模板也不认 weblogo，即便有 sequences）
+assert _IL({"exp_type": "其他", "params": {"k": "v"}, "results": {}}) is False
+assert _IL({"params": {"calc_type": "weblogo", "sequences": ["ACDE"]}}) is False
+
+# 13e. **核心保守点**：不给 exp_type 兜底推断。
+# 这条实验会被 infer_calc_type 判成 bli_fit，但 params 里什么都没有 → 必须 False。
+assert identity.infer_calc_type(
+    {"exp_type": "BLI", "params": {}, "results": {"samples": {}}}) == "bli_fit"
+assert _IL({"exp_type": "BLI", "params": {}, "results": {"samples": {"WT": {}}}}) is False
+
+# 13f. 不认别名（证明没走 normalize_calc_type）
+assert identity.normalize_calc_type("conc") == "concentration"
+assert _IL({"params": {"calc_type": "conc", "proteins": [{"name": "WT"}]}}) is False
+assert _IL({"params": {"calc_type": "bli", "wells": {"A1": {}}}}) is False
+
+# 13g. 历史双重编码：params 是 JSON 字符串也要正确解包
+assert _IL({"params": '{"calc_type": "enzyme", "wells": {"A1": {}}}'}) is True
+assert _IL({"params": '{"calc_type": "enzyme", "wells": {}}'}) is False
+assert _IL({"params": "not json", "wells": {"A1": {}}}) is False
+
+# 13h. 空/None 输入不炸
+assert _IL(None) is False
+assert _IL({}) is False
+print("13. is_loadable 判定边界 OK")
+
 print("\nAll identity/compare tests passed.")

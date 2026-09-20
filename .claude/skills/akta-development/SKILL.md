@@ -5,7 +5,7 @@ description: 维护和扩展 protein_lab 的 AKTA 分析模块（akta.py + /api/
 
 # AKTA 分析模块开发指南
 
-protein_lab 的 AKTA 工具（v0.0.9+）从「上传 Unicorn zip → 峰图 + 峰表 → 存档」跑通到「从实验复制恢复 + 参数回填 + 多样品导出」。沉淀了格式逆向、数据契约与多入口一致性的经验。改这个模块前先读本指南 + [akta.py](../../../akta.py) 实际代码。
+protein_lab 的 AKTA 工具（v0.0.9+）从「上传 Unicorn zip → 峰图 + 峰表 → 存档」跑通到「载入计算工具恢复 + 参数回填 + 多样品导出」。沉淀了格式逆向、数据契约与多入口一致性的经验。改这个模块前先读本指南 + [akta.py](../../../akta.py) 实际代码。
 
 > 姊妹模块 [bli-development](../bli-development/SKILL.md)（BLI 分析）走同一套契约与模式，两端点/会话/判别字段/复制恢复/回填/下载镜像对称。改一侧要评估另一侧。
 >
@@ -35,7 +35,7 @@ test_akta.py  fixtures/ 两个真实 zip 回归
 
 ## 数据契约（改动前必须对齐的横切字段）
 
-1. **`calc_type:"akta"` 必须写入 params**——它是详情页渲染、从实验复制、导出的统一判别字段。写入端漏了它，读端所有分支静默失效（详见陷阱 #1）。
+1. **`calc_type:"akta"` 必须写入 params**——它是详情页渲染、载入计算工具、导出的统一判别字段。写入端漏了它，读端所有分支静默失效（详见陷阱 #1）。
 2. **results 恒带 `AKTA_ANALYSIS_VERSION`**（规则 #3：分析结果必须记录版本）。
 3. **raw → `experiment_raw` `data_type=akta_traces`，只写一次**（规则 #2/#5）。payload 形状：`{analysis_version, params, channel: ch.to_dict(full=True), events, meta}`——注意**只存当前选中通道**的完整 vols/amps，多通道会话存档会丢其他通道（已知取舍，暂够用）。
 4. **复制 = 从快照 restore，不重新解析 zip**（规则 #8 可复现）：`GET /api/experiments/<eid>` 附 `_raw_ids` → `GET .../raw/<rid>` 拉 payload → `POST /api/akta/restore` 重建会话。restore 返回形状与 analyze 单 run 一致（`{session_id, runs:[{name, session_id, channels, uv_channels, events, meta}]}`），前端可直接塞进 `aktaRuns`。

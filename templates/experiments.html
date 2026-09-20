@@ -13,6 +13,11 @@
 </div>
 
 <div class="toolbar">
+  <!-- 主操作放前面：关键词在客户端过滤（标题/关联蛋白），类型走后端 calc_type，两者 AND。
+       用 type="text"（不是 search）与蛋白库一致，避开浏览器原生清除按钮破主题。
+       .toolbar input 已有 min-width:200px; flex:1，零 CSS 改动，窄屏自动堆叠。 -->
+  <input type="text" id="expSearchInput" data-i18n-placeholder="archive.search_exp"
+         placeholder="Search title or protein…" oninput="filterExpList()" autocomplete="off">
   <select id="expTypeFilter" data-calc-types onchange="loadExperiments()">
     <option value="" data-i18n-option="archive.all_types">All types</option>
     {% for t in calc_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
@@ -36,6 +41,7 @@
       <th style="width:120px" data-i18n="archive.col_type">Type</th>
       <th data-i18n="archive.col_protein">Proteins</th>
       <th data-i18n="archive.col_notes">Notes</th>
+      <th></th>
       <th></th>
       <th></th>
     </tr>

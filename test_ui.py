@@ -111,20 +111,27 @@ for _id in ("proteinTable", "proteinList", "searchBox", "detailPanel", "addModal
     assert f'id="{_id}"' in proteins, f"proteins missing #{_id}"
 
 calc = client.get("/calculator").get_data(as_text=True)
-for tab in ("conc", "dilution", "bli", "akta", "weblogo", "enzyme", "copy"):
+for tab in ("conc", "dilution", "bli", "akta", "weblogo", "enzyme"):
     assert f'data-tab="{tab}"' in calc, f"missing tool {tab}"
     assert f'id="tab-{tab}"' in calc
+# 「从实验复制」tab 已删（浏览+载入收口到实验档案页），Reuse 组只剩空壳也一并删掉
+assert 'data-tab="copy"' not in calc, "copy tab 应已删除"
+assert 'id="tab-copy"' not in calc, "tab-copy 面板应已删除"
+assert 'data-i18n="workbench.group.reuse"' not in calc, "Reuse 空壳组应已删除"
 assert 'data-i18n="workbench.group.prepare"' in calc
 assert 'data-i18n="workbench.group.analyze"' in calc
 assert 'data-i18n="workbench.group.sequence"' in calc
-assert 'data-i18n="workbench.group.reuse"' in calc
 assert 'class="advanced"' in calc or "<details" in calc
 
 exps = client.get("/experiments").get_data(as_text=True)
-for _id in ("expTable", "expList", "expTypeFilter", "exportBtn", "expModal"):
+for _id in ("expTable", "expList", "expTypeFilter", "exportBtn", "expModal", "expSearchInput"):
     assert f'id="{_id}"' in exps, f"archive missing #{_id}"
 for t in models.EXP_TYPES:
     assert f'<option value="{t}">' in exps, f"exp_type option missing {t}"
+# 档案页第 9 列（详情入口）——表头数与错误行 colspan 必须跟着走，否则列错位
+# 用 <th[ >] 而非 <th，否则会把 <thead> 也算进来
+_nth = len(re.findall(r"<th[ >]", exps))
+assert _nth == 9, f"expTable 应有 9 列表头，实际 {_nth}"
 
 eid = services.create_experiment(title="UI detail", exp_type="其他", params={"k": "v"}, results={})["id"]
 detail = client.get(f"/experiments/{eid}").get_data(as_text=True)
@@ -166,10 +173,23 @@ print("8. static version includes i18n.js OK")
 # ── 9. Layout / i18n wiring / dialog cancel ───────────
 assert 'id="weblogoSearch"' in calc, "Weblogo search input missing"
 assert "stack-on-narrow" in calc
-assert 'id="copySearchInput"' in calc
+assert 'id="copySearchInput"' not in calc, "copy tab 的搜索框应随 tab 一起删除"
+assert 'id="expSearchInput"' in exps, "档案页应接管搜索（原 copy tab 的唯一搜索入口）"
 appjs = (STATIC / "app.js").read_text(encoding="utf-8")
 for banned in ("全部标签", "全部蛋白", "新建实验", "计划占位（未归档）"):
     assert banned not in appjs, f"hardcoded UI string still in app.js: {banned}"
+# 载入链路：档案页标题深链到计算器，由 applyCopyAndSwitch（载入引擎）消费
+assert "load_exp=" in appjs, "档案页标题应深链 /calculator?load_exp=<id>"
+assert "function applyCopyAndSwitch(" in appjs, "载入引擎不该被删"
+assert "function isAktaExp(" in appjs and "function isBliExp(" in appjs, \
+    "is*Exp 定义在被删区间内，必须挖出来（applyCopyAndSwitch 仍在调）"
+assert "function latestRawId(" in appjs and "function safeJson(" in appjs
+# 档案页列表重构后的三个函数必须都在（搜索过滤是纯客户端）
+for fn in ("function expMatchesQuery(", "function filterExpList(", "function renderExpList("):
+    assert fn in appjs, f"档案页缺少 {fn}"
+assert "let expAllExps = []" in appjs and "EXP_LIST_LIMIT" in appjs
+assert 'colspan="9"' in appjs, "错误行/空态行的 colspan 应同步为 9（表格加了第 9 列）"
+assert "archive.search_capped" in appjs, "搜索上限（仅最近 100 条）应有可见提示"
 assert "recordCheckedIds" in appjs
 assert "syncRecordCheck" in appjs
 assert "archive.confirm_delete_named" in appjs

@@ -331,7 +331,7 @@ TOOLS = [
     },
     {
         "name": "save_conclusion",
-        "description": "在研究脉络中新增结论节点（conclusion）。白名单：结论只能挂在实验节点下（experiment→conclusion），直接挂目标需 free_attach 逃生舱。parent_id（研究节点 id）与 exp_id（实验 id，自动解析到其研究节点，多目标挂载时每个节点各建一条结论）二选一必填。tag 标立场（支持/反驳/部分/不确定，可逗号混普通标签）。supporting_exp_ids（v0.1.3）为额外支撑实验旁路引用（多实验→一结论），树父实验仍是主证据",
+        "description": "在研究脉络中新增结论节点（conclusion）。挂载类型不设约束（2026-09-18 起）：可挂任何父节点下（含直接挂目标）。parent_id（研究节点 id）与 exp_id（实验 id，自动解析到其研究节点，多目标挂载时每个节点各建一条结论）二选一必填。tag 标立场（支持/反驳/部分/不确定，可逗号混普通标签）。supporting_exp_ids（v0.1.3）为额外支撑实验旁路引用（多实验→一结论），树父实验仍是主证据",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -341,7 +341,6 @@ TOOLS = [
                 "parent_id": {"type": "integer", "description": "父研究节点 id（通常为 experiment 节点），与 exp_id 二选一必填"},
                 "exp_id": {"type": "integer", "description": "实验 id，自动解析到其研究节点（可能多个），与 parent_id 二选一必填"},
                 "supporting_exp_ids": {"type": "array", "items": {"type": "integer"}, "description": "额外支撑实验 id 列表（旁路引用，树父实验以外的支撑实验）"},
-                "free_attach": {"type": "boolean", "description": "逃生舱：打破白名单边，默认 false"}
             },
             "required": ["title"]
         }
@@ -595,7 +594,6 @@ def handle_tools_call(id_, params):
                 nid, err = research.create_node(
                     node_type="conclusion", title=args["title"],
                     detail=args.get("detail", ""), parent_id=pid, tag=args.get("tag", ""),
-                    free_attach=bool(args.get("free_attach", False)),
                     supporting_exp_ids=args.get("supporting_exp_ids"))
                 if err:
                     raise ValueError(f"{tool_name}: {err}")

@@ -196,13 +196,13 @@ def _attach_goal_node(exp_id: int, exp_title: str,
             raise ValueError("新建目标标题不能为空")
         ng_tag = (new_goal.get("tag") or "").strip()
         nid, err = research.create_node(
-            node_type="goal", title=ng_title, tag=ng_tag, free_attach=False)
+            node_type="goal", title=ng_title, tag=ng_tag)
         if not nid:
             raise ValueError(f"创建 goal 节点失败: {err}")
         parent_id = nid
     enid, err = research.create_node(
         node_type="experiment", title=exp_title, exp_id=exp_id,
-        parent_id=parent_id, free_attach=False)
+        parent_id=parent_id)
     if not enid:
         # new_goal 路径下回滚第一步建的根 goal（避免孤儿根 goal 节点）
         if not goal_id and parent_id:

@@ -618,7 +618,7 @@ async function restoreCalcState() {
 //  Calculator Page — Tab switching
 // ═════════════════════════════════════════════════════
 
-const TOOL_IDS = ["conc", "dilution", "bli", "akta", "weblogo", "enzyme", "copy"];
+const TOOL_IDS = ["conc", "dilution", "bli", "akta", "weblogo", "enzyme"];
 
 function activateTool(tabId, opts) {
   if (!TOOL_IDS.includes(tabId)) return;
@@ -629,7 +629,6 @@ function activateTool(tabId, opts) {
   tab.classList.add("active");
   const panel = document.getElementById("tab-" + tabId);
   if (panel) panel.classList.remove("hidden");
-  if (tabId === "copy") loadCopyExpList();
   if (tabId === "dilution") loadBliImportExps();
   if (tabId === "weblogo") { loadWeblogoProteins(); restoreWeblogo(); }
   if (tabId === "enzyme") loadEnzymeProteinList();
@@ -672,7 +671,7 @@ let selectedProteins = {};  // { id: { name, mw, ext_ox, abs_0_1pct, ... } }
 let concUnit = localStorage.getItem("concUnit") || "uM";  // 浓度结果显示单位（6 单位之一）
 let dilUnit = localStorage.getItem("dilUnit") || "uM";    // BLI 稀释步骤浓度显示单位
 let allProteins = [];
-let copyCache = null;       // cached experiment data for copy tab
+let copyCache = null;       // 待载入计算工具的实验（档案页/详情页深链写入）
 let calcTagFilter = [];     // 计算工具标签筛选
 let weblogoTagFilter = [];  // Weblogo 标签筛选
 
@@ -1246,44 +1245,24 @@ async function saveBliTable() {
   } catch (err) { toast(err, true); }
 }
 
-// ═════════════════════════════════════════════════════
-//  Tab 3: Copy from experiment
-// ═════════════════════════════════════════════════════
-//  Tab 5: 从实验复制 (卡片式 UI)
-// ═════════════════════════════════════════════════════
 
-let copyAllExps = [];
-let copyTypeFilter = "all";
+// helper: safe JSON parse
+function safeJson(s) {
+  try { return JSON.parse(s); } catch (_) { return {}; }
+}
 
-const COPY_TYPE_META = {
-  "浓度测定": { css: "conc", labelKey: "workbench.tab.conc" },
-  "BLI 浓度梯度": { css: "dilution", labelKey: "workbench.tab.dilution" },
-  "BLI 分析": { css: "bli", labelKey: "workbench.tab.bli" },
-  "酶活测定": { css: "enzyme", labelKey: "workbench.tab.enzyme" },
-  "Weblogo": { css: "weblogo", labelKey: "workbench.tab.weblogo" },
-  "AKTA": { css: "akta", labelKey: "workbench.tab.akta" },
-};
-
-function copyExpTypeInfo(e) {
-  const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
-  const calcType = params.calc_type || "";
-  let meta = null;
-  if (calcType === "concentration") meta = COPY_TYPE_META["浓度测定"];
-  else if (calcType === "dilution") meta = COPY_TYPE_META["BLI 浓度梯度"];
-  else if (calcType === "enzyme") meta = COPY_TYPE_META["酶活测定"];
-  else if (calcType === "weblogo") meta = COPY_TYPE_META["Weblogo"];
-  else if (calcType === "akta") meta = COPY_TYPE_META["AKTA"];
-  else if (calcType === "bli_fit") meta = COPY_TYPE_META["BLI 分析"];
-  else if (isBliExp(e)) meta = COPY_TYPE_META["BLI 分析"];
-  else {
-    for (const [key, m] of Object.entries(COPY_TYPE_META)) {
-      if ((e.exp_type || "").includes(key.replace("测定", "").replace("浓度梯度", ""))) {
-        meta = m; break;
-      }
-    }
+// 取实验**最新**一条原始快照 id（_raws 按 id 升序 = 创建序，最后一条=最近一次分析）。
+// 多次重挂/重分析后应载入最新状态（旧快照保留可复现，但计算入口看当前）。
+// dataType 给定时优先取该类型的最新一条——重挂可能往同一实验追加别的类型的 raw
+// （如酶活实验被 BLI 分析重挂），直接取整体最后一条会拿到类型不符的 payload。
+function latestRawId(exp, dataType) {
+  const raws = (exp && exp._raws) || [];
+  if (raws.length) {
+    const pool = dataType ? raws.filter(r => (r.data_type || "") === dataType) : raws;
+    return (pool.length ? pool : raws).slice(-1)[0].id;
   }
-  if (!meta) return { css: "other", label: t("copy.filter.other") };
-  return { css: meta.css, label: t(meta.labelKey) };
+  const ids = (exp && exp._raw_ids) || [];   // 兼容无 _raws 的旧响应
+  return ids[ids.length - 1];
 }
 
 // AKTA 判定：新存档靠 params.calc_type=="akta"，旧存档（v0.0.9 早期无 calc_type）靠 exp_type 兜底
@@ -1303,150 +1282,6 @@ function isBliExp(e) {
     return !!(results && results.samples);
   }
   return false;
-}
-
-async function loadCopyExpList() {
-  if (copyAllExps.length) { renderCopyExpList(); return; }
-  try {
-    copyAllExps = await API.get("/api/experiments?limit=100");
-    renderCopyExpList();
-    renderCopyTypeTags();
-  } catch (err) { document.getElementById("copyExpList").innerHTML = '<p style="color:var(--graphite);text-align:center;padding:40px">' + t("copy.load_failed") + '</p>'; }
-}
-
-function renderCopyTypeTags() {
-  const counts = { all: copyAllExps.length };
-  for (const e of copyAllExps) {
-    const info = copyExpTypeInfo(e);
-    counts[info.css] = (counts[info.css] || 0) + 1;
-  }
-  const tags = [
-    { key: "all", labelKey: "copy.filter.all" },
-    { key: "conc", labelKey: "copy.filter.conc" },
-    { key: "dilution", labelKey: "copy.filter.dilution" },
-    { key: "bli", labelKey: "copy.filter.bli" },
-    { key: "enzyme", labelKey: "copy.filter.enzyme" },
-    { key: "weblogo", labelKey: "copy.filter.weblogo" },
-    { key: "akta", labelKey: "copy.filter.akta" },
-    { key: "other", labelKey: "copy.filter.other" },
-  ].filter(tag => counts[tag.key]);
-  document.getElementById("copyTypeTags").innerHTML = tags.map(tag =>
-    `<span class="copy-type-tag ${tag.key}${copyTypeFilter === tag.key ? ' active' : ''}"
-          onclick="copyTypeFilter='${tag.key}';renderCopyTypeTags();renderCopyExpList()">
-      ${t(tag.labelKey)} <span style="opacity:.6">${counts[tag.key]}</span>
-    </span>`
-  ).join("");
-}
-
-function filterCopyExps() { renderCopyExpList(); }
-
-function renderCopyExpList() {
-  const container = document.getElementById("copyExpList");
-  const q = (document.getElementById("copySearchInput")?.value || "").trim().toLowerCase();
-  let exps = copyAllExps;
-  if (copyTypeFilter !== "all") {
-    exps = exps.filter(e => copyExpTypeInfo(e).css === copyTypeFilter);
-  }
-  if (q) {
-    exps = exps.filter(e => (e.title || "").toLowerCase().includes(q) || (e.protein_names || "").toLowerCase().includes(q));
-  }
-  if (!exps.length) {
-    container.innerHTML = '<p style="color:var(--graphite);font-size:13px;text-align:center;padding:40px">' + t("ui.no_matching_exp") + '</p>';
-    return;
-  }
-  container.innerHTML = exps.map(e => {
-    const ti = copyExpTypeInfo(e);
-    const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
-    const proteins = params.proteins || [];
-    const wells = params.wells || params.well_info || {};
-    let detail = "";
-    if (params.calc_type === "enzyme") {
-      detail = t("copy.wells_n", { n: Object.keys(wells).length }) + " | " + (params.meta?.sample || "");
-    } else if (isAktaExp(e)) {
-      detail = t("copy.channel", { ch: params.channel || "?" }) + " | " + (params.source || t("ui.archived"));
-    } else if (isBliExp(e)) {
-      const results = typeof e.results === "string" ? safeJson(e.results) : e.results || {};
-      const nSamples = results.samples ? Object.keys(results.samples).length : 0;
-      detail = t("copy.samples_n", { n: nSamples }) + " | " + (params.source || t("ui.archived"));
-    } else if (proteins.length) {
-      detail = t("copy.proteins_n", { n: proteins.length }) + " | " + proteins.map(p => p.name).join(", ");
-    } else {
-      detail = e.protein_names || t("copy.no_protein");
-    }
-    return `<div class="copy-card" onclick="selectCopyExp(${e.id})" id="copy-card-${e.id}">
-      <div class="copy-type-badge ${ti.css}">${esc(ti.label)}</div>
-      <div class="copy-card-body">
-        <div class="copy-card-title">${esc(e.title)}</div>
-        <div class="copy-card-sub">${e.date || ""} · ${ti.label} · ${esc(detail)}</div>
-      </div>
-    </div>`;
-  }).join("");
-}
-
-async function selectCopyExp(eid) {
-  document.querySelectorAll(".copy-card").forEach(c => c.classList.remove("active"));
-  document.getElementById("copy-card-" + eid)?.classList.add("active");
-  try {
-    const e = await API.get(`/api/experiments/${eid}`);
-    copyCache = e;
-    const ti = copyExpTypeInfo(e);
-    const params = typeof e.params === "string" ? safeJson(e.params) : e.params || {};
-    const calcType = params.calc_type || "";
-    let detailHtml = "";
-    const proteins = params.proteins || [];
-    const wells = params.wells || params.well_info || {};
-
-    if (calcType === "concentration" && proteins.length) {
-      detailHtml = `<b>${t("copy.proteins_n", { n: proteins.length })}</b><br>` +
-        proteins.map(p => `· ${esc(p.name)}: A₂₈₀=${p.a280 ?? "?"}, ${p.conc_uM ?? "?"} μM`).join("<br>");
-    } else if (calcType === "dilution" && proteins.length) {
-      detailHtml = `<b>${t("copy.proteins_n", { n: proteins.length })}</b><br>` +
-        proteins.map(p => `· ${esc(p.name)}: ${t("workbench.dil_summary", { c: p.stock_uM, s: p.start_uM, f: p.factor, n: p.steps })}`).join("<br>");
-    } else if (calcType === "enzyme") {
-      const withData = Object.entries(wells).filter(([_, w]) => w.fit || w.od_range);
-      detailHtml = `<b>${t("copy.wells_n", { n: Object.keys(wells).length })}</b> (${withData.length})<br>` +
-        `${params.meta?.sample || ""} | ${params.meta?.wavelength || "?"} nm`;
-    } else if (calcType === "weblogo") {
-      detailHtml = `<b>${t("detail.seq_n", { n: proteins.length })}</b> | ${params.positions || "?"} `;
-    } else if (isAktaExp(e)) {
-      detailHtml = `<b>${t("copy.channel", { ch: params.channel || "?" })}</b>` +
-        (params.source ? ` | ${esc(params.source)}` : "") +
-        (params.xmin || params.xmax ? ` | ${params.xmin ?? 0}–${params.xmax ?? "∞"} mL` : "");
-    } else if (isBliExp(e)) {
-      const results = typeof e.results === "string" ? safeJson(e.results) : e.results || {};
-      const nSamples = results.samples ? Object.keys(results.samples).length : 0;
-      detailHtml = `<b>${t("copy.samples_n", { n: nSamples })}</b>` +
-        (params.source ? ` | ${esc(params.source)}` : "");
-    } else {
-      detailHtml = `${e.protein_names || t("detail.no_protein")} | ${e.notes || "—"}`;
-    }
-
-    const targetLabel = ti.label;
-
-    document.getElementById("copyPreviewTitle").textContent = e.title;
-    document.getElementById("copyPreviewMeta").innerHTML = `<span class="copy-type-tag ${ti.css}">${esc(ti.label)}</span> ${e.date || ""} → <b>${targetLabel}</b>`;
-    document.getElementById("copyPreviewDetail").innerHTML = detailHtml;
-    document.getElementById("copyPreview").classList.remove("hidden");
-  } catch (err) { toast(err, true); }
-}
-
-// helper: safe JSON parse
-function safeJson(s) {
-  try { return JSON.parse(s); } catch (_) { return {}; }
-}
-
-// 取实验**最新**一条原始快照 id（_raws 按 id 升序 = 创建序，最后一条=最近一次分析）。
-// 多次重挂/重分析后应载入最新状态（旧快照保留可复现，但计算入口看当前）。
-// dataType 给定时优先取该类型的最新一条——重挂可能往同一实验追加别的类型的 raw
-// （如酶活实验被 BLI 分析重挂），直接取整体最后一条会拿到类型不符的 payload。
-function latestRawId(exp, dataType) {
-  const raws = (exp && exp._raws) || [];
-  if (raws.length) {
-    const pool = dataType ? raws.filter(r => (r.data_type || "") === dataType) : raws;
-    return (pool.length ? pool : raws).slice(-1)[0].id;
-  }
-  const ids = (exp && exp._raw_ids) || [];   // 兼容无 _raws 的旧响应
-  return ids[ids.length - 1];
 }
 
 async function applyCopyAndSwitch() {
@@ -1652,7 +1487,7 @@ async function applyCopyAndSwitch() {
 }
 
 // 详情页「载入计算工具」深链：/calculator?load_exp=<id> → 把该实验载入对应计算 tab
-// （复用从实验复制的 applyCopyAndSwitch：BLI/AKTA 读最新 raw 快照重建会话，酶活/浓度读 params 重建）
+// （复用载入引擎 applyCopyAndSwitch：BLI/AKTA 读最新 raw 快照重建会话，酶活/浓度读 params 重建）
 async function loadExpIntoCalc(expId) {
   try {
     const exp = await API.get(`/api/experiments/${expId}`);
@@ -1666,59 +1501,121 @@ async function loadExpIntoCalc(expId) {
 //  Experiments Page
 // ═════════════════════════════════════════════════════
 
+// ── 实验档案列表：拉取 → 客户端关键词过滤 → 桌面表 / 移动卡双渲染 ─
+// 原「从实验复制」tab 已删，这里成为**唯一**的实验浏览 + 载入面：
+// 可载入的行（_loadable，见 identity.is_loadable）标题直接深链到计算器，
+// 不可载入的（纯记录 / weblogo）回落详情页。
+let expAllExps = [];
+// limit=100：原 copy tab 搜的就是最近 100 条，档案页默认 50 会让搜索覆盖面静默缩水一半。
+// 两条副作用都接受了：① models.exp_list 的 calc_type 分支会放大到 max(limit*20, 500)
+// 再 Python 过滤切片，limit=100 → 取 2000 行；② 一次重绘 100 行（无虚拟滚动，与原 tab 的
+// 100 张卡片同量级）。真到顶了在表尾显式提示（archive.search_capped），不静默少给。
+const EXP_LIST_LIMIT = 100;
+
 async function loadExperiments() {
   const tbody = document.querySelector("#expTable tbody");
   if (!tbody) return;
   updateExportLink();
   try {
     const type = document.getElementById("expTypeFilter")?.value || "";
-    const qs = type ? `calc_type=${encodeURIComponent(type)}` : "";
-    const exps = await API.get(`/api/experiments?${qs}`);
-    tbody.innerHTML = exps.map(e => {
-      // 关联蛋白只显示第一个，hover 显示完整列表
-      const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
-      const pcell = pnames.length
-        ? `<span title="${esc(e.protein_names)}">${esc(pnames[0])}${pnames.length > 1 ? t("archive.and_more", { n: pnames.length - 1 }) : ""}</span>`
-        : "-";
-      const typeLabel = (window.BigoI18n && BigoI18n.calcTypeLabel && e.calc_type)
-        ? BigoI18n.calcTypeLabel(e.calc_type)
-        : ((window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type);
-      return `
+    const qs = type ? `calc_type=${encodeURIComponent(type)}&` : "";
+    expAllExps = await API.get(`/api/experiments?${qs}limit=${EXP_LIST_LIMIT}`);
+    renderExpList();
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px">${t("error.load_failed")}: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+// 关键词匹配：标题或关联蛋白名子串（小写化）。原样移植自被删的 copy tab，语义不变。
+// 已知边界：protein_names 来自人工关联表而非存档 params，所以「忘了关联蛋白」的实验搜不到。
+function expMatchesQuery(e, q) {
+  return `${e.title || ""} ${e.protein_names || ""}`.toLowerCase().includes(q);
+}
+
+function filterExpList() { renderExpList(); }
+
+function renderExpList() {
+  const tbody = document.querySelector("#expTable tbody");
+  if (!tbody) return;
+  const q = (document.getElementById("expSearchInput")?.value || "").trim().toLowerCase();
+  // 重绘会重建每一行的复选框 → 先记下当前勾选，渲染后回填。
+  // 否则「勾两行 → 搜索把某行滤掉 → 清空搜索」勾选就静默丢了。
+  const checked = new Set(recordCheckedIds("exp-check"));
+  const exps = q ? expAllExps.filter(e => expMatchesQuery(e, q)) : expAllExps;
+
+  if (!exps.length) {
+    const empty = `<p style="color:var(--graphite);font-size:13px;text-align:center;padding:40px">${t("ui.no_matching_exp")}</p>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--graphite)">${t("ui.no_matching_exp")}</td></tr>`;
+    const list0 = document.getElementById("expList");
+    if (list0) list0.innerHTML = empty;
+    updateExpBulkBar();
+    return;
+  }
+
+  const firstPage = exps.length;   // 供上限提示判断
+  tbody.innerHTML = exps.map(e => {
+    // 关联蛋白只显示第一个，hover 显示完整列表
+    const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
+    const pcell = pnames.length
+      ? `<span title="${esc(e.protein_names)}">${esc(pnames[0])}${pnames.length > 1 ? t("archive.and_more", { n: pnames.length - 1 }) : ""}</span>`
+      : "-";
+    const typeLabel = (window.BigoI18n && BigoI18n.calcTypeLabel && e.calc_type)
+      ? BigoI18n.calcTypeLabel(e.calc_type)
+      : ((window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type);
+    // 可载入 → 直接进计算器（深链，由 calculator 页的 loadExpIntoCalc 消费）；
+    // 不可载入 → 详情页。纯 href 切换、零 JS：档案页没有计算器 DOM，
+    // applyCopyAndSwitch 会去点 .tab-btn 而 null 崩，所以必须站内导航。
+    const href = e.loadable ? `/calculator?load_exp=${e.id}` : `/experiments/${e.id}`;
+    const titleAttr = e.loadable ? ` title="${esc(t("detail.load_tool"))}"` : "";
+    // 详情图标只在可载入行出现（其余行的标题已经指向详情），列本身保留占位以对齐
+    const detailCell = e.loadable
+      ? `<a class="btn btn-sm btn-icon" href="/experiments/${e.id}" title="${esc(t("common.details"))}" aria-label="${esc(t("common.details"))}">
+           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+         </a>`
+      : "";
+    return `
       <tr>
-        <td><input type="checkbox" class="exp-check" value="${e.id}" onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></td>
+        <td><input type="checkbox" class="exp-check" value="${e.id}"${checked.has(String(e.id)) ? " checked" : ""} onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></td>
         <td class="exp-date">${e.date || "-"}</td>
-        <td><a href="/experiments/${e.id}">${esc(e.title)}</a></td>
+        <td><a href="${href}"${titleAttr}>${esc(e.title)}</a></td>
         <td class="exp-type"><span class="badge">${esc(typeLabel)}</span></td>
         <td>${pcell}</td>
         <td>${esc((e.notes || "").substring(0, 40))}</td>
         <td><button class="btn btn-sm btn-danger" data-action="delete-exp" data-id="${e.id}" data-name="${escAttr(e.title)}">${t("common.delete")}</button></td>
         <td><a class="btn btn-sm btn-outline" href="/api/experiments/${e.id}/export" title="${esc(t("archive.export_one"))}">${t("common.export")}</a></td>
+        <td>${detailCell}</td>
       </tr>
     `;
-    }).join("");
-    const list = document.getElementById("expList");
-    if (list) {
-      list.innerHTML = exps.map(e => {
-        const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
-        const typeLabel = (window.BigoI18n && BigoI18n.calcTypeLabel && e.calc_type)
-          ? BigoI18n.calcTypeLabel(e.calc_type)
-          : ((window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type);
-        return `<article class="record-card">
-          <div class="record-card-head">
-            <label class="record-select"><input type="checkbox" class="exp-check" value="${e.id}" onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></label>
-            <h3><a href="/experiments/${e.id}">${esc(e.title)}</a></h3>
-          </div>
-          <dl>
-            <dt>${t("archive.col_date")}</dt><dd>${esc(e.date || "-")}</dd>
-            <dt>${t("archive.col_type")}</dt><dd>${esc(typeLabel)}</dd>
-            <dt>${t("archive.col_protein")}</dt><dd>${esc(pnames[0] || "-")}${pnames.length > 1 ? t("archive.and_more", { n: pnames.length - 1 }) : ""}</dd>
-          </dl>
-        </article>`;
-      }).join("");
-    }
-  } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px">${t("error.load_failed")}: ${esc(err.message)}</td></tr>`;
+  }).join("");
+
+  // 搜索只覆盖最近 EXP_LIST_LIMIT 条——到顶了就明说，别让人以为「搜不到 = 不存在」
+  if (firstPage >= EXP_LIST_LIMIT) {
+    tbody.innerHTML += `<tr><td colspan="9" style="text-align:center;padding:10px;color:var(--graphite);font-size:12px">${t("archive.search_capped")}</td></tr>`;
   }
+
+  const list = document.getElementById("expList");
+  if (list) {
+    list.innerHTML = exps.map(e => {
+      const pnames = (e.protein_names || "").split(",").map(s => s.trim()).filter(Boolean);
+      const typeLabel = (window.BigoI18n && BigoI18n.calcTypeLabel && e.calc_type)
+        ? BigoI18n.calcTypeLabel(e.calc_type)
+        : ((window.BigoI18n && BigoI18n.expTypeLabel) ? BigoI18n.expTypeLabel(e.exp_type) : e.exp_type);
+      const href = e.loadable ? `/calculator?load_exp=${e.id}` : `/experiments/${e.id}`;
+      return `<article class="record-card">
+        <div class="record-card-head">
+          <label class="record-select"><input type="checkbox" class="exp-check" value="${e.id}"${checked.has(String(e.id)) ? " checked" : ""} onchange="syncRecordCheck(this, 'exp-check'); updateExpBulkBar()"></label>
+          <h3><a href="${href}"${e.loadable ? ` title="${esc(t("detail.load_tool"))}"` : ""}>${esc(e.title)}</a></h3>
+        </div>
+        <dl>
+          <dt>${t("archive.col_date")}</dt><dd>${esc(e.date || "-")}</dd>
+          <dt>${t("archive.col_type")}</dt><dd>${esc(typeLabel)}</dd>
+          <dt>${t("archive.col_protein")}</dt><dd>${esc(pnames[0] || "-")}${pnames.length > 1 ? t("archive.and_more", { n: pnames.length - 1 }) : ""}</dd>
+        </dl>
+      </article>`;
+    }).join("");
+  }
+  // 重绘后刷新批量条：此前 loadExperiments() 从不调它，切换类型下拉后批量条会残留过期计数
+  updateExpBulkBar();
 }
 
 function showExpAddModal(prefill = null) {
@@ -2603,7 +2500,7 @@ async function downloadEnzymePlot() {
 
 // 手动处理参数快照（对称 bliParams / aktaParams）：**只收手动项，不含逐点数据**。
 // 契约规则 A：times/od 只落 experiment_raw，params 不内嵌；规则 B：这份快照原样嵌进
-// raw payload.params，是「从实验复制」回填 UI 的唯一读取源（raw 只写一次 → 天然不可变）。
+// raw payload.params，是「载入计算工具」回填 UI 的唯一读取源（raw 只写一次 → 天然不可变）。
 function enzymeParams() {
   return {
     calc_type: "enzyme",
@@ -3853,9 +3750,9 @@ function refreshAktaPlaceholder() { refreshAutoNamePlaceholders(); }
 
 // ═════════════════════════════════════════════════════
 //  研究脉络（v0.1.0）— 证据链：目标 → 实验 → 结论 → 新目标
-//  白名单边与 research.py WHITELIST 一致（此处仅前端类型预选提示，
-//  权威校验在服务端）：goal→{goal,experiment}、experiment→conclusion、
-//  conclusion→goal；勾「自由挂载」(free_attach) 逃生舱可打破任一边。
+//  挂载类型不设约束（2026-09-18 取消白名单）：任何类型可挂任何父节点，
+//  真实形态就是「筛选战役 → N 个候选结果」的同类型嵌套。
+//  服务端只留结构校验：根必须是目标 + 防环。
 // ═════════════════════════════════════════════════════
 const researchState = {
   trees: [], experiments: [], expMap: {},
@@ -3863,13 +3760,6 @@ const researchState = {
   collapsed: new Set(),   // lineflow 折叠态：▾ 按钮切换子层显隐
   view: "list", activeRootId: null,
 };
-
-function researchFirstAllowed(parentType) {
-  if (!parentType) return "goal";
-  const allowed = { goal: ["goal", "experiment"], experiment: ["conclusion"], conclusion: ["goal"] }[parentType] || [];
-  for (const t of ["goal", "experiment", "conclusion"]) if (allowed.includes(t)) return t;
-  return "goal";
-}
 
 function researchNodeMatch(node, q, tag, prot) {
   if (tag) {
@@ -3932,7 +3822,7 @@ function researchToggle(id) {
   researchRender();
 }
 
-// lineflow 配色由 CSS 变量统一管理（--lf-line-goal/experiment/conclusion/free），
+// lineflow 配色由 CSS 变量统一管理（--lf-line-goal/experiment/conclusion/observation），
 // 旧横向流程图常量 RES_FLOW / RES_FLOW_EDGE 在 v0.1.2 lineflow 替换中已删，保留此处说明。
 
 function researchRender(force) {
@@ -3998,20 +3888,18 @@ function renderEvidenceNode(node, q, tag, prot, filtering) {
   const childHtml = kids.length && !collapsed
     ? `<ul class="flow-tree">${kids.map(c => renderEvidenceNode(c, q, tag, prot, filtering)).join("")}</ul>`
     : "";
-  const freeCls = node.free_attach ? " free-attach" : "";
   const stance = node.node_type === "conclusion" ? lineflowStanceChip(node.tag) : "";
   const tags = (node.tag || "").split(",").map(s => s.trim()).filter(Boolean)
     .filter(tg => !["支持", "反驳", "部分", "不确定"].includes(tg))
     .map(tg => `<span class="lf-tag">${esc(tg)}</span>`).join("");
-  const free = node.free_attach ? `<span class="lf-free">${t("research.free")}</span>` : "";
   const collapseBtn = kids.length
     ? `<button class="lf-collapse${collapsed ? "" : " open"}" onclick="event.stopPropagation();researchToggle(${node.id})" title="${collapsed ? t("research.expand") : t("research.collapse")}"><span class="lf-tri" aria-hidden="true"></span></button>`
     : "";
-  return `<li class="flow-col${freeCls}${kids.length ? " has-children" : ""}${kids.length && collapsed ? " collapsed" : ""}">
+  return `<li class="flow-col${kids.length ? " has-children" : ""}${kids.length && collapsed ? " collapsed" : ""}">
     <div class="evidence-node evidence-node--${node.node_type}${dim}${sel}" onclick="researchSelect(${node.id})">
       <span class="evidence-title">${esc(node.title)}</span>
       <span class="evidence-type">${t("node." + node.node_type)}</span>
-      ${stance}${tags}${free}${collapseBtn}
+      ${stance}${tags}${collapseBtn}
     </div>
     ${childHtml}
   </li>`;
@@ -4204,7 +4092,6 @@ function renderResearchDetail(node) {
   document.getElementById("researchDetailContent").innerHTML = `
     <div class="res-detail-meta">
       <span class="res-badge res-badge-${node.node_type}">${t("node." + node.node_type)}</span>
-      ${node.free_attach ? `<span class="res-free">${t("research.free")}</span>` : ""}
       ${tags.map(tg => node.node_type === "conclusion" ? resTagChip(tg) : `<span class="res-tag-chip">${esc(tg)}</span>`).join("")}
       <span class="res-detail-id">#${node.id}</span>
     </div>
@@ -4237,8 +4124,8 @@ async function researchChangeStance(nodeId, stanceValue) {
   if (stanceValue) kept.push(stanceValue);
   const newTag = kept.join(",");
   try {
-    // update_node 是全量更新（白名单 + title 必填），挂立场时必须带上 node_type / title /
-    // parent_id 等 leaf 字段，否则 title="" 被 400 挡。设计：tag 是 leaf 字段，但 API
+    // update_node 是全量更新（title 必填 + 根须 goal + 防环），挂立场时必须带上 node_type /
+    // title / parent_id 等 leaf 字段，否则 title="" 被 400 挡。设计：tag 是 leaf 字段，但 API
     // 没开 PATCH 端点，前端必须传齐其他字段。
     await API.put(`/api/research/nodes/${nodeId}`, {
       tag: newTag,
@@ -4247,7 +4134,6 @@ async function researchChangeStance(nodeId, stanceValue) {
       detail: curNode.detail || "",
       parent_id: curNode.parent_id,
       exp_id: curNode.exp_id,
-      free_attach: !!curNode.free_attach,
     });
     if (sel) sel.setAttribute("data-prev", stanceValue);
     await researchLoad();
@@ -4270,7 +4156,6 @@ function researchOpenModal(mode, node, parent) {
   const tagInp = document.getElementById("researchTag");
   const expSel = document.getElementById("researchExpSel");
   const expSearch = document.getElementById("researchExpSearch");
-  const freeChk = document.getElementById("researchFreeAttach");
   // 每次都重建实验下拉（实验可能新归档）；未加载过则先拉取
   if (researchState.experiments.length) {
     researchExpFill();
@@ -4288,18 +4173,17 @@ function researchOpenModal(mode, node, parent) {
     detailInp.value = node.detail || "";
     tagInp.value = node.tag || "";
     expSel.value = node.exp_id || "";
-    freeChk.checked = !!node.free_attach;
   } else {
     document.getElementById("researchModalTitle").textContent = mode === "root" ? t("research.add_root") : t("research.add_child");
     nid.value = "";
     pid.value = parent ? parent.id : "";
-    typeSel.value = researchFirstAllowed(parent ? parent.node_type : null);
+    // 默认继承父节点类型（筛选战役下加候选结果就是同类型嵌套）；加根默认 goal
+    typeSel.value = parent ? parent.node_type : "goal";
     titleInp.value = "";
     detailInp.value = "";
     tagInp.value = "";
     expSel.value = "";
     expSearch.value = "";
-    freeChk.checked = false;
   }
   document.getElementById("researchModal").classList.remove("hidden");
   titleInp.focus();
@@ -4333,7 +4217,6 @@ async function researchSave(e) {
     parent_id: rawPid ? Number(rawPid) : null,
     exp_id: rawExp ? Number(rawExp) : null,
     tag: document.getElementById("researchTag").value.trim(),
-    free_attach: document.getElementById("researchFreeAttach").checked,
   };
   try {
     if (id) await API.put(`/api/research/nodes/${id}`, payload);
@@ -4559,10 +4442,6 @@ function init() {
       researchFillProteinFilter();
       researchRender();
     }
-    if (document.getElementById("copyTypeTags") && copyAllExps.length) {
-      renderCopyTypeTags();
-      renderCopyExpList();
-    }
     if (document.getElementById("compareTable")) loadCompareCandidates();
     if (document.querySelector("#concTable")) refreshAutoNamePlaceholders();
     updateBulkBar();
@@ -4577,3 +4456,4 @@ function init() {
   }
 }
 init();
+

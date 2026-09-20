@@ -6,6 +6,9 @@
     <p class="page-kicker" data-i18n="nav.product">BDA Workbench</p>
     <h1 data-i18n="workbench.title">BDA Workbench</h1>
   </div>
+  <!-- 反向入口：删掉「从实验复制」tab 后，浏览历史实验归档案页管。
+       原标题点击直接深链到此页（?load_exp=<id>），这里给一条回程路，免得单向门。 -->
+  <a class="btn btn-sm" href="/experiments" data-i18n="detail.back">Back to archive</a>
 </div>
 <nav class="tool-groups" aria-label="Tools">
   <div class="tool-group">
@@ -22,10 +25,6 @@
   <div class="tool-group">
     <span class="tool-group-label" data-i18n="workbench.group.sequence">Sequence</span>
     <button class="tab-btn" data-tab="weblogo" data-i18n="workbench.tab.weblogo">Weblogo</button>
-  </div>
-  <div class="tool-group">
-    <span class="tool-group-label" data-i18n="workbench.group.reuse">Reuse</span>
-    <button class="tab-btn" data-tab="copy" data-i18n="workbench.tab.copy">Load from Archive</button>
   </div>
 </nav>
 
@@ -537,32 +536,6 @@
 
   <!-- 曲线图 -->
   <div id="enzymePlotArea" style="margin-top:12px"></div>
-</div>
-
-<!-- ══════════════════════════════════════════════════ -->
-<!--  Tab 5: 从实验复制                                   -->
-<!-- ══════════════════════════════════════════════════ -->
-<div id="tab-copy" class="tab-panel hidden">
-  <div class="stack-on-narrow">
-    <!-- 左侧：实验列表 -->
-    <div>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <input type="text" id="copySearchInput" data-i18n-placeholder="workbench.search_exp" placeholder="Search experiment titles..." oninput="filterCopyExps()"
-               style="flex:1;padding:8px 12px;border:1px dashed var(--rule);font-size:14px">
-      </div>
-      <div id="copyTypeTags" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"></div>
-      <div id="copyExpList" style="max-height:420px;overflow-y:auto">
-        <p style="color:var(--graphite);font-size:13px;text-align:center;padding:40px" data-i18n="common.loading">Loading…</p>
-      </div>
-    </div>
-    <!-- 右侧：详情预览 -->
-    <div id="copyPreview" class="calc-card hidden" style="position:sticky;top:16px;align-self:start">
-      <h3 id="copyPreviewTitle" style="margin-bottom:4px;font-size:16px"></h3>
-      <div id="copyPreviewMeta" style="font-size:13px;color:var(--graphite);margin-bottom:10px"></div>
-      <div id="copyPreviewDetail" style="font-size:13px;line-height:1.7"></div>
-      <button class="btn btn-primary" onclick="applyCopyAndSwitch()" style="margin-top:12px;width:100%" data-i18n="workbench.load_tool">Load into matching tool</button>
-    </div>
-  </div>
 </div>
 
 {% endblock %}

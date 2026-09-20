@@ -4,25 +4,28 @@
     .venv/Scripts/python.exe test_research.py
 
 覆盖：
-1. 白名单边：goal→{goal,experiment}、experiment→conclusion、conclusion→goal 放行
-2. 白名单拦截：goal→conclusion / experiment→experiment / conclusion→experiment 等拒绝
-3. 根必须是目标（goal）：experiment/conclusion 挂根拒绝
-4. 逃生舱 free_attach：打破白名单放行
+1. 合法边放行：goal→{goal,experiment}、experiment→conclusion、conclusion→goal
+2. 挂载类型不设约束（2026-09-18 取消白名单）：曾被白名单拦截的边现在全部放行
+3. 根必须是目标（goal）：experiment/conclusion/observation 挂根拒绝
+4. **生产真实形状回归**：goal → experiment「批量化筛选」→ experiment「筛选结果1」×N
+   （同类型嵌套；2026-09-18 取消白名单的直接来由）
 5. exp_id 校验：引用不存在实验拒绝
 6. 级联删除子树：删根连带删除全部后代，返回删除数
 7. build_trees 森林序列化（嵌套结构 + 排序）
 8. 删实验断链：exp_id FK SET NULL，节点保留
 9. 同级排序：sort_order 自动追加
-10. 更新重挂：白名单拦截 + free_attach 放行 + 换父重排
-11. API：/api/research/nodes 增查改删 + 白名单 400
+10. 更新重挂：任意父类型放行 + 换父重排
+11. API：/api/research/nodes 增查改删
 12. MCP 读工具零写库（list_research_trees / get_research_node / get_research_context）
 13. /research 页面渲染（流程图容器 #researchFlow）
 14. 立场 tag 操控：写入/替换/清除/跨节点类型（v0.1.2 增量，零 schema 变更）
 15. 研究上下文聚合 get_research_context（v0.1.2）：结构/计划占位/开放目标/stance 映射/边界/序列脱敏
 16. 评审修复（P2-1~P4-7）：stance 双端一致/写入规范化/防环/输入强转/子树统计重构
 17. 同级排序移动 move_node：上移/下移/边界拒绝/sort_order 重排规范化/API 端点
-18. v0.1.3 证据结构升级：observation 节点（白名单/叶子/分类 tag）+ 结论多实验支持
+18. v0.1.3 证据结构升级：observation 节点（可挂任意节点下/分类 tag）+ 结论多实验支持
     （supporting_exp_ids 校验/JSON 往返/上下文聚合全证据/API 端点）
+19. MCP 写工具面：save_observation / save_conclusion（parent_id 与 exp_id 二选一）
+20. schema v5：free_attach 列已删除（迁移后不存在，写路径无从引用）
 
 数据安全：数据库用临时目录，不触碰生产库（见 CLAUDE.md 测试规范）。
 """
@@ -52,7 +55,7 @@ def dump_db():
     return out
 
 
-# ── 1. 白名单边放行 ──
+# ── 1. 合法边放行 ──
 g = models.research_node_create(node_type="goal", title="根目标", sort_order=0)
 ok, err = research.create_node("goal", "子目标", parent_id=g)
 assert ok and not err, f"goal→goal 应放行: {err}"
@@ -65,33 +68,41 @@ assert ok and not err, f"experiment→conclusion 应放行: {err}"
 conc1 = ok
 ok, err = research.create_node("goal", "新目标", parent_id=conc1)
 assert ok and not err, f"conclusion→goal 应放行: {err}"
-print("1. 白名单放行边 OK")
+print("1. 合法边放行 OK")
 
-# ── 2. 白名单拦截 ──
-for bad_type in ("conclusion",):
-    ok, err = research.create_node(bad_type, "bad", parent_id=g)
-    assert ok is None and "白名单" in err, f"goal→{bad_type} 应被拦截: {err}"
-for bad_type in ("experiment", "goal"):
-    ok, err = research.create_node(bad_type, "bad", parent_id=exp1)
-    assert ok is None and "白名单" in err, f"experiment→{bad_type} 应被拦截: {err}"
-for bad_type in ("experiment", "conclusion"):
-    ok, err = research.create_node(bad_type, "bad", parent_id=conc1)
-    assert ok is None and "白名单" in err, f"conclusion→{bad_type} 应被拦截: {err}"
-print("2. 白名单拦截 OK")
+# ── 2. 挂载类型不设约束（2026-09-18 取消白名单）──
+# 这些边在取消前全被 WHITELIST 拦（"白名单不允许..."），现在应一律放行。
+for parent_id, name in ((g, "goal"), (exp1, "experiment"), (conc1, "conclusion")):
+    for child_type in ("goal", "experiment", "conclusion", "observation"):
+        nid, err = research.create_node(child_type, f"任意边-{name}-{child_type}",
+                                        parent_id=parent_id)
+        assert nid and not err, f"{name}→{child_type} 应放行: {err}"
+print("2. 挂载类型不设约束（任意类型 → 任意父）OK")
 
 # ── 3. 根必须是目标 ──
-for bad_type in ("experiment", "conclusion"):
+for bad_type in ("experiment", "conclusion", "observation"):
     ok, err = research.create_node(bad_type, "bad-root")
     assert ok is None and "根节点必须" in err, f"{bad_type} 挂根应拒绝: {err}"
 print("3. 根必须为目标 OK")
 
-# ── 4. 逃生舱 free_attach ──
-ok, err = research.create_node("conclusion", "非常规结论", parent_id=g, free_attach=True)
-assert ok and not err, f"free_attach 应打破白名单: {err}"
-ok, err = research.create_node("experiment", "非常规实验", parent_id=exp1, free_attach=True)
-assert ok and not err, f"free_attach 应打破白名单(experiment): {err}"
-assert models.research_node_get(ok)["free_attach"] == 1, "free_attach 应落库为 1"
-print("4. 逃生舱 free_attach OK")
+# ── 4. 生产真实形状回归（2026-09-18 取消白名单的直接来由）──
+# goal「重新选择酶催化体系进行测试」→ experiment「基于Agent的批量化筛选」
+#   → experiment「筛选结果1：GlxI」×N
+# 取消白名单前，experiment→experiment 不在 WHITELIST 里，只能勾「自由挂载」才建得成
+# （生产节点 id=44 就是这么来的）。这条钉子就是钉住那次卡壳。
+camp_g = research.create_node("goal", "重新选择酶催化体系进行测试")[0]
+camp_e = research.create_node("experiment", "基于Agent的批量化筛选", parent_id=camp_g)[0]
+assert camp_e, "筛选战役（experiment）应挂在 goal 下"
+picks = []
+for name in ("筛选结果1：GlxI", "筛选结果2：TIM", "筛选结果3：TEV"):
+    nid, err = research.create_node("experiment", name, parent_id=camp_e)
+    assert nid and not err, f"筛选结果（experiment→experiment）应放行: {err}"
+    picks.append(nid)
+assert all(models.research_node_get(p)["parent_id"] == camp_e for p in picks), \
+    "候选结果应全部挂在筛选战役下"
+assert [c["id"] for c in models.research_node_children(camp_e)] == picks, \
+    "候选结果应作为同级按序排列"
+print("4. 生产真实形状（筛选战役 → N 候选结果）OK")
 
 # ── 5. exp_id 校验 ──
 ok, err = research.create_node("experiment", "坏引用", parent_id=g, exp_id=99999)
@@ -118,7 +129,7 @@ assert any(c["id"] == sub_g for c in root["children"]), "子目标应嵌套在�
 assert any(c["id"] == exp1 for c in root["children"]), "实验应嵌套在根下"
 e1_node = next(c for c in root["children"] if c["id"] == exp1)
 assert any(c["id"] == conc1 for c in e1_node["children"]), "结论应嵌套在实验下"
-assert root["free_attach"] is False and "node_type_label" in root, "公开形态应带 label/布尔 free_attach"
+assert "node_type_label" in root, "公开形态应带中文类型标签"
 print("7. build_trees 森林序列化 OK")
 
 # ── 8. 删实验断链（FK SET NULL，节点保留）──
@@ -139,20 +150,17 @@ rel = [x for x in order if x in (s1, s2, s3)]
 assert rel == [s1, s2, s3], f"同级应按 sort_order 升序: {order}"
 print("9. 同级排序 OK")
 
-# ── 10. 更新重挂：白名单拦截 + free_attach 放行 + 换父重排 ──
+# ── 10. 更新重挂：任意父类型放行 + 换父重排 ──
 # 重挂目标 conclusion 用旁路节点（非 exp1 子树成员）——评审修复 P2-2 起防环拦截：
-# 若仍用 conc1（exp1 自己的子节点），重挂即成环，白名单/防环两个语义会纠缠。
+# 若仍用 conc1（exp1 自己的子节点），重挂即成环，会被防环拒绝而非重排。
 other_exp = research.create_node("experiment", "旁路实验", parent_id=g)[0]
 other_conc = research.create_node("conclusion", "旁路结论", parent_id=other_exp)[0]
-# 把 conclusion 重挂到另一个 experiment 下（合法）
+# 把 conclusion 重挂到另一个 experiment 下（同父，无操作）
 ok, err = research.update_node(conc1, "conclusion", "结论1改", parent_id=exp1)
 assert ok and not err, f"conclusion 重挂 experiment 应放行: {err}"
-# 把 experiment 重挂到 conclusion 下（白名单拦截）
+# 把 experiment 重挂到 conclusion 下——取消白名单前这条会被拦（"白名单不允许"）
 ok, err = research.update_node(exp1, "experiment", "实验1改", parent_id=other_conc)
-assert ok is False and "白名单" in err, f"experiment 挂 conclusion 应拦截: {err}"
-# 加逃生舱后放行（目标非 exp1 后代 → 不构成环）
-ok, err = research.update_node(exp1, "experiment", "实验1改", parent_id=other_conc, free_attach=True)
-assert ok and not err, f"free_attach 重挂应放行: {err}"
+assert ok and not err, f"experiment 挂 conclusion 应放行: {err}"
 assert models.research_node_get(exp1)["parent_id"] == other_conc, "应已重挂到 conclusion 下"
 # 重挂回 g（goal）→ 应排在 g 子节点末尾
 ok, err = research.update_node(exp1, "experiment", "实验1改", parent_id=g)
@@ -169,8 +177,11 @@ r = client.post("/api/research/nodes", json={
 assert r.status_code == 201, f"创建应 201: {r.status_code} {r.get_json()}"
 api_gid = r.get_json()["id"]
 r = client.post("/api/research/nodes", json={
-    "node_type": "conclusion", "title": "坏挂", "parent_id": api_gid})
-assert r.status_code == 400, f"白名单违规应 400: {r.status_code}"
+    "node_type": "conclusion", "title": "任意挂", "parent_id": api_gid})
+assert r.status_code == 201, f"任意类型挂载应 201（2026-09-18 取消白名单）: {r.status_code} {r.get_json()}"
+r = client.post("/api/research/nodes", json={
+    "node_type": "experiment", "title": "非法根"})
+assert r.status_code == 400, f"非 goal 挂根应 400（根规则仍在）: {r.status_code}"
 r = client.get(f"/api/research/nodes/{api_gid}")
 assert r.status_code == 200 and r.get_json()["chain"] == [{"id": api_gid,
     "node_type": "goal", "node_type_label": "目标", "title": "API目标"}], "GET 应带链视图"
@@ -384,8 +395,8 @@ plain_e = next(x for x in _ctx(g)["subtree"]["conclusions"] if x["node_id"] == p
 assert plain_e["stance"] == {"key": "", "label": ""}, f"16a4 无立场词应空: {plain_e['stance']}"
 print("16a. stance 双端一致（规范化/带空格/多词/无词）OK")
 
-# P2-2 防环：update_node 不允许挂到自身或后代（用白名单合法的 goal→goal 场景，
-# 否则白名单会先拦；防环是逃生舱放行路径上的硬兜底）
+# P2-2 防环：update_node 不允许挂到自身或后代。2026-09-18 取消白名单后，防环是**唯一**的
+# 硬结构兜底（service 层已无类型约束），所以这节从「逃生舱路径的兜底」升格为结构完整性主闸。
 ca = research.create_node("goal", "环测试A")[0]
 cb = research.create_node("goal", "环测试B", parent_id=ca)[0]
 cc = research.create_node("experiment", "环测试C", parent_id=cb)[0]
@@ -397,12 +408,10 @@ assert ok is False and "成环" in err, f"16b 挂到后代应拒绝: {err}"
 assert research.get_chain(cb)[-1]["id"] == cb, "16b 防环后树应保持正常"
 print("16b. 重挂防环（自挂/后代）OK")
 
-# P3-3 输入强转：字符串 parent_id / free_attach="false" 语义正确；非法值明确报错
-str_parent = research.create_node("goal", "字符串父测试", parent_id=str(ca),
-                                  free_attach="false")[0]
+# P3-3 输入强转：字符串 parent_id 语义正确；非法值明确报错
+str_parent = research.create_node("goal", "字符串父测试", parent_id=str(ca))[0]
 p = models.research_node_get(str_parent)
 assert p["parent_id"] == ca, f"16c 字符串 parent_id 应强转 int: {p['parent_id']!r}"
-assert p["free_attach"] == 0, f"16c free_attach='false' 应为 False: {p['free_attach']!r}"
 roots = research.build_trees()
 assert not any(r["id"] == str_parent for r in roots), "16c 字符串 parent_id 不应成孤立根"
 ca_root = next(r for r in roots if r["id"] == ca)
@@ -500,18 +509,19 @@ print("17e. 根节点同级移动 OK")
 # conclusion 的 supporting_exp_ids = 多实验→一结论旁路引用（树父实验仍是主证据）。
 og = research.create_node("goal", "证据升级目标")[0]
 
-# 18a. observation 白名单：goal/experiment/conclusion 下都能挂；叶子；不能挂根
+# 18a. observation 挂载：goal/experiment/conclusion 下都能挂；2026-09-18 起 observation 下
+# 也可挂任意类型（不再是叶子——白名单整体取消，没有「叶子」概念了）；仍不能挂根
 o1 = research.create_node("observation", "根目标要点", parent_id=og, tag="操作要点")[0]
 oe = research.create_node("experiment", "实验A", parent_id=og)[0]
 o2 = research.create_node("observation", "实验A细节", parent_id=oe)[0]
 oc = research.create_node("conclusion", "实验A结论", parent_id=oe)[0]
 o3 = research.create_node("observation", "结论备注", parent_id=oc, tag="负结果")[0]
-for bad in ("goal", "experiment", "conclusion", "observation"):
-    ok, err = research.create_node(bad, "bad-child", parent_id=o1)
-    assert ok is None and "白名单" in err, f"18a observation 叶子不应挂 {bad}: {err}"
+for child in ("goal", "experiment", "conclusion", "observation"):
+    nid, err = research.create_node(child, f"obs-child-{child}", parent_id=o1)
+    assert nid and not err, f"18a observation 下应可挂 {child}（取消白名单）: {err}"
 ok, err = research.create_node("observation", "bad-root-obs")
 assert ok is None and "根节点必须" in err, f"18a observation 不能挂根: {err}"
-print("18a. observation 白名单/叶子/根约束 OK")
+print("18a. observation 挂载（任意类型可挂/根约束）OK")
 
 # 18b. observation 分类 tag：_normalize_tag 逐项 trim
 o4 = research.create_node("observation", "带空tag", parent_id=oe,
@@ -678,16 +688,15 @@ assert len(obs19d) == 2 and sorted(o["parent_id"] for o in obs19d) == sorted([en
     f"19d 应挂到全部实验节点: {obs19d}"
 print("19d. 多目标挂载（exp_id → 全部实验节点）OK")
 
-# 19e. 白名单拒绝 + 实验未挂树
-obs_leaf = research.create_node("observation", "叶子", parent_id=g19)[0]
-r = _mcp_obs(title="挂叶子", parent_id=obs_leaf)
-assert r["error"]["code"] == -32602 and "白名单" in r["error"]["message"], \
-    f"19e observation 下不应可挂: {r}"
+# 19e. observation 下可挂（2026-09-18 取消白名单：不再是叶子）+ 实验未挂树仍拒绝
+obs_child = research.create_node("observation", "曾为叶子", parent_id=g19)[0]
+r = _mcp_obs(title="挂到观察下", parent_id=obs_child)
+assert "error" not in r, f"19e observation 下应可挂（取消白名单）: {r}"
 e_untree = models.exp_create(title="未挂树实验", exp_type="酶活测定", params={}, results={})
 r = _mcp_obs(title="未挂树描述", exp_id=e_untree)
 assert r["error"]["code"] == -32602 and "尚未挂到研究脉络" in r["error"]["message"], \
     f"19e 未挂树应拒绝: {r}"
-print("19e. 白名单拒绝 / 实验未挂树拒绝 OK")
+print("19e. observation 下可挂 / 实验未挂树拒绝 OK")
 
 # 19f. 写库验证：save_observation 后 research_nodes 新增 observation 行
 before19 = len(dump_db()["research_nodes"])
@@ -696,5 +705,23 @@ assert "error" not in r, f"19f 应成功: {r}"
 assert len(dump_db()["research_nodes"]) == before19 + 1, \
     f"19f 应新增 1 行 observation: {before19} → {len(dump_db()['research_nodes'])}"
 print("19f. 写库验证 OK")
+
+# ── 20. schema v5：free_attach 列与参数已彻底消失 ──
+# 「自由挂载」在 2026-09-18 随白名单一起取消；这一节钉住它不会以任何形式复活——
+# 列没了（迁移 v5 DROP COLUMN）、安全列白名单没了、写路径收下该参数也无处可写。
+cols = [r[1] for r in sqlite3.connect(models.DB_PATH).execute(
+    "PRAGMA table_info(research_nodes)").fetchall()]
+assert "free_attach" not in cols, f"20 v5 迁移后不应有 free_attach 列: {cols}"
+assert "free_attach" not in models.RESEARCH_SAFE_COLUMNS, "20 安全列白名单不应含 free_attach"
+ver = sqlite3.connect(models.DB_PATH).execute("PRAGMA user_version").fetchone()[0]
+assert ver == models.SCHEMA_VERSION == 5, f"20 user_version 应为 5: {ver}"
+# 旧调用方仍传 free_attach → 被安全列过滤（宽容降级，不报错也不写库）
+n20 = research.create_node("goal", "v5 探针")[0]
+assert models.research_node_update(n20, title="v5 探针改", free_attach=True) is True, \
+    "20 未知列应被静默过滤而非报错"
+assert "free_attach" not in models.research_node_get(n20), "20 不应落回该列"
+assert models.research_node_update(n20, free_attach=True) is False, \
+    "20 只传未知列时无字段可更新，应返 False"
+print("20. schema v5（free_attach 列/参数彻底移除）OK")
 
 print("\n全部研究脉络测试通过 ✓")

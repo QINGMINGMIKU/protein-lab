@@ -5,11 +5,8 @@
 {% set results = exp.results if exp.results is mapping else {} %}
 {% set calc_type = params.get("calc_type", "") %}
 {% set proteins = params.get("proteins", []) %}
-{# 可载入计算工具：分析型实验（有分析 raw 快照，或 params 可重建）→ 显示「载入计算工具」入口，
-   点击跳 /calculator?load_exp=<id>，由 calculator 页消费并自动恢复对应 tab 数据。 #}
-{% set has_calc_raw = raws and raws|selectattr("data_type","in",["enzyme_traces","bli_curves","akta_traces"])|list %}
-{% set has_calc_params = (calc_type in ["concentration","dilution"] and proteins) or (calc_type == "enzyme" and params.get("wells")) %}
-{% set loadable = has_calc_raw or has_calc_params %}
+{# 可载入计算工具：判定由路由传入（identity.is_loadable，与 /api/experiments 的 loadable 同一函数），
+   模板只消费 loadable——不在这里内联判定，避免与列表两处漂移。 #}
 
 <div class="page-header">
   <div>

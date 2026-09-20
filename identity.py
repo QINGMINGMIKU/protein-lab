@@ -46,6 +46,11 @@ _ALIASES = {
     "logo": "weblogo",
 }
 
+# 分析型 raw 白名单——这些 data_type 才可能重建计算工具的画面。
+# experiment_raw.data_type 是**开放集**（库里就有 test_trace 之类的非分析快照），
+# 所以判定必须走白名单，不能只看「有没有 raw」。
+CALC_RAW_TYPES = ("enzyme_traces", "bli_curves", "akta_traces")
+
 
 def _as_dict(val) -> dict:
     if isinstance(val, dict):
@@ -149,3 +154,30 @@ def annotate(exp: dict) -> dict:
     exp = dict(exp)
     exp["calc_type"] = infer_calc_type(exp)
     return exp
+
+
+def is_loadable(exp: dict | None, raw_types=()) -> bool:
+    """该实验能否「载入计算工具」（详情页 CTA 与列表 API 共用的唯一判定源）。
+
+    `raw_types` = 该实验已落库的 experiment_raw.data_type 集合，由调用方批量查好传入
+    （见 `models.exp_raw_type_map`），避免逐条查 raw。
+
+    **三处刻意保守**（逐字还原原 experiment_detail.html 模板的内联判定，别"顺手"放宽）：
+      1) 只看 `params.calc_type` **键**的值——不 normalize、不从 exp_type 兜底推断。
+         真实库里就有反例：#38「重新纯化与浓度标定」/#39「AKTA 峰位分析」是 MCP 手写的
+         记录，params 里有 `proteins` 却**没有 `calc_type` 键**（infer_calc_type 会给它们
+         贴 concentration / akta 标签）。一旦改成走推断，这两条就会显示「可载入」，
+         点进去只能得到残缺的 tab（#39 连 `akta_traces` 快照都没有）——即"改了既有可见行为"。
+      2) 不认 results——原模板也不认（weblogo 即便有 sequences 也不可载入）；
+      3) raw 只看 `CALC_RAW_TYPES` 白名单（`experiment_raw.data_type` 是开放集，
+         库里存在 `test_trace` 这类非分析快照，"有 raw" 不等于"能重建画面"）。
+    """
+    exp = exp or {}
+    params = _as_dict(exp.get("params"))
+    calc_type = params.get("calc_type", "")
+    has_calc_raw = any(rt in CALC_RAW_TYPES for rt in (raw_types or ()))
+    has_calc_params = (
+        (calc_type in ("concentration", "dilution") and bool(params.get("proteins")))
+        or (calc_type == "enzyme" and bool(params.get("wells")))
+    )
+    return bool(has_calc_raw or has_calc_params)

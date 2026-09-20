@@ -110,8 +110,11 @@ def page_experiment_detail(eid):
         val = e.get(field)
         e[field] = val if isinstance(val, dict) else {}
     raws = models.exp_raw_list(eid, with_version=True)
+    # 可载入判定走 identity.is_loadable（与 /api/experiments 的 loadable 同一函数）——
+    # 模板只消费结果，判定不再内联在 Jinja 里，两处不可能漂移。
+    loadable = identity.is_loadable(e, {r.get("data_type") for r in raws})
     return render_template("experiment_detail.html", exp=e, exp_types=models.EXP_TYPES,
-                           raws=raws, show_research_block=True)
+                           raws=raws, loadable=loadable, show_research_block=True)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -133,7 +136,6 @@ def api_research_node_create():
         parent_id=data.get("parent_id"),
         exp_id=data.get("exp_id"),
         tag=data.get("tag") or "",
-        free_attach=data.get("free_attach", False),
         supporting_exp_ids=data.get("supporting_exp_ids"),
     )
     if err:
@@ -161,7 +163,6 @@ def api_research_node_update(nid):
         parent_id=data.get("parent_id"),
         exp_id=data.get("exp_id"),
         tag=data.get("tag") or "",
-        free_attach=data.get("free_attach", False),
         supporting_exp_ids=data.get("supporting_exp_ids"),
     )
     if not ok:
@@ -450,6 +451,19 @@ def api_calc_dilution():
 #  Experiments API
 # ═══════════════════════════════════════════════════════════
 
+def _attach_loadable(rows: list) -> list:
+    """给列表行附 loadable（能否载入计算工具）。
+
+    判定本身在 identity.is_loadable（与详情页 CTA 同一函数，避免两处漂移）；
+    这里只负责**批量**取 raw 类型，一次 DISTINCT 查询而不是逐行 exp_raw_list。
+    放在路由层而非 models.exp_list：exp_list 还被 delete-all / 导出用，不该为它们多花查询。
+    """
+    rtypes = models.exp_raw_type_map([r["id"] for r in rows], identity.CALC_RAW_TYPES)
+    for r in rows:
+        r["loadable"] = identity.is_loadable(r, rtypes.get(r["id"], ()))
+    return rows
+
+
 @app.route("/api/experiments", methods=["GET"])
 def api_exp_list():
     exp_type = request.args.get("type", "")
@@ -459,8 +473,8 @@ def api_exp_list():
     except (ValueError, TypeError):
         limit = 50
     if calc_type:
-        return jsonify(models.exp_list(calc_type=calc_type, limit=limit))
-    return jsonify(models.exp_list(exp_type, limit))
+        return jsonify(_attach_loadable(models.exp_list(calc_type=calc_type, limit=limit)))
+    return jsonify(_attach_loadable(models.exp_list(exp_type, limit)))
 
 
 @app.route("/api/experiments/<int:eid>", methods=["GET"])
@@ -469,12 +483,13 @@ def api_exp_get(eid):
     if not e:
         return jsonify({"error": "实验不存在"}), 404
     e = identity.annotate(e)
-    # 附原始数据快照（供「从实验复制」等按需拉取 payload，避免大字段常驻详情响应）：
+    # 附原始数据快照（供「载入计算工具」深链按需拉取 payload，避免大字段常驻详情响应）：
     # _raws 带 data_type（前端按类型取最新一条——重挂可能往同一实验追加别的类型）；
     # _raw_ids 保留纯 id 列表（既有调用方/测试兼容）。
     _raws = models.exp_raw_list(e["id"])
     e["_raws"] = _raws
     e["_raw_ids"] = [r["id"] for r in _raws]
+    e["loadable"] = identity.is_loadable(e, {r["data_type"] for r in _raws})
     e["key_results"] = compare.key_results(e)
     return jsonify(e)
 
@@ -1463,7 +1478,7 @@ def api_enzyme_export():
 
 @app.route("/api/enzyme/restore", methods=["POST"])
 def api_enzyme_restore():
-    """从实验原始快照重建酶活分析态（供「从实验复制」把历史实验载回酶活 tab）。
+    """从实验原始快照重建酶活分析态（供「载入计算工具」把历史实验载回酶活 tab）。
 
     与 BLI/AKTA 的 restore 对称，但酶活**没有服务端会话**（曲线直接落在前端状态里），
     因此本端点只做两件容易出错、值得单测的事：
@@ -1638,7 +1653,7 @@ def api_bli_analyze():
 
 @app.route("/api/bli/restore", methods=["POST"])
 def api_bli_restore():
-    """从实验原始快照重建 BLI 会话（供「从实验复制」把历史实验载回 BLI 分析 tab 再出图/拟合）。
+    """从实验原始快照重建 BLI 会话（供「载入计算工具」把历史实验载回 BLI 分析 tab 再出图/拟合）。
 
     body: {"payload": {curves: [{label, sample_id, conc_nM, time, response}]}}
     返回形状与 /api/bli/analyze 一致（session_id + samples + n_sensors），前端可直接复用上传路径。
@@ -1762,7 +1777,7 @@ def api_bli_save():
         td = td if td is not None else d
 
     params = {
-        "calc_type": "bli_fit",   # 判别字段：详情页渲染 / 从实验复制 / 导出横切依赖（AKTA 同款约定）
+        "calc_type": "bli_fit",   # 判别字段：详情页渲染 / 载入计算工具 / 导出横切依赖（AKTA 同款约定）
         "source": body.get("source", ""),
         "smooth_window": int(body.get("smooth_window", 31) or 0),
         "fit_overlay": bool(body.get("fit_overlay") or body.get("fit")),
@@ -2034,7 +2049,7 @@ def api_akta_analyze():
 
 @app.route("/api/akta/restore", methods=["POST"])
 def api_akta_restore():
-    """从实验原始快照重建 AKTA 会话（供「从实验复制」把历史实验载回 AKTA tab 再出图/导出）。
+    """从实验原始快照重建 AKTA 会话（供「载入计算工具」把历史实验载回 AKTA tab 再出图/导出）。
 
     body: {"payload": {channel:{name,data_type,unit,vols,amps}, events, meta}, "name": 显示名}
     返回形状与 /api/akta/analyze 的单 run 一致（含 session_id），前端可直接塞进 aktaRuns。

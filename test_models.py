@@ -787,6 +787,114 @@ assert _u26c.get("restored") and not _u26c.get("bulk"), f"单条恢复不该走 
 assert _uc26.delete("/api/experiments/99999").status_code == 404, "删不存在的实验应 404"
 print("26. 批量删除撤销（bulk 单条目 / 全量恢复 / raw 重挂 / 单条不受影响 / 404）OK")
 
+# ─ 27. 可载入判定 loadable（identity.is_loadable 唯一源 + 列表 API 批量附值）──
+# 背景：删掉计算器「从实验复制」tab 后，实验档案页的标题要直接载入计算工具，
+# 所以**列表**必须知道哪些行载得动。判定原本只内联在 experiment_detail.html 的 Jinja 里，
+# 列表拿不到 → 抽成 identity.is_loadable，详情路由与列表 API 共用一份（两处不可能漂移）。
+_uc27 = client
+import identity  # noqa: E402  （本文件此前未直接依赖 identity，本节首次直调）
+
+
+def _mk27(key, exp_type="其他", params=None, results=None, raws=None):
+    return services.create_experiment(
+        title=f"27-{key}", exp_type=exp_type, params=params or {}, results=results or {},
+        raw_snapshots=raws or [],
+    )["id"]
+
+
+_e27 = {
+    # 分析型 raw（三端）→ 可载入
+    "BLI": _mk27("BLI", "BLI", {"calc_type": "bli_fit"}, {},
+                 [("bli_curves", {"analysis_version": "v1", "curves": []})]),
+    "AKTA": _mk27("AKTA", "AKTA", {"calc_type": "akta"}, {},
+                  [("akta_traces", {"analysis_version": "v1", "channels": []})]),
+    # 酶活靠 wells、浓度靠 proteins；**空容器不算**
+    "酶活": _mk27("酶活", "酶活测定", {"calc_type": "enzyme", "wells": {"A1": {"name": "WT"}}}),
+    "酶活空孔": _mk27("酶活空孔", "酶活测定", {"calc_type": "enzyme", "wells": {}}),
+    "浓度": _mk27("浓度", "浓度测定",
+                  {"calc_type": "concentration", "proteins": [{"name": "WT"}]}),
+    "浓度无蛋白": _mk27("浓度无蛋白", "浓度测定", {"calc_type": "concentration", "proteins": []}),
+    # 不可载入：纯记录 / weblogo（原模板也不认）/ 白名单外的 raw
+    "纯记录": _mk27("纯记录", "其他", {"k": "v"}),
+    "logo": _mk27("logo", "Weblogo", {"calc_type": "weblogo", "sequences": ["ACDEF"]}),
+    "怪快照": _mk27("怪快照", "其他", {}, {}, [("test_trace", {"x": 1})]),
+    # **核心保守点**：只有 BLI 族名、没有任何 raw、也没填参数 → 必须载不动。
+    # 注意 contrast：identity.infer_calc_type 会给它贴 "bli_fit" 标签（族名兜底），
+    # 而 is_loadable 的 params 分支**只认 concentration/dilution/enzyme 三个原值**——
+    # BLI 想可载入只有 raw 白名单一条路。哪天有人往 params 分支里加 "bli_fit"/"akta"，
+    # 这条就会翻成 True，正是要拦住的那种「顺手放宽」。
+    "仅族名": _mk27("仅族名", "BLI", {}, {"samples": {"WT": {}}}),
+}
+_expected27 = {
+    "BLI": True, "AKTA": True, "酶活": True, "酶活空孔": False, "浓度": True,
+    "浓度无蛋白": False, "纯记录": False, "logo": False, "怪快照": False, "仅族名": False,
+}
+
+# 27a. 列表 API 批量附 loadable（走 HTTP，验的是真实接线）
+_rows27 = {r["title"]: r for r in _uc27.get("/api/experiments?limit=200").get_json()}
+for _key, _want in _expected27.items():
+    assert f"27-{_key}" in _rows27, f"列表里找不到 27-{_key}"
+    _got = _rows27[f"27-{_key}"].get("loadable")
+    assert _got is _want, f"27-{_key}: loadable 应为 {_want}，实际 {_got}"
+
+# 27b. 详情 JSON 也附 loadable（与列表同构）
+assert _uc27.get(f"/api/experiments/{_e27['BLI']}").get_json()["loadable"] is True
+assert _uc27.get(f"/api/experiments/{_e27['纯记录']}").get_json()["loadable"] is False
+
+# 27c. **两处不漂移**：列表 loadable 与详情页是否出现载入链接，必须同真同假。
+#      这是「判定只有一份」的机械保证——哪天有人在模板里重新内联判定就会红。
+for _key, _eid in _e27.items():
+    _detail = _uc27.get(f"/experiments/{_eid}").get_data(as_text=True)
+    _has_link = f'href="/calculator?load_exp={_eid}"' in _detail
+    assert _has_link is _expected27[_key], (
+        f"27-{_key}: 详情页载入链接 {_has_link} 与列表 loadable {_expected27[_key]} 不一致（判定漂移）")
+
+# 27d. 详情路由照旧传 raws（模板的原始快照表要它，删了会静默少一块）
+assert "test_trace" in _uc27.get(f"/experiments/{_e27['怪快照']}").get_data(as_text=True), \
+    "非分析型 raw 也应在详情页快照表里显示"
+
+# 27e. 列表路径**不做逐行 raw 查询**（exp_raw_type_map 一条 DISTINCT 代替 N+1）
+_orig_raw_list27 = models.exp_raw_list
+
+
+def _boom27(*_a, **_kw):
+    raise AssertionError("列表路径不应逐行调 exp_raw_list（N+1）")
+
+
+models.exp_raw_list = _boom27
+try:
+    _r27e = _uc27.get("/api/experiments?limit=200")
+    assert _r27e.status_code == 200, _r27e.status_code
+    assert len(_r27e.get_json()) >= len(_e27)
+finally:
+    models.exp_raw_list = _orig_raw_list27
+
+# 27f. exp_raw_type_map 的边界：空输入不发查询、白名单外的类型不进 map
+assert models.exp_raw_type_map([], ["bli_curves"]) == {}
+assert models.exp_raw_type_map([_e27["BLI"]], []) == {}
+_tmap27 = models.exp_raw_type_map([_e27["BLI"], _e27["怪快照"], _e27["纯记录"]],
+                                  identity.CALC_RAW_TYPES)
+assert _tmap27[_e27["BLI"]] == {"bli_curves"}
+assert _e27["怪快照"] not in _tmap27, "白名单外的 data_type 不该出现在 map 里"
+assert _e27["纯记录"] not in _tmap27, "无 raw 的实验不该出现在 map 里"
+
+# 27g. calc_type 过滤分支同样要附 loadable
+_enz27 = _uc27.get("/api/experiments?calc_type=enzyme&limit=200").get_json()
+assert _enz27 and all("loadable" in r for r in _enz27), "calc_type 分支也要附 loadable"
+assert {r["title"]: r["loadable"] for r in _enz27}["27-酶活"] is True
+
+# 收尾：只删本节自己建的 10 条（直调 models，不压 undo 栈）。
+#  不能 delete-all——§26 那 25 条「批量NN」还在库里，delete-all 会把它们一起删掉，
+#   后面的 undo 又会把它们整批恢复回来，测试尾部状态变得不可预期。
+assert identity.infer_calc_type(
+    {"exp_type": "BLI", "params": {}, "results": {"samples": {}}}) == "bli_fit", \
+    "族名推断给 bli_fit（与 loadable 判定刻意不一致，见 27-仅族名）"
+for _eid in _e27.values():
+    models.exp_delete(_eid)
+assert not any(r["title"].startswith("27-") for r in models.exp_list(limit=9999)), \
+    "本节实验应收干净"
+print("27. 可载入判定 loadable（唯一源 / 列表与详情同真同假 / 无 N+1 / 族名不兜底）OK")
+
 import shutil
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED")

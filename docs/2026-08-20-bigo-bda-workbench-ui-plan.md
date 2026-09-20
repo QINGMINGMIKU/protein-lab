@@ -57,7 +57,7 @@ CI must run `test_research.py` and `test_ui.py` before the build.
 
 - 仅换视觉语言，不动布局结构、DOM id、API 契约、i18n。
 - 跟随 BDA-demo：默认字体栈 JetBrains Mono → Noto Sans SC（中文 fallback），`tabular-nums` 对齐数据列。
-- `grid-guides` 与 `free-attach` 虚线保留（布局引导 / 自由挂载语义），其余全部 solid。
+- `grid-guides` 虚线保留（布局引导），其余全部 solid（`free-attach` 虚线随 **2026-09-18 挂载自由化**删除——不再有自由挂载语义）。
 - `.btn` 保持 `border-radius: 0`（BDA 按钮方角）；卡片/面板/下拉 6–14px 圆角 + shadow。
 - 立场 chip 支持态从 cyan 改为语义绿 `--success`（支持=绿 / 反驳=红 / 部分=橙 / 不确定=灰蓝，与 BDA statusTone 语义一致）。
 

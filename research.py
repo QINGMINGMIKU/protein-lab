@@ -4,10 +4,11 @@
 业务规则集中在这（Workbench 定位：AI 可读的证据链，不做项目管理）：
   - 节点类型 goal/experiment/conclusion/observation（v0.1.3 加 observation 观察·关键细节）；
     单亲树、可自由重挂；多根目标
-  - 白名单边：goal→{goal,experiment,observation}、experiment→{conclusion,observation}、
-    conclusion→{goal,observation}、observation→{}（叶子）
-    ——跨边不合法，除非勾「自由挂载」(free_attach) 逃生舱打破（不做跨分支共享，
-      真 DAG 留后续）
+  - 挂载类型不设约束（2026-09-18 取消白名单）：任何类型可挂任何父节点。取消的直接来由是
+    真实形态「筛选战役(experiment) → N 个候选结果(experiment)」这种同类型嵌套——旧白名单
+    把它判成非法，只能靠配套的放行开关绕过，于是那个开关从例外变成了常态
+  - 结构约束保留（唯一硬约束集）：父节点须存在、单亲树、防环（update_node）、根必须是
+    目标（goal）
   - 结论旁路引用 supporting_exp_ids（v0.1.3）：多实验→一结论——树父实验仍是主证据，
     其余支持实验走一等旁路引用（方向恒定实验→结论，结构上不可能成环）
   - 根必须是目标（goal）；experiment 块 = 实验引用（exp_id）或计划占位（exp_id 空）
@@ -20,26 +21,6 @@ import models
 RESEARCH_NODE_TYPES = models.RESEARCH_NODE_TYPES
 NODE_TYPE_LABELS = {"goal": "目标", "experiment": "实验", "conclusion": "结论",
                     "observation": "观察"}
-
-# 白名单边：父类型 → 允许的子类型集合。加子块勾「自由挂载」可打破任一边。
-# observation 是叶子旁注（不进必选链），任何节点下都能挂观察/关键细节。
-WHITELIST = {
-    "goal": {"goal", "experiment", "observation"},
-    "experiment": {"conclusion", "observation"},
-    "conclusion": {"goal", "observation"},
-    "observation": set(),  # 叶子：观察下不再挂子节点
-}
-
-
-def _as_bool(v) -> bool:
-    """宽松布尔强转：True/"true"/"1"/"yes"/"on" → True，其余 → False。
-
-    评审修复（P3-3）：API 边界可能收到字符串 "false"——`bool("false")` 是 True
-    会误触白名单逃生舱，这里按真实语义解析。
-    """
-    if isinstance(v, bool):
-        return v
-    return str(v).strip().lower() in ("true", "1", "yes", "on")
 
 
 def _coerce_id(v, field: str):
@@ -101,26 +82,15 @@ def _coerce_supporting_exp_ids(v, node_type: str) -> list[int]:
     return out
 
 
-def _parent_label(t: str | None) -> str:
-    return NODE_TYPE_LABELS.get(t or "", t or "根")
+def _check_root_type(parent: dict | None, node_type: str) -> str:
+    """挂为根（parent=None）时节点必须是目标（goal）。返回错误串（空串=合法）。
 
-
-def _check_new_edge(parent: dict | None, node_type: str, free_attach: bool) -> str:
-    """校验 (parent, node_type) 边是否合法，返回错误串（空串=合法）。
-
-    parent=None 表示挂为根：根必须是目标（goal）。free_attach 逃生舱直接放行。
+    取白名单（2026-09-18 取消）：任何类型可挂任何父节点，只留这一条 + update_node 的防环。
+    2026-09-18 取消前的真实用例：筛选战役（experiment）下挂 N 个候选结果（experiment）。
     """
-    if free_attach:
-        return ""
-    if parent is None:
-        if node_type != "goal":
-            return f"根节点必须是目标（goal），「{NODE_TYPE_LABELS.get(node_type, node_type)}」要挂在已有节点下"
-        return ""
-    allowed = WHITELIST.get(parent["node_type"], set())
-    if node_type not in allowed:
-        return (f"白名单不允许「{_parent_label(parent['node_type'])}」直接挂"
-                f"「{NODE_TYPE_LABELS.get(node_type, node_type)}」"
-                f"（可勾「自由挂载」逃生舱打破）")
+    if parent is None and node_type != "goal":
+        return (f"根节点必须是目标（goal），"
+                f"「{NODE_TYPE_LABELS.get(node_type, node_type)}」要挂在已有节点下")
     return ""
 
 
@@ -132,7 +102,6 @@ def _sort_tail(sibs: list[dict], exclude_id: int = None) -> int:
 
 def create_node(node_type: str, title: str, detail: str = "",
                 parent_id: int = None, exp_id: int = None, tag: str = "",
-                free_attach: bool = False,
                 supporting_exp_ids: list = None) -> tuple[int | None, str]:
     """新建研究节点。返回 (node_id, "") 或 (None, error)。"""
     try:
@@ -151,7 +120,7 @@ def create_node(node_type: str, title: str, detail: str = "",
     parent = models.research_node_get(parent_id) if parent_id is not None else None
     if parent_id is not None and parent is None:
         return None, f"父节点 {parent_id} 不存在"
-    err = _check_new_edge(parent, node_type, _as_bool(free_attach))
+    err = _check_root_type(parent, node_type)
     if err:
         return None, err
     sibs = (models.research_node_children(parent_id) if parent
@@ -159,16 +128,15 @@ def create_node(node_type: str, title: str, detail: str = "",
     nid = models.research_node_create(
         node_type=node_type, title=title.strip(), detail=detail,
         parent_id=parent_id, exp_id=exp_id, tag=_normalize_tag(tag),
-        free_attach=_as_bool(free_attach), sort_order=_sort_tail(sibs),
+        sort_order=_sort_tail(sibs),
         supporting_exp_ids=supporting_exp_ids)
     return nid, ""
 
 
 def update_node(node_id: int, node_type: str, title: str, detail: str = "",
                 parent_id: int = None, exp_id: int = None, tag: str = "",
-                free_attach: bool = False,
                 supporting_exp_ids: list = None) -> tuple[bool, str]:
-    """全量更新研究节点（前端提交完整对象）。重挂（父变化）时重校验白名单并重排。
+    """全量更新研究节点（前端提交完整对象）。重挂（父变化）时重校验并重排。
 
     评审修复（P3）：supporting_exp_ids 缺省（None）= 保留现值——前端两处编辑 PUT
     （researchSave / researchChangeStance）都不携带该字段，若按空列表写入会把结论的
@@ -196,13 +164,13 @@ def update_node(node_id: int, node_type: str, title: str, detail: str = "",
     parent = models.research_node_get(parent_id) if parent_id is not None else None
     if parent_id is not None and parent is None:
         return False, f"父节点 {parent_id} 不存在"
-    err = _check_new_edge(parent, node_type, _as_bool(free_attach))
+    err = _check_root_type(parent, node_type)
     if err:
         return False, err
-    # 防环（P2-2）：新父不能是自身或其任何后代——沿新父链上溯，遇 node_id 即环。
-    # 白名单可能被 free_attach 逃生舱打破，防环是其上的硬兜底；否则树成环后
-    # _collect_subtree / research_node_delete_subtree 死循环、/api/research/nodes 序列化 500
-    # （get_chain/_depth_in_subtree 已有 seen，这里补齐）。
+    # 防环：新父不能是自身或其任何后代——沿新父链上溯，遇 node_id 即环。
+    # 白名单取消（2026-09-18）后这是**唯一的硬结构兜底**（表层无 CHECK、service 层无类型约束）：
+    # 一旦成环，_collect_subtree / research_node_delete_subtree 死循环、
+    # /api/research/nodes 序列化 500（get_chain/_depth_in_subtree 已有 seen，这里补齐）。
     if parent_id != node.get("parent_id") and parent_id is not None:
         cur, seen = parent_id, set()
         while cur is not None and cur not in seen:
@@ -220,7 +188,7 @@ def update_node(node_id: int, node_type: str, title: str, detail: str = "",
     models.research_node_update(
         node_id, node_type=node_type, title=title.strip(), detail=detail,
         parent_id=parent_id, exp_id=exp_id, tag=_normalize_tag(tag),
-        free_attach=_as_bool(free_attach), sort_order=sort_order,
+        sort_order=sort_order,
         supporting_exp_ids=supporting_exp_ids)
     return True, ""
 
@@ -260,8 +228,8 @@ def move_node(node_id: int, direction: str) -> tuple[bool, str]:
 
 
 def _node_public(n: dict) -> dict:
-    """节点公开形态：free_attach 归一为 bool，附中文类型标签（供前端/JSON 消费）。"""
-    return {**n, "free_attach": bool(n.get("free_attach")),
+    """节点公开形态：附中文类型标签（供前端/JSON 消费）。"""
+    return {**n,
             "node_type_label": NODE_TYPE_LABELS.get(n.get("node_type"), n.get("node_type"))}
 
 
