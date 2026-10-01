@@ -4443,7 +4443,7 @@ function init() {
       researchRender();
     }
     if (document.getElementById("compareTable")) loadCompareCandidates();
-    if (document.querySelector("#concTable")) refreshAutoNamePlaceholders();
+    if (document.querySelector("#concTable")) { refreshAutoNamePlaceholders(); updateConcHeaders(); }
     updateBulkBar();
     updateExpBulkBar();
   });

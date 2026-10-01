@@ -72,8 +72,10 @@
           <th data-i18n="workbench.col_abs">Abs 0.1%</th>
           <th data-i18n="workbench.col_a280">A₂₈₀</th>
           <th data-i18n="workbench.col_path">Path (cm)</th>
-          <th class="col-result" data-i18n="workbench.col_conc">Concentration</th>
-          <th class="col-result" data-i18n="workbench.col_conc">Concentration</th>
+          {# 这两列的表头带单位后缀，由 updateConcHeaders() 单点写入（单位会随下拉框变），
+             不能挂 data-i18n——i18n.apply() 在 DOMContentLoaded 跑、晚于 init()，会把后缀冲掉 #}
+          <th class="col-result">Concentration</th>
+          <th class="col-result">Concentration</th>
           <th data-i18n="workbench.col_target_c">Target concentration</th>
           <th data-i18n="workbench.col_target_v">Target volume (μL)</th>
           <th class="col-result" data-i18n="workbench.col_stock">Take stock (μL)</th>
