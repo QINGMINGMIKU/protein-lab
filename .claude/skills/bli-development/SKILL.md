@@ -19,7 +19,7 @@ bli.py       纯函数内核：parse_fortebio_csv / group_by_sample / generate_s
 app.py       六端点 + 内存会话：analyze → plot → fit → save（另加 restore 供复制、export 导出 Excel）
 services.py  统一实验写入入口（calc_type 判别字段在此保证）
 models.py    experiment_raw 不可变快照（只写一次，删实验不删 raw）
-calculator.html + static/app.js   「BLI 分析」tab：上传 → 样本摘要/参数面板 → 传感器图 → 5 方法 KD 表
+calculator.html + static/app-bli-akta.js   「BLI 分析」tab：上传 → 样本摘要/参数面板 → 传感器图 → 5 方法 KD 表
 templates/experiment_detail.html   详情页 BLI 拟合卡片 + 原始快照表
 test_bli.py  合成 fixture + 隔离临时库回归
 ```
@@ -61,7 +61,7 @@ test_bli.py  合成 fixture + 隔离临时库回归
 
 1. **dilution 混入 BLI 判定** → 浓度梯度实验 `exp_type` 也是 "BLI"。`isBliExp(e)` 判别顺序：`calc_type==="bli_fit"` → `calc_type==="dilution"` 显式 return false → 旧格式（无 calc_type）才靠 `exp_type` 含 "BLI" **且 `results.samples` 存在**。缺任一步都会把浓度梯度误判成 BLI 分析。写入端漏 calc_type = 详情页/复制全静默失效（AKTA 陷阱 #1 同款）。
 2. **多入口揭示序列不一致** → 上传路径和复制路径都必须完整执行「reveal `#bliAnalyzed` → hide `#bliKdWrap` → 清 `#bliPlotArea` → `refreshBliPlaceholder()`」→ switch tab → `bliPlot()`。改一侧必须同步另一侧。AKTA 同款 `#aktaAnalyzed`/`#aktaPeakTableWrap`。
-3. **前端字段名以服务端为准**：analyze 的文件字段是 `file`（`request.files["file"]`），save 的判别参数是 `fit_overlay`（兼容前端老 `fit`）；后端做 `bool(body.get("fit_overlay") or body.get("fit"))`。改端点签名要同步 app.js 的 POST。
+3. **前端字段名以服务端为准**：analyze 的文件字段是 `file`（`request.files["file"]`），save 的判别参数是 `fit_overlay`（兼容前端老 `fit`）；后端做 `bool(body.get("fit_overlay") or body.get("fit"))`。改端点签名要同步 static/app-bli-akta.js 的 POST。
 4. **相界不要依赖启发式**：`_detect_phases` 只对强一致数据可靠，明显 assoc/dissoc 相界应在参数面板显式输入，save 也会把 t_assoc/t_dissoc 落 params。
 5. **样式常量本尊在 bli.py**：`COLORS`/`PLOT_STYLE`（11 色面板）在 bli.py 定义，AKTA/酶活惰性 `from bli import ...` 复用——改配色动 bli.py，别在各模块自建一套。
 6. **空/坏会话兜底**：plot/fit/save 端点先 `_bli_get_session`，会话不存在（TTL 2h 过期/重启）返回「会话不存在或已过期，请重新上传」——前端复制恢复的 restore 分支天然规避这个（永远重新建会话）。
@@ -77,7 +77,7 @@ test_bli.py  合成 fixture + 隔离临时库回归
 
 ```bash
 # 语法 + 回归（必须用 venv python，系统 python 缺 biopython/logomaker）
-node --check static/app.js
+node --check static/app-bli-akta.js
 .venv/Scripts/python.exe test_bli.py      # 解析/绘图/KD + BLI 分析 API + 酶活绘图
 .venv/Scripts/python.exe test_models.py    # 数据契约回归
 ```

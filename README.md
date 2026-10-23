@@ -20,6 +20,7 @@
 ## 功能
 
 - **研究脉络**（v0.1.0）— 顶层导航第一项（默认首页）：**目标 →(拆解)子目标/实验 →(得出)结论 →(引出)新目标** 证据链；挂载类型不设约束（原白名单 + 自由挂载逃生舱已于 2026-09-18 取消）；实验块 = 关联已归档实验（exp_id）或计划占位；**根目标列表**（默认，每根卡片带节点/实验数）→ 点入**单根横向流程图**（左→右流式、同级纵向并联、连接线按类型着色）+ 链视图（根到节点 breadcrumb）+ 实验引用卡 + 搜索/标签/蛋白筛选；MCP 可读
+- **横切对比**（`/compare`）— 勾选 2+ 条**同分析类型**实验，把 BLI KD / 酶活斜率 / AKTA 峰 / 浓度等关键数对齐成一张表；混类型直接拒绝，首末列差异 ≥2× 高亮；数字摊开，判断留给人
 - **蛋白库** — 手动添加 / FASTA 批量导入 / 搜索匹配 / 标签筛选与编辑 / **批量改标签**（选中多条添加/移除标签）/ **点击表头按 MW、消光系数排序**
 - **计算工具**（6 个标签页）：
   - 蛋白浓度 — Beer-Lambert 计算（Biopython ProtParam 消光系数，与 Expasy 一致）；**浓度单位切换**（M/uM/nM/mg/mL/ug/mL/ng/uL）
@@ -35,7 +36,7 @@
 - **实验自动命名** — `{日期}_{实验类型}_{序号}`，同一天同类型自动递增；导出文件也遵循命名
 - **实验归档** — 一键保存 / Excel 导出 / 详情页 / 批量删除 + 撤销（批量删除压单条撤销项，一次撤销全量恢复）；启动自动备份数据库（例行桶保留最近 10 份）
 - **MCP 服务器** — 19 个工具，供 Claude 等 AI 通过 MCP 协议调用
-- **测试** — `test_models.py`（24 节：JSON 往返 / 迁移框架 / 原始数据不可变 / MCP 读写契约 / 酶活存档契约）+ `test_bli.py`（BLI 解析/绘图/KD 拟合 + 酶活绘图 + **BLI 分析 API**）+ `test_akta.py`（**AKTA 原生解析/峰检测/峰图 + API**，用真实样例 zip）+ `test_enzyme.py`（酶活存档契约 + `/api/enzyme/restore` + 归档导出读 raw）+ `test_ui.py` / `test_research.py` / `test_identity.py`；CI 每次构建前自动运行
+- **测试** — `test_models.py`（27 节：JSON 往返 / 迁移框架 / 原始数据不可变 / MCP 读写契约 / 酶活存档契约）+ `test_bli.py`（BLI 解析/绘图/KD 拟合 + 酶活绘图 + **BLI 分析 API**）+ `test_akta.py`（**AKTA 原生解析/峰检测/峰图 + API**，用真实样例 zip）+ `test_enzyme.py`（酶活存档契约 + `/api/enzyme/restore` + 归档导出读 raw）+ `test_research.py` + `test_ui.py` + `test_identity.py` + `test_backup.py`（**import 无副作用 / 测试库隔离 / WAL 备份可恢复**）+ `test_e2e.py`（**真实样例导入→分析→保存→重载→导出**）；CI 每次构建前自动运行
 
 ## 数据完整性（v0.0.7）
 
@@ -47,18 +48,18 @@
 | **原始数据不可变** | `experiment_raw` 表**只写一次、从不覆盖**（新分析=新快照行）；删除实验不删原始数据（FK `ON DELETE SET NULL`） |
 | **三段式存储契约** | 原始数据（`experiment_raw`，仪器产出）/ 手动参数（`experiments.params`，人填人选）/ 派生结果（`experiments.results`）三层分开——逐点数据不写进 params，raw payload 内嵌当时的手动参数副本，故「载入计算工具」能**数据全量还原 + 参数按存档值复现** |
 | **迁移前自动备份** | 每次 schema 升级前快照 `pre-migration_*.db`（保留 5 份）；启动例行备份保留 10 份。备份走 **SQLite 在线备份 API**（事务一致，服务运行中也不丢最新写入），且**按前缀分桶、各桶独立轮转**——例行轮转只删自己生成的文件，手工备份与 `pre-*` 安全网永不被误删 |
-| **MCP 读写契约** | 唯一写工具 `save_experiment`，读工具零写库——由测试逐工具断言强制，不是口头约定 |
+| **MCP 读写契约** | 写工具仅 `save_experiment` / `save_observation` / `save_conclusion` / `attach_goal`，其余读工具零写库——由测试逐工具断言强制，不是口头约定 |
 | **架构分层** | `models`（数据+序列化）→ `services`（统一写入入口）→ `calculators`（纯函数，可单测）→ `app`（编排渲染）；速率校正等计算**后端单写**，消灭前后端双写漂移 |
 
 ## 运行方式
 
 ### 方式一：源码 + venv（开发 / 无打包需求）
 
-- Windows 双击 `启动.bat`，macOS 双击 `启动.command`，浏览器自动打开 <http://127.0.0.1:5000>。
-- 首次运行自动创建 `.venv` 并安装依赖。关闭窗口即停止服务。
+- 先准备环境（两个平台都需要，仓库不自动安装）：`python -m venv .venv` → `.venv/Scripts/pip install -r requirements.txt`（Windows）或 `.venv/bin/pip install -r requirements.txt`（macOS）。
+- Windows 双击 `启动.bat`（使用已有 `.venv`，缺省回退系统 python）；macOS 双击 `启动.command`（会自动创建 `.venv` 并安装依赖）。关闭窗口即停止服务。
 - 启动时自动备份数据库到 `backups/`（例行桶保留最近 10 份）。
 
-### 方式二：打包版（v0.0.5，无需 Python）
+### 方式二：打包版（v0.1.5，无需 Python）
 
 - 从 GitHub Release 下载 `protein-lab-windows.zip` 或 `protein-lab-macos.zip`，解压后进入 `protein_lab/` 目录，双击 `protein_lab.exe`（Windows）/ 运行 `protein_lab`（macOS）即可。放在**可写目录**（如桌面/下载，不要放 `C:\Program Files`）。
 - 打包采用 **onedir 目录形态**（非单文件）：**免启动解压、秒开、杀毒误报低**。
@@ -121,7 +122,10 @@ protein_lab/
 ├── akta.py             AKTA 内核（Unicorn zip 原生解析 / 峰检测 / 峰图 / 峰表，v0.0.9）
 ├── models.py           SQLite 模型：CRUD + JSON 往返 + schema 迁移框架 + experiment_raw
 ├── services.py         统一实验写入入口（自动命名 / 校验 / 未来 audit·lineage 插桩点）
-├── mcp_server.py       MCP stdio 服务器（读写契约：唯一写工具 save_experiment）
+├── exports.py          Excel 导出（归档 + 酶活/BLI/AKTA 宽格式作图 Sheet）
+├── jsonutil.py         JSON 防御性解包（历史双重编码兼容）
+├── identity.py         实验身份判定（calc_type 归一 / is_loadable 单点）
+├── mcp_server.py       MCP stdio 服务器（写工具 save_experiment / save_observation / save_conclusion / attach_goal）
 ├── paths.py            路径解析（PyInstaller 打包与 dev 双模式）
 ├── fonts.py            CJK 字体解析 + matplotlib 中文配置
 ├── protein_lab.spec    PyInstaller 打包配置
@@ -131,7 +135,7 @@ protein_lab/
 ├── 启动.bat            一键启动（Windows）
 ├── 启动.command        一键启动（macOS）
 ├── templates/          Jinja2 页面模板
-├── static/             JS + CSS
+├── static/             JS + CSS（app-*.js 按职责拆分，无构建步骤）
 ├── fonts/              Noto Sans SC（OFL，打包进二进制）
 ├── fixtures/           AKTA 测试样例 zip（git 跟踪，CI 用）
 ├── .github/workflows/  CI 双平台构建 + 测试步

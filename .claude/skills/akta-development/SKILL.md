@@ -18,7 +18,7 @@ akta.py       纯函数内核：Unicorn zip 原生解析 / Channel / Peak / dete
 app.py        四端点 + 内存会话：analyze → plot → export → save（另加 restore 供复制）
 services.py   统一实验写入入口（calc_type 判别字段在此保证）
 models.py     experiment_raw 不可变快照（只写一次，删实验不删 raw）
-calculator.html + static/app.js   「AKTA 峰图」tab：上传 → 文件/通道列表 → 峰检测参数 → 峰图 → 峰表
+calculator.html + static/app-bli-akta.js   「AKTA 峰图」tab：上传 → 文件/通道列表 → 峰检测参数 → 峰图 → 峰表
 templates/experiment_detail.html   详情页 AKTA 峰检测结果卡片 + 原始快照表
 test_akta.py  fixtures/ 两个真实 zip 回归
 ```
@@ -52,7 +52,7 @@ test_akta.py  fixtures/ 两个真实 zip 回归
 
 1. **calc_type 缺失** → 详情页显示原始 JSON 兜底、复制分支识别不了。修复在统一写入入口补字段，不要在读端兜底。
 2. **多入口揭示序列不一致** → `aktaRunList` 在 `#aktaAnalyzed`（默认 `hidden`）内。上传路径和复制路径都必须完整执行「设置 `aktaMeta` → 清 `aktaEventsInfo` → 揭示 `#aktaAnalyzed` → 隐藏 `#aktaPeakTableWrap` → 清 `#aktaPlotArea` → `refreshAktaPlaceholder()`」。改一侧必须同步另一侧（现两处重复，若再长建议抽 `revealAktaAnalyzed()`）。BLI 同款 `#bliAnalyzed`/`bliKdWrap`。
-3. **前端字段名以服务端为准**：analyze 端点多文件字段是 `file`（`request.files.getlist("file")`），不是 `zip`。改端点签名要同步 app.js 的 POST。
+3. **前端字段名以服务端为准**：analyze 端点多文件字段是 `file`（`request.files.getlist("file")`），不是 `zip`。改端点签名要同步 static/app-bli-akta.js 的 POST。
 4. **x 轴标题去下划线**：通道名如 `UV 1_280` 含下划线，横轴统一 `Volume (mL)`，不带通道名。
 5. **峰阴影用曲线补色**（`_complement_color` = 255−各通道），不用固定色；背景网格 `ax.grid(True, alpha=0.15)` 是代码自带。
 6. **样式常量共享**：`COLORS`/`PLOT_STYLE` 从 bli.py 抽出（11 色面板），AKTA/BLI/酶活三处复用——改配色动 bli.py，别在各模块自建一套。
@@ -67,7 +67,7 @@ test_akta.py  fixtures/ 两个真实 zip 回归
 
 ```bash
 # 语法 + 回归（必须用 venv python，系统 python 缺 biopython/logomaker）
-node --check static/app.js
+node --check static/app-bli-akta.js
 .venv/Scripts/python.exe test_akta.py      # fixtures 真实 zip 解析/峰检测/峰图 + API
 .venv/Scripts/python.exe test_models.py    # 数据契约回归
 ```

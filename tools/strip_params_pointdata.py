@@ -42,14 +42,7 @@ KEEP_WELL_KEYS = ("name", "ref", "group", "protein_id", "mw",
                   "conc_ng_ml", "conc_uM", "fit", "od_range")
 
 
-def _as_dict(v):
-    """params/results 可能是双重编码的 JSON 字符串（历史遗留）——防御性解包。"""
-    while isinstance(v, str):
-        try:
-            v = json.loads(v)
-        except (ValueError, TypeError):
-            return {}
-    return v if isinstance(v, dict) else {}
+from jsonutil import as_dict as _as_dict
 
 
 def _wells_key(params: dict) -> str:
@@ -230,6 +223,7 @@ def main() -> int:
 
     if args.db:
         models.DB_PATH = args.db
+    models.init_db()
 
     only = None
     if args.only:

@@ -4,3 +4,7 @@ biopython>=1.80
 logomaker>=0.8
 waitress>=3.0
 scipy>=1.7
+# 以下三个是代码直接 import 的运行时依赖（不靠 logomaker 传递安装）：
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7

@@ -9,9 +9,11 @@ import shutil
 from datetime import datetime
 
 from paths import app_base_dir
+from jsonutil import unwrap_json as _json_unwrap
 
-# 打包(onefile)后 __file__ 指向临时解压目录，DB 必须放 EXE 同目录；dev 下即源码目录
-DB_PATH = os.path.join(app_base_dir(), "protein_lab.db")
+# 打包(onefile)后 __file__ 指向临时解压目录，DB 必须放 EXE 同目录；dev 下即源码目录。
+# PROTEIN_LAB_DB 仅供测试/诊断显式改库路径——正式运行不要设置，默认路径就是产品路径。
+DB_PATH = os.environ.get("PROTEIN_LAB_DB") or os.path.join(app_base_dir(), "protein_lab.db")
 
 # 实验类型清单（单一来源）——模板下拉 / MCP 工具描述都从这读，避免各处硬编码漂移
 EXP_TYPES = ("BLI", "SDS-PAGE", "AKTA", "浓度测定", "酶活测定", "Weblogo", "其他")
@@ -194,10 +196,10 @@ def backup_db_to(dst_path: str) -> None:
 def _backup_before_migration():
     """迁移前就地把库备份到 backups/（pre-migration 标记），保留最近 5 份。
 
-    为什么需要：迁移在 import models 时触发（app.py 顶部 import），而 app.py 的启动例行
-    备份在 main 块才执行——备份到手的已是迁移后库。这里在**首个未应用迁移**之前快照一份，
-    为未来可能的破坏性迁移（如 DROP COLUMN 带数据）留迁移前回滚点。仅清理 pre-migration_
-    前缀，不动 app.py 的 protein_lab_ 例行备份——**各桶由各自的生产者轮转**，谁也删不到谁。
+    为什么需要：迁移与启动例行备份都发生在进程启动早期，例行备份若排在迁移之后，
+    备份到手的已是迁移后库。这里在**首个未应用迁移**之前快照一份，为未来可能的破坏性
+    迁移（如 DROP COLUMN 带数据）留迁移前回滚点。仅清理 pre-migration_ 前缀，不动
+    app.py 的 protein_lab_ 例行备份——**各桶由各自的生产者轮转**，谁也删不到谁。
     """
     backup_dir = os.path.join(os.path.dirname(DB_PATH), "backups")
     os.makedirs(backup_dir, exist_ok=True)
@@ -245,10 +247,14 @@ def _migrate():
 
 
 def init_db():
-    """迁移到最新 schema。保持历史语义：import models 即触发（models.py 末尾调用）。
+    """显式初始化/迁移数据库到最新 schema。
+
+    **不再在 import 时自动调用**（2026-10-22 维护轮）：import 有副作用会让「只是
+    import models」的测试/脚本碰到正式库。入口处显式调用——app.py main、mcp_server.main、
+    测试与 tools 脚本各自在设好 DB_PATH 之后调用。
+
     迁移后切 WAL（持久化在库文件头，设一次即可；:memory: 测试库是 no-op）——
-    WAL 下读者不阻塞写者，Web 4 线程 + MCP 进程并存更稳；但备份裸 copy 主文件会漏
-    未 checkpoint 的 WAL 内容，备份前必须 wal_checkpoint（见 app.py backup_database）。"""
+    WAL 下读者不阻塞写者，Web 4 线程 + MCP 进程并存更稳。"""
     _migrate()
     conn = sqlite3.connect(DB_PATH, timeout=30)
     try:
@@ -370,15 +376,7 @@ def protein_delete_all() -> int:
 
 # ── Experiments CRUD ───────────────────────────────────────
 
-def _json_unwrap(val):
-    """防御性解包：历史数据可能把 JSON 字符串再编码一层（双重编码），循环解到非字符串为止。
-    结果不强制 dict——旧浓度格式的 results 可能是 list，须原样保留。"""
-    while isinstance(val, str):
-        try:
-            val = json.loads(val)
-        except (json.JSONDecodeError, TypeError):
-            break
-    return val
+# `_json_unwrap` 统一来自 jsonutil（解包语义见该模块；结果可为 list，不强制 dict）。
 
 
 def _set_exp_proteins(conn: sqlite3.Connection, experiment_id: int,
@@ -860,5 +858,5 @@ def research_nodes_root() -> list[dict]:
     return [_node_row(r) for r in rows]
 
 
-# ── Init on import ─────────────────────────────────────────
-init_db()
+# 注意：此处**不调用** init_db()。导入 models 必须无副作用（测试/脚本安全）。
+# 各入口显式初始化：app.py main、mcp_server.main、test_*.py、tools/*.py。

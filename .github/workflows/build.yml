@@ -29,11 +29,13 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt -r requirements-build.txt
 
-      # 回归测试：models 层 + BLI/酶活模块。MPLBACKEND=Agg 确保无头环境绘图不弹窗。
+      # 回归测试：models 层 + BLI/酶活/研究脉络 + 备份恢复 + 真实样例 e2e。
+      # MPLBACKEND=Agg 确保无头环境绘图不弹窗。REF/ 样例被 gitignore，e2e 里 BLI/酶活
+      # 缺失时跳过，AKTA 走 fixtures/（已跟踪）。
       - name: Run tests
         env:
           MPLBACKEND: Agg
-        run: python test_models.py && python test_bli.py && python test_akta.py && python test_enzyme.py && python test_research.py && python test_ui.py && python test_identity.py
+        run: python test_models.py && python test_bli.py && python test_akta.py && python test_enzyme.py && python test_research.py && python test_ui.py && python test_identity.py && python test_backup.py && python test_e2e.py
 
       - name: Build with PyInstaller
         run: pyinstaller protein_lab.spec --noconfirm

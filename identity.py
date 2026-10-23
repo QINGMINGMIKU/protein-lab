@@ -52,21 +52,8 @@ _ALIASES = {
 CALC_RAW_TYPES = ("enzyme_traces", "bli_curves", "akta_traces")
 
 
-def _as_dict(val) -> dict:
-    if isinstance(val, dict):
-        return val
-    if isinstance(val, str) and val.strip():
-        import json
-        try:
-            cur = val
-            for _ in range(3):
-                if not isinstance(cur, str):
-                    break
-                cur = json.loads(cur)
-            return cur if isinstance(cur, dict) else {}
-        except (TypeError, ValueError):
-            return {}
-    return {}
+# 统一走 jsonutil（与 models/tools 同一份解包语义，避免三处宽容度漂移）
+from jsonutil import as_dict as _as_dict
 
 
 def normalize_calc_type(raw) -> str | None:

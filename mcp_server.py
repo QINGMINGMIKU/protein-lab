@@ -637,6 +637,8 @@ def handle_tools_call(id_, params):
 # ── Main loop ──────────────────────────────────────────────
 
 def main():
+    # 显式初始化（import models 已无副作用）。.mcp.json 直接跑本文件，入口在这里。
+    models.init_db()
     # Windows 中文环境 stdio 默认 cp936，MCP 协议要求 UTF-8
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stdin.reconfigure(encoding="utf-8")

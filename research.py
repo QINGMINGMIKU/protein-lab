@@ -309,7 +309,7 @@ STANCE_LABELS = {key: label for label, key in STANCE_KEYWORDS.items()}
 
 
 def res_stance_key(tag: str) -> str:
-    """立场词 → key。镜像 static/app.js resStanceKey：按 tag 序取第一个命中词（逐项 trim），
+    """立场词 → key。镜像 static/app-research.js 的 resStanceKey：按 tag 序取第一个命中词（逐项 trim），
     无命中返回 ''。
 
     评审修复（P2-1）：旧实现按关键词序遍历且不 trim——(a) `数据, 支持`（逗号后空格）

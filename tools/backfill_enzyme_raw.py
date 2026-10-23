@@ -354,6 +354,7 @@ def main() -> int:
 
     if args.db:
         models.DB_PATH = args.db
+    models.init_db()
 
     if args.rollback:
         ids = [int(x) for x in args.rollback.split(",") if x.strip()]

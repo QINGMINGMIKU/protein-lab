@@ -336,7 +336,7 @@ ROOT → 🧪 BLI 实验 → ✓ 结论            ← breadcrumb
 ## 下一步
 
 1. 用户 review 这份设计
-2. 通过后改 `static/app.js` 渲染函数（`renderResearchFlow` → `renderLineflow`）
+2. 通过后改 `static/app-research.js` 渲染函数（`renderResearchFlow` → `renderLineflow`；2026-10-22 前该函数位于 `static/app.js`）
 3. 改 `static/style.css` 加 `.lf-*` 命名空间，删旧 `.res-flow-*`
 4. `templates/research.html` 微调（容器、按钮文案）
 5. 跑 test_research（13 节）确认 API 契约不破

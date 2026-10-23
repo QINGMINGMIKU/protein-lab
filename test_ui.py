@@ -51,7 +51,10 @@ assert set(EN) == set(ZH), f"en/zh-CN key mismatch: {sorted(set(EN)^set(ZH))[:10
 assert EN["nav.research"] == "Research Trace"
 assert ZH["nav.research"] == "研究脉络"
 js = (STATIC / "i18n.js").read_text(encoding="utf-8")
-appjs_src = (STATIC / "app.js").read_text(encoding="utf-8")
+# app.js 已按职责拆成 app-*.js（2026-10-22 维护轮）；源码级断言对拼接后的全文生效。
+APP_JS_FILES = sorted(STATIC.glob("app-*.js"))
+assert APP_JS_FILES, "static/app-*.js 缺失"
+appjs_src = "\n".join(p.read_text(encoding="utf-8") for p in APP_JS_FILES)
 assert "window.BigoI18n" in js or "global.BigoI18n" in js
 assert "function" in js and "setLocale" in js and 'localStorage' in js
 for key in ("t(", "apply(", "setLocale(", "locale"):
@@ -87,7 +90,8 @@ print("4. Experiment type label mapping OK")
 
 # ── 5. Static assets exist ────────────────────────────
 for rel in (
-    "i18n.js", "i18n.json", "ui-shell.js", "app.js", "style.css",
+    "i18n.js", "i18n.json", "ui-shell.js", "style.css",
+    *[p.name for p in APP_JS_FILES],
     "fonts/InterVariable.woff2",
     "fonts/JetBrainsMonoVariable.woff2",
     "fonts/NotoSansSC-Regular.otf",
@@ -164,18 +168,21 @@ spec = (ROOT / "protein_lab.spec").read_text(encoding="utf-8")
 assert '("static", "static")' in spec or '("static"' in spec
 print("7. PyInstaller / fonts path OK")
 
-# ── 8. inject_static_version includes i18n.js ─────────
-# context processor is registered; inspect source
+# ── 8. inject_static_version covers every split JS file ─────────
+# 拆分后写死文件名会漏更新：必须扫描 static/ 下所有 .js/.css。
 src = (ROOT / "app.py").read_text(encoding="utf-8")
-assert "i18n.js" in src, "inject_static_version should include i18n.js"
-print("8. static version includes i18n.js OK")
+assert 'endswith((".js", ".css"))' in src, \
+    "inject_static_version 应扫描全部 .js/.css（拆分后不能再写死文件名）"
+for p in APP_JS_FILES:
+    assert (STATIC / p.name).stat().st_mtime > 0
+print("8. static version covers all split JS files OK")
 
 # ── 9. Layout / i18n wiring / dialog cancel ───────────
 assert 'id="weblogoSearch"' in calc, "Weblogo search input missing"
 assert "stack-on-narrow" in calc
 assert 'id="copySearchInput"' not in calc, "copy tab 的搜索框应随 tab 一起删除"
 assert 'id="expSearchInput"' in exps, "档案页应接管搜索（原 copy tab 的唯一搜索入口）"
-appjs = (STATIC / "app.js").read_text(encoding="utf-8")
+appjs = appjs_src
 for banned in ("全部标签", "全部蛋白", "新建实验", "计划占位（未归档）"):
     assert banned not in appjs, f"hardcoded UI string still in app.js: {banned}"
 # 载入链路：档案页标题深链到计算器，由 applyCopyAndSwitch（载入引擎）消费
@@ -300,5 +307,30 @@ for path in TEMPLATES.glob("*.html"):
 assert "RES_STANCE_CHIP" not in appjs, "JS stance inline colors must be removed"
 assert "IBM Plex" not in appjs and "IBMPlexMono" not in appjs
 print("11. No hardcoded colors / IBM Plex leftovers OK")
+
+# ── 12. 前后端镜像常量（手工同步，靠本断言防漂移）──
+# 这两处是唯一「同一份语义写两遍」的地方（前端无构建步骤）：单位换算 kernel
+# 与酶活分析版本号。任何一侧改动而另一侧没跟，都会静默出错——钉死逐值相等。
+from calculators import CONC_UNITS, ENZYME_ANALYSIS_VERSION
+_conc_block = appjs.split("const CONC_UNITS = {")[1].split("};")[0]
+_js_units = {}
+for _m in re.finditer(
+        r'("?[A-Za-z0-9/]+"?)\s*:\s*\{\s*kind:\s*"(molar|mass)",\s*factor:\s*([0-9.eE+-]+)\s*\}',
+        _conc_block):
+    _js_units[_m.group(1).strip('"')] = (_m.group(2), float(_m.group(3)))
+assert set(_js_units) == set(CONC_UNITS), \
+    f"前端 CONC_UNITS 与 calculators.CONC_UNITS 单位集合不一致: " \
+    f"仅前端 {sorted(set(_js_units) - set(CONC_UNITS))}, 仅后端 {sorted(set(CONC_UNITS) - set(_js_units))}"
+for _u, _spec in CONC_UNITS.items():
+    _kind, _factor = _js_units[_u]
+    assert _kind == _spec["kind"], f"{_u} kind 漂移: JS={_kind} PY={_spec['kind']}"
+    assert abs(_factor - _spec["factor"]) <= abs(_spec["factor"]) * 1e-12, \
+        f"{_u} factor 漂移: JS={_factor} PY={_spec['factor']}"
+_m = re.search(r'const ENZYME_ANALYSIS_VERSION\s*=\s*"([^"]+)"', appjs)
+assert _m, "前端缺少 ENZYME_ANALYSIS_VERSION 常量"
+assert _m.group(1) == ENZYME_ANALYSIS_VERSION, \
+    f"ENZYME_ANALYSIS_VERSION 漂移: JS={_m.group(1)} PY={ENZYME_ANALYSIS_VERSION}"
+print(f"12. Mirrored constants in sync ({len(CONC_UNITS)} units, "
+      f"enzyme {ENZYME_ANALYSIS_VERSION}) OK")
 
 print("\nAll UI tests passed.")

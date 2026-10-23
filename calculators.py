@@ -72,7 +72,8 @@ def calc_conc(a280: float, ext_coeff: float, mw: float,
 # ═══════════════════════════════════════════════════════════
 # canonical 基准：molar→µM，mass→ng/µL。跨 kind（摩尔↔质量）必须提供 mw (Da)：
 #   molar→mass: base × mw / 1000；mass→molar: base × 1000 / mw
-# 前端 static/app.js 有逐行镜像 convertConc()，改动时两边同步。
+# 前端 static/app-core.js 有逐行镜像 convertConc()，改动时两边同步
+# （test_ui.py §12 逐值比对 CONC_UNITS，漂移会直接拦下）。
 
 CONC_UNITS = {
     "M":     {"kind": "molar", "factor": 1e6},    # → µM
@@ -245,7 +246,7 @@ def parse_tecan_xlsx(filepath: str) -> dict:
 def enzyme_time_grid(meta: dict, wells: dict) -> list:
     """酶活时间网格（秒，升序去重）：优先 meta.temps，缺省回退首个孔的 times。
 
-    与前端 enzymeTimePoints 的重建口径一致（app.js uploadEnzymeFile），
+    与前端 enzymeTimePoints 的重建口径一致（static/app-enzyme.js 的 uploadEnzymeFile），
     保证时间窗口下标在前后端指同一个点。
     """
     temps = (meta or {}).get("temps") or []
